@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlurtForum</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+<script src="https://unpkg.com/@beblurt/dblurt@latest/dist/dblurt.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+ 
+<!-- LANGUAGE BAR -->
+<div class="lang-bar">
+  <div style="margin-right: auto; display: flex; gap: 3px; align-items: center;">
+    <span class="gs" style="margin-right: 5px;">{{ t('theme') }}:</span>
+    <button v-for="th in themes" :key="th.id" class="theme-btn" :class="{active: theme===th.id}" @click="setTheme(th.id)">{{ th.label }}</button>
+  </div>
+  <button v-for="l in langs" :key="l" class="lang-btn" :class="{active: lang===l}" @click="setLang(l)">{{ l.toUpperCase() }}</button>
+</div>
+ 
+<!-- HEADER -->
+<div class="site-header">
+  <div class="header-inner">
+    <div class="logo" @click="goHome">
+      <div class="logo-title">Blurt<em>Forum</em></div>
+      <div class="logo-sub">BLOCKCHAIN-POWERED COMMUNITY PLATFORM • BLURT NETWORK</div>
+    </div>
+    <div class="header-right">
+      <div class="block-status">
+        ONLINE | BLOCK: #{{ globalProps.head_block_number || '…' }}
+      </div>
+      <div class="user-bar" v-if="!auth.user">
+        <span>{{ t('notLoggedIn') }}</span>
+        <button class="btn-hdr" @click="openLoginModal">{{ t('login') }}</button>
+      </div>
+      <div class="user-bar" v-else>
+        <button class="btn-hdr" @click="openNotifModal" style="margin-right: 5px;">🔔 {{ t('notifications') }}</button>
+        <span style="margin-right: 5px;">
+          {{ t('loggedInAs') }}: <b>@{{ auth.user.username }}</b>
+          <span class="gs" style="margin-left: 5px;">(VP: {{ auth.user.vp }}%)</span>
+        </span>
+        <button class="btn-hdr" @click="logout">{{ t('logout') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+ 
+<!-- COMMUNITY SELECTOR -->
+<div v-if="!config.lockedCommunity" class="community-bar forumline">
+  <span style="font-weight: bold; color: var(--primary);">{{ t('community') }}:</span>
+  <select v-model="selectedCommunity" @change="handleCommunityChange">
+    <option v-for="c in allCommunities" :key="c.account" :value="c.account">{{ c.title }} ({{ c.account }})</option>
+    <option value="custom">— {{ t('custom') }} —</option>
+  </select>
+  <template v-if="selectedCommunity==='custom'">
+    <input type="text" v-model="customTag" :placeholder="t('enterTag')" @keyup.enter="handleCommunityChange" style="width:150px;">
+    <button class="btn btn-sm" @click="handleCommunityChange">OK</button>
+  </template>
+  <span class="gs" style="margin-left:auto; font-weight: bold;">{{ t('currentCommunity') }}: {{ config.communityAccount }}</span>
+</div>
+ 
+<!-- NAV BAR -->
+<div class="nav-bar">
+  <div class="nav-links">
+    <a class="nav-link" href="#" @click.prevent="goHome">{{ t('home') }}</a>
+    <a class="nav-link" href="#" @click.prevent="loadData">{{ t('refresh') }}</a>
+    <a class="nav-link" href="#" v-if="auth.user && view==='forum' && activeForum"
+       @click.prevent="showNewPostForm=true">+ {{ t('newPost') }}</a>
+  </div>
+  <div class="nav-right gs" style="padding: 8px 10px; font-weight: bold;">{{ config.communityAccount }}</div>
+</div>
+ 
+<!-- BREADCRUMB -->
+<div class="breadcrumb">
+  <a href="#" @click.prevent="goHome">BlurtForum</a>
+  <template v-if="activeForum"> &raquo; <a href="#" @click.prevent="openForum(activeForum)">{{ activeForum.name }}</a></template>
+  <template v-if="activeTopic"> &raquo; {{ activeTopic.title }}</template>
+  <template v-if="view==='newpost'"> &raquo; {{ t('newPost') }}</template>
+</div>
+ 
+<!-- MAIN CONTENT -->
+<div class="content">
+ 
+  <div v-if="loading" class="loader"><span class="spin"></span>{{ t('loading') }} {{ config.communityAccount }}…</div>
+  
+  <div v-if="!loading && forumPagination.bgLoading" style="background: var(--nav-bg); padding: 5px 15px; margin-bottom: 15px; border-radius: 4px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-main);">
+    <div style="flex: 1; height: 4px; background: var(--bg-page); border-radius: 2px; overflow: hidden;">
+      <div :style="{ width: (forumPagination.fetchedCount / 300 * 100) + '%', height: '100%', background: 'var(--primary)', transition: 'width 0.3s' }"></div>
+    </div>
+    <span class="gs">{{ t('fetchingMore') }} ({{ forumPagination.fetchedCount }}/300)</span>
+  </div>
+ 
+  <template v-if="!loading">
+ 
+    <!-- ========== INDEX VIEW ========== -->
+    <div v-if="view==='index'">
+
+      <div v-if="communityInfo.about" class="alert alert-info" style="margin-bottom:15px">
+        <b>{{ communityInfo.title || config.communityAccount }}</b>: {{ communityInfo.about }}
+      </div>
+
+      <div v-if="structureNote" class="alert alert-info" style="margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          {{ t('usingDefaultStructure') }}
+          <br><span class="gs">{{ t('structureHint') }}</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" @click="showStructureDocs=true">ℹ️ {{ t('structureDocs') }}</button>
+      </div>
+
+      <table class="forumline" v-for="cat in forumStructure" :key="cat.name">
+        <tr><td colspan="4" class="catHead">{{ cat.name }}</td></tr>
+        <tr>
+          <td colspan="2" class="thHead" style="text-align:left;padding-left:15px">{{ t('forum') }}</td>
+          <td class="thHead" width="70" align="center">{{ t('posts') }}</td>
+          <td class="thHead" width="220" align="center">{{ t('lastPost') }}</td>
+        </tr>
+        <tr v-for="forum in cat.forums" :key="forum.id" class="row-hover" @click="openForum(forum)" 
+            :style="{ opacity: forum.posts.length === 0 ? 0.7 : 1 }">
+          <td class="row1" width="40" align="center" :style="{ fontSize: forum.posts.length === 0 ? '14px' : '20px' }">
+            {{ forum.posts.length === 0 ? '📁' : '📂' }}
+          </td>
+          <td class="row1">
+            <a href="#" @click.stop.prevent="openForum(forum)" :style="{ fontSize: forum.posts.length === 0 ? '11px' : '13px' }">{{ forum.name }}</a><br>
+            <span v-if="forum.posts.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
+            <span v-if="forum.desc && forum.posts.length > 0" class="gs"> — {{ forum.desc }}</span>
+            <span v-if="forum.posts.length === 0" class="gs" style="font-style: italic;">({{ t('noPosts') }})</span>
+          </td>
+          <td class="row2" align="center"><span class="gs" :style="{ fontWeight: forum.posts.length === 0 ? 'normal' : 'bold' }">{{ forum.posts.length }}</span></td>
+          <td class="row1">
+            <template v-if="forum.posts.length>0">
+              <span class="gs">{{ fmtDate(forum.posts[0].created) }}<br>
+              <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
+            </template>
+            <span v-else class="gs" style="color: #999;">—</span>
+          </td>
+        </tr>
+      </table>
+
+      <!-- MODERATORS SECTION -->
+      <div v-if="moderators.length>0" class="mods-section">
+        <div class="mods-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>{{ t('communityTeam') }}: {{ config.communityAccount }}</span>
+          <button v-if="canEditStructure" class="btn btn-accent btn-sm" @click="startEditStructure">{{ t('editStructure') }}</button>
+        </div>
+        <div class="mods-body">
+          <div v-for="m in moderators" :key="m.account" class="mod-badge">
+            <span><a href="#" @click.prevent="openProfile(m.account)">@{{ m.account }}</a></span>
+            <span class="mod-role" :style="{color: ['owner', 'admin'].includes(m.role) ? '#e74c3c' : 'var(--primary)'}">{{ m.role }}</span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /index -->
+
+ 
+    <!-- ========== FORUM VIEW ========== -->
+    <div v-if="view==='forum' && activeForum">
+ 
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <div>
+          <b style="font-size:15px;color:var(--primary)">{{ activeForum.name }}</b>
+          <span v-if="activeForum.desc" class="gs"> — {{ activeForum.desc }}</span>
+        </div>
+        <button v-if="auth.user" class="btn btn-accent" @click="showNewPostForm=true">+ {{ t('newPost') }}</button>
+        <span v-else class="gs" style="font-weight: bold;">{{ t('loginToPost') }}</span>
+      </div>
+ 
+      <!-- NEW POST FORM -->
+      <div v-if="showNewPostForm && auth.user" class="write-form">
+        <div style="font-weight:bold;color:var(--primary);margin-bottom:10px;border-bottom:1px solid #D1D7DC;padding-bottom:10px;font-size:14px">
+          {{ t('newPost') }}
+        </div>
+        <div style="margin-bottom:10px">
+          <label class="form-label">{{ t('postTitle') }}</label>
+          <input type="text" v-model="postForm.title" :placeholder="t('postTitle')">
+        </div>
+        <div style="margin-bottom:10px">
+          <label class="form-label">{{ t('postBody') }} (Markdown)</label>
+          <textarea v-model="postForm.body" :placeholder="t('writePost')"></textarea>
+        </div>
+        <div style="margin-bottom:10px">
+          <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
+          </label>
+        </div>
+        <div v-if="postForm.error" class="alert alert-error">{{ postForm.error }}</div>
+        <div v-if="postForm.success" class="alert alert-success">{{ postForm.success }}</div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" @click="submitPost" :disabled="postForm.loading">
+            <span v-if="postForm.loading" class="spin"></span>{{ t('submit') }}
+          </button>
+          <button class="btn btn-ghost" @click="showNewPostForm=false">{{ t('cancel') }}</button>
+        </div>
+      </div>
+ 
+      <table class="forumline">
+        <tr>
+          <td class="thHead" width="30"></td>
+          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
+          <td class="thHead" width="120" align="center">{{ t('author') }}</td>
+          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+          <td class="thHead" width="180" align="center">{{ t('lastPost') }}</td>
+        </tr>
+        <tr v-if="activeForum.posts.length===0">
+          <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
+        </tr>
+        <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
+            class="row-hover" @click="openTopic(post)">
+          <td :class="i%2===0?'row1':'row2'" align="center">
+            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">▲</div>
+          </td>
+          <td :class="i%2===0?'row1':'row2'">
+            <a href="#" @click.stop.prevent="openTopic(post)" style="font-size:12px">{{ post.title }}</a><br>
+            <span class="gs">{{ fmtDate(post.created) }}</span>
+          </td>
+          <td :class="i%2===0?'row2':'row1'" align="center"><a href="#" @click.stop.prevent="openProfile(post.author)">@{{ post.author }}</a></td>
+          <td :class="i%2===0?'row2':'row1'" align="center">
+            <span class="badge payout-link" :class="post.totalPayout>0?'badge-green':'badge-blue'" @click.stop="openPayoutModal(post)">
+              {{ post.payout.toFixed(2) }} B
+            </span>
+          </td>
+          <td :class="i%2===0?'row1':'row2'" align="center">
+            <span class="gs">{{ fmtDate(post.created) }}</span>
+          </td>
+        </tr>
+      </table>
+
+      <div v-if="forumPagination.hasMore || activeForum.posts.length > forumPagination.visibleCount" style="text-align: center; margin-top: 15px;">
+        <button class="btn btn-primary" @click="loadMorePosts" :disabled="forumPagination.loading">
+          <span v-if="forumPagination.loading" class="spin"></span>
+          {{ t('loadMore') }}
+        </button>
+      </div>
+    </div><!-- /forum -->
+ 
+    <!-- ========== TOPIC VIEW ========== -->
+    <div v-if="view==='topic' && activeTopic">
+ 
+      <!-- ORIGINAL POST -->
+      <table class="forumline" style="margin-bottom:5px">
+        <tr>
+          <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></b></td>
+          <td class="row3">
+            <div class="post-header">
+              <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span class="badge payout-link" :class="activeTopic.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
+                  {{ activeTopic.payout.toFixed(3) }} BLURT
+                </span>
+                <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)" style="font-size: 16px;">▲</span>
+                <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
+                <button v-if="canMute" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic)">🚫 {{ t('mute') }}</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="row1 post-profile">
+            <div class="avatar" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/128x128)'}"></div>
+            <div class="gs" style="margin-top:5px; font-weight: bold;"><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a><br>{{ t('blurtUser') }}</div>
+          </td>
+          <td class="row1 post-body-cell">
+            <div class="post-body" v-html="renderMD(activeTopic.body)"></div>
+            <div style="margin-top:15px;padding-top:10px;border-top:1px solid #D1D7DC; display: flex; gap: 10px;">
+              <template v-if="auth.user">
+                <button class="btn btn-sm" @click="startReply(activeTopic)">{{ t('reply') }}</button>
+                <button v-if="auth.user.username === activeTopic.author" class="btn btn-sm btn-ghost" @click="startEdit(activeTopic)">{{ t('edit') }}</button>
+              </template>
+              <span v-else class="gs" style="font-weight: bold;">{{ t('loginToReply') }}</span>
+            </div>
+          </td>
+        </tr>
+        <!-- Inline reply form for main post -->
+        <tr v-if="replyTarget && replyTarget.permlink===activeTopic.permlink">
+          <td colspan="2" style="padding:0">
+            <div class="write-form" style="margin:0;border:none;border-radius:0;">
+              <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
+                {{ t('replyTo') }}: <i>{{ activeTopic.title }}</i>
+              </div>
+              <textarea v-model="replyForm.body" :placeholder="t('writeReply')"></textarea>
+              <div style="margin-top:10px">
+                <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                  <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
+                </label>
+              </div>
+              <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
+              <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
+              <div style="margin-top:10px;display:flex;gap:10px">
+                <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
+                  <span v-if="replyForm.loading" class="spin"></span>{{ t('send') }}
+                </button>
+                <button class="btn btn-sm" @click="replyTarget=null">{{ t('cancel') }}</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </table>
+ 
+      <!-- COMMENTS SECTION -->
+      <div v-if="repliesLoading" class="loader"><span class="spin"></span>{{ t('loadingComments') }}</div>
+ 
+      <template v-else>
+        <div v-if="replies.length>0"
+             style="background:#006699;color:#FFA34F;padding:8px 12px;font-weight:bold;font-size:11px;text-transform:uppercase;margin-bottom:5px; border-radius: 4px;">
+          {{ t('comments') }} ({{ replies.length }})
+        </div>
+        <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
+ 
+        <table class="forumline" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
+          <tr>
+            <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
+            <td class="row3">
+              <div class="post-header">
+                <span class="gs">
+                  #{{ i+1 }} · {{ fmtDate(r.created) }}
+                  <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
+                </span>
+                <div style="display:flex;gap:10px;align-items:center">
+                  <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
+                    {{ r.payout.toFixed(3) }} B
+                  </span>
+                  <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)">▲</span>
+                  <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
+                  <button v-if="canMute" class="btn btn-sm btn-hdr" @click="mutePost(r)">🚫 {{ t('mute') }}</button>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td :class="i%2===0?'row1':'row2'" class="post-profile">
+              <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
+              <div class="gs" style="font-weight: bold;"><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></div>
+            </td>
+            <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
+              <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
+              <div v-if="isNestedReply(r)" class="quote-box">
+                <span style="font-weight: bold;">{{ t('replyTo') }}: <a href="#" @click.prevent="openProfile(r.parent_author)">@{{ r.parent_author }}</a></span>
+                <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
+                  [{{ r._qOpen ? t('hide') : t('show') }}]
+                </span>
+                <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))"></div>
+              </div>
+ 
+              <div class="post-body" v-html="renderMD(r.body)"></div>
+ 
+              <div style="margin-top:10px;padding-top:8px;border-top:1px solid #D1D7DC; display: flex; gap: 10px;">
+                <template v-if="auth.user">
+                  <button class="btn btn-sm" @click="startReply(r)">{{ t('reply') }}</button>
+                  <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="startEdit(r)">{{ t('edit') }}</button>
+                </template>
+              </div>
+            </td>
+          </tr>
+          <!-- Inline reply form for this comment -->
+          <tr v-if="replyTarget && replyTarget.permlink===r.permlink">
+            <td colspan="2" style="padding:0">
+              <div class="write-form" style="margin:0;border:none;border-radius:0;">
+                <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
+                  {{ t('replyTo') }}: <b>@{{ r.author }}</b>
+                </div>
+                <textarea v-model="replyForm.body" :placeholder="t('writeReply')"></textarea>
+                <div style="margin-top:10px">
+                  <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
+                  </label>
+                </div>
+                <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
+                <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
+                <div style="margin-top:10px;display:flex;gap:10px">
+                  <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
+                    <span v-if="replyForm.loading" class="spin"></span>{{ t('send') }}
+                  </button>
+                  <button class="btn btn-sm" @click="replyTarget=null">{{ t('cancel') }}</button>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </template>
+ 
+    </div><!-- /topic -->
+ 
+    <!-- ========== PROFILE VIEW ========== -->
+    <div v-if="view==='profile' && profileUser.username">
+      <div class="forumline" style="padding: 20px;">
+        <div style="display: flex; gap: 20px; align-items: flex-start;">
+          <div class="avatar" :style="{width: '120px', height: '120px', backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+profileUser.username+'/128x128)'}"></div>
+          <div style="flex: 1;">
+            <h2 style="color: var(--primary); margin: 0 0 10px;">@{{ profileUser.username }}</h2>
+            <div v-if="profileUser.data">
+              <div style="margin-bottom: 5px;"><b>{{ t('walletValue') }}:</b> {{ profileUser.data.walletValue }} BLURT</div>
+              <div v-if="profileUser.data.about" class="gs" style="margin-bottom: 15px;">{{ profileUser.data.about }}</div>
+            </div>
+            <div v-if="profileUser.loading" class="loader"><span class="spin"></span>{{ t('loading') }}…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabs" style="margin-top: 20px;">
+        <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="profileTab='posts'">{{ t('posts') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="profileTab='comments'">{{ t('comments') }}</button>
+        <div style="margin-left: auto;">
+          <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" v-model="profileUser.filterCommunity"> {{ t('communityPosts') }}
+          </label>
+        </div>
+      </div>
+
+      <table class="forumline" v-if="profileTab==='posts'">
+        <tr>
+          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
+          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+          <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+        </tr>
+        <tr v-for="post in profileUser.posts" :key="post.permlink" 
+            v-show="!profileUser.filterCommunity || post.category === config.communityAccount || (post.tags && post.tags.includes(config.communityAccount))"
+            class="row-hover" @click="openTopic(post)">
+          <td class="row1">
+            <a href="#" @click.stop.prevent="openTopic(post)">{{ post.title }}</a>
+          </td>
+          <td class="row2" align="center">
+            <span class="badge" :class="post.totalPayout>0?'badge-green':'badge-blue'">{{ post.payout.toFixed(2) }} B</span>
+          </td>
+          <td class="row1" align="center">
+            <span class="gs">{{ fmtDate(post.created) }}</span>
+          </td>
+        </tr>
+        <tr v-if="profileUser.posts.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
+      </table>
+
+      <table class="forumline" v-if="profileTab==='comments'">
+        <tr>
+          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
+          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+          <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+        </tr>
+        <tr v-for="c in profileUser.comments" :key="c.permlink" 
+            v-show="!profileUser.filterCommunity || c.category === config.communityAccount || (c.tags && c.tags.includes(config.communityAccount))"
+            class="row-hover" @click="openTopic(c)">
+          <td class="row1">
+            <span class="gs">RE: @{{ c.parent_author }}</span><br>
+            {{ c.body.substring(0, 100) }}...
+          </td>
+          <td class="row2" align="center">
+            <span class="badge" :class="c.totalPayout>0?'badge-green':'badge-blue'">{{ c.payout.toFixed(2) }} B</span>
+          </td>
+          <td class="row1" align="center">
+            <span class="gs">{{ fmtDate(c.created) }}</span>
+          </td>
+        </tr>
+        <tr v-if="profileUser.comments.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
+      </table>
+    </div><!-- /profile -->
+ 
+  </template>
+
+ 
+</div><!-- /content -->
+ 
+<!-- FOOTER -->
+<div class="site-footer">
+  BlurtForum — @beblurt/dblurt · Blurt Network | #{{ globalProps.head_block_number||'…' }} | {{ lang.toUpperCase() }}
+</div>
+ 
+<!-- LOGIN MODAL -->
+<div v-if="showLoginModal" class="modal-overlay" @click.self="showLoginModal=false">
+  <div class="modal-box">
+    <div class="modal-header">
+      {{ t('login') }}
+      <button class="modal-close" @click="showLoginModal=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <div v-if="loginErr" class="alert alert-error">{{ loginErr }}</div>
+ 
+      <div class="tabs">
+        <button class="tab-btn" :class="{active:loginTab==='key'}" @click="loginTab='key'">{{ t('privateKey') }}</button>
+        <button class="tab-btn" :class="{active:loginTab==='wv'}" @click="loginTab='wv'">WhaleVault</button>
+      </div>
+ 
+      <template v-if="loginTab==='key'">
+        <div style="margin-bottom:15px">
+          <label class="form-label">{{ t('username') }}</label>
+          <input type="text" v-model="loginForm.username" :placeholder="t('username')" @keyup.enter="doKeyLogin"
+                 style="width:100%;padding:8px;border:1px solid #999;font-family:var(--sans);font-size:12px">
+        </div>
+        <div style="margin-bottom:15px">
+          <label class="form-label">{{ t('postingKey') }}</label>
+          <input type="password" v-model="loginForm.key" :placeholder="t('postingKey')" @keyup.enter="doKeyLogin"
+                 style="width:100%;padding:8px;border:1px solid #999;font-family:var(--sans);font-size:12px">
+        </div>
+        <div style="margin-bottom:15px">
+          <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" v-model="loginForm.remember"> {{ t('rememberMe') }}
+          </label>
+          <div v-if="loginForm.remember" class="gs" style="color: #DD6900; margin-top: 5px;">{{ t('storageWarning') }}</div>
+        </div>
+        <button class="btn btn-primary" style="width:100%; padding: 10px;" @click="doKeyLogin" :disabled="loginBusy">
+          <span v-if="loginBusy" class="spin"></span>{{ t('login') }}
+        </button>
+      </template>
+ 
+      <template v-else>
+        <div v-if="!wvAvailable" class="alert alert-error" style="margin-bottom:15px">{{ t('wvNotInstalled') }}</div>
+        <div v-if="wvAvailable" style="margin-bottom:15px">
+          <label class="form-label">{{ t('username') }}</label>
+          <input type="text" v-model="loginForm.username" :placeholder="t('username')"
+                 style="width:100%;padding:8px;border:1px solid #999;font-family:var(--sans);font-size:12px">
+        </div>
+        <button class="wv-btn" @click="doWVLogin" :disabled="!wvAvailable||loginBusy">
+          🐋 <span v-if="loginBusy" class="spin"></span>{{ t('loginWV') }}
+        </button>
+        <div class="gs" style="margin-top:15px;text-align:center; font-weight: bold;">{{ t('wvDesc') }}</div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<!-- PAYOUT MODAL -->
+<div v-if="payoutModal.show" class="modal-overlay" @click.self="payoutModal.show=false">
+  <div class="modal-box">
+    <div class="modal-header">
+      {{ t('payoutDetails') }}
+      <button class="modal-close" @click="payoutModal.show=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #D1D7DC;">
+        <div style="font-weight: bold; color: var(--primary);">{{ t('payoutStatus') }}</div>
+        <div v-if="payoutModal.post.isPaid" class="alert alert-success" style="margin-top: 5px;">
+          {{ t('paidOn') }}: {{ payoutModal.post.payoutDate }}
+        </div>
+        <div v-else class="alert alert-info" style="margin-top: 5px;">
+          {{ t('pendingPayout') }}: {{ (payoutModal.post.pendingPayout || 0).toFixed(3) }} BLURT<br>
+          <span class="gs">{{ t('expectedOn') }}: {{ payoutModal.post.payoutDate }}</span>
+        </div>
+      </div>
+      <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('voters') }} ({{ (payoutModal.post.active_votes || []).length }})</div>
+      <div style="max-height: 200px; overflow-y: auto; border: 1px solid #D1D7DC; background: #fff;">
+        <div v-for="v in payoutModal.post.active_votes" :key="v.voter" style="padding: 5px 10px; border-bottom: 1px solid #ECECEC; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(v.voter); payoutModal.show=false">@{{ v.voter }}</a></span>
+          <span class="gs">
+            {{ (v.percent / 100).toFixed(0) }}%
+            <template v-if="payoutModal.post.net_rshares > 0">
+              ({{ (v.rshares / payoutModal.post.net_rshares * payoutModal.post.payout).toFixed(3) }} B)
+            </template>
+          </span>
+        </div>
+        <div v-if="!(payoutModal.post.active_votes || []).length" style="padding: 10px; text-align: center; color: #999;">{{ t('noVotes') }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICATIONS MODAL -->
+<div v-if="notifModal.show" class="modal-overlay" @click.self="notifModal.show=false">
+  <div class="modal-box" style="width: 500px;">
+    <div class="modal-header">
+      {{ t('notifications') }}
+      <button class="modal-close" @click="notifModal.show=false">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 0;">
+      <div v-if="notifModal.loading" class="loader"><span class="spin"></span>{{ t('loading') }}</div>
+      <div v-else>
+        <div v-for="n in notifModal.list" :key="n.id" class="notif-item row-hover" @click="openNotification(n)">
+          <b v-if="n.author" @click.stop="openProfile(n.author); notifModal.show=false">@{{ n.author }}</b> 
+          <span v-if="n.type==='reply'"> {{ t('repliedToYou') }}</span>
+          <span v-else-if="n.type==='mention'"> {{ t('mentionedYou') }}</span>
+          <span v-else-if="n.type==='vote'"> {{ t('votedYourPost') }}</span>
+          <span v-else> {{ n.msg || n.type }}</span>
+          <span class="gs">{{ fmtDate(n.date) }}</span>
+        </div>
+        <div v-if="notifModal.list.length===0" style="padding: 20px; text-align: center; color: #999;">{{ t('noNotifications') }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STRUCTURE DOCS MODAL -->
+<div v-if="showStructureDocs" class="modal-overlay" @click.self="showStructureDocs=false">
+  <div class="modal-box" style="width: 500px;">
+    <div class="modal-header">
+      {{ t('structureDocs') }}
+      <button class="modal-close" @click="showStructureDocs=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <p>{{ t('structureHelp') }}</p>
+      <pre style="background: var(--bg-page); padding: 10px; margin: 10px 0; border: 1px solid var(--border-main); overflow-x: auto; font-family: var(--mono);">
+## Category Name
+> Forum Name | tag1, tag2 | Optional Description
+> Another Forum | tag3 | etc.
+
+## Another Category
+> General | blurt-123 | Catch-all for this community
+      </pre>
+      <p class="gs">{{ t('structureExample') }}</p>
+      <div class="alert alert-info">
+        Each category starts with <code>## </code>. Each forum starts with <code>&gt; </code> followed by <code>Name | Tags | Description</code>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LAYOUT EDITOR MODAL -->
+<div v-if="editStructureMode" class="modal-overlay" @click.self="editStructureMode=false">
+  <div class="modal-box" style="width: 600px;">
+    <div class="modal-header">
+      {{ t('editStructure') }}
+      <button class="modal-close" @click="editStructureMode=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom: 15px;">
+        <label class="form-label">{{ t('structureDocs') }} (Community Description)</label>
+        <textarea v-model="structureForm.text" style="width: 100%; height: 300px; font-family: var(--mono); padding: 10px; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text);"></textarea>
+      </div>
+      <div v-if="structureForm.error" class="alert alert-error">{{ structureForm.error }}</div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-primary" @click="saveStructure" :disabled="structureForm.loading">
+          <span v-if="structureForm.loading" class="spin"></span>{{ t('save') }}
+        </button>
+        <button class="btn btn-ghost" @click="editStructureMode=false">{{ t('cancel') }}</button>
+        <button class="btn btn-sm btn-hdr" style="margin-left: auto;" @click="showStructureDocs=true">ℹ️ Help</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div v-if="editModal.show" class="modal-overlay" @click.self="editModal.show=false">
+  <div class="modal-box" style="width: 700px;">
+    <div class="modal-header">
+      {{ editModal.isPost ? t('editPost') : t('editComment') }}
+      <button class="modal-close" @click="editModal.show=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <div v-if="editModal.isPost" style="margin-bottom:15px">
+        <label class="form-label">{{ t('postTitle') }}</label>
+        <input type="text" v-model="editModal.title"
+               style="width:100%; padding:10px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);">
+      </div>
+      <div style="margin-bottom:15px">
+        <label class="form-label">{{ t('postBody') }} (Markdown)</label>
+        <textarea v-model="editModal.body" style="width:100%; height:350px; font-family:var(--sans); font-size:12px; padding:10px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);"></textarea>
+      </div>
+      <div v-if="editModal.error" class="alert alert-error">{{ editModal.error }}</div>
+      <div v-if="editModal.success" class="alert alert-success">{{ editModal.success }}</div>
+      <div style="display:flex; gap:10px">
+        <button class="btn btn-primary" @click="submitEdit" :disabled="editModal.loading">
+          <span v-if="editModal.loading" class="spin"></span>{{ t('update') }}
+        </button>
+        <button class="btn btn-ghost" @click="editModal.show=false">{{ t('cancel') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PIN MODAL -->
+<div v-if="pinModal.show" class="modal-overlay" @click.self="pinModal.show=false">
+  <div class="modal-box" style="width: 300px;">
+    <div class="modal-header">
+      {{ pinModal.mode === 'setup' ? t('setPin') : t('enterPin') }}
+      <button class="modal-close" @click="pinModal.show=false">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="gs" style="margin-bottom: 10px; text-align: center;">{{ pinModal.mode === 'setup' ? t('pinSetupDesc') : t('pinEnterDesc') }}</p>
+      <input type="password" v-model="pinModal.value" :placeholder="t('pinPlaceholder')" maxlength="6"
+             @keyup.enter="handlePinSubmit"
+             style="width:100%; padding:10px; text-align:center; font-size:24px; letter-spacing:5px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);">
+      <div v-if="pinModal.error" class="alert alert-error" style="margin-top:10px; padding:5px 10px;">{{ pinModal.error }}</div>
+      <button class="btn btn-primary" style="width:100%; margin-top:15px; padding:10px;" @click="handlePinSubmit">OK</button>
+    </div>
+  </div>
+</div>
+ 
+</div><!-- /#app -->
+
+<script src="js/whalevault.js"></script>
+<script src="js/translations.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
