@@ -143,7 +143,7 @@ window.addEventListener("message", function(event) {
     }
 }, false);
 
-function wv_set_polyfill(wallet_name, use_cid, use_url) {
+window.wv_set_polyfill = function(wallet_name, use_cid, use_url) {
     if (!wallet_name || window[wallet_name] || !use_cid || !use_url) return;
     window[wallet_name] = {
         alt_rpc: use_url,
@@ -291,7 +291,7 @@ function wv_set_polyfill(wallet_name, use_cid, use_url) {
 // if steem_keychain, hive_keychain, or blurt_keychain not available, offer a minimally-viable WhaleVault "polyfill"
 // use *_keychain.alt_rpc to programatically change default rpc endpoint
 setTimeout(function() {
-    wv_set_polyfill('steem_keychain', 'stm', 'https://api.steemit.com');
-    wv_set_polyfill('hive_keychain', 'hiv', 'https://api.openhive.network');
-    wv_set_polyfill('blurt_keychain', 'blt', 'https://rpc.blurt.blog');
+    window.wv_set_polyfill('steem_keychain', 'stm', 'https://api.steemit.com');
+    window.wv_set_polyfill('hive_keychain', 'hiv', 'https://api.openhive.network');
+    window.wv_set_polyfill('blurt_keychain', 'blt', 'https://rpc.blurt.blog');
 }, 500);

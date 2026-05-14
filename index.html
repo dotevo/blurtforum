@@ -536,6 +536,15 @@
           <span class="gs">{{ t('expectedOn') }}: {{ payoutModal.post.payoutDate }}</span>
         </div>
       </div>
+      <div v-if="payoutModal.beneficiaries && payoutModal.beneficiaries.length" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #D1D7DC;">
+        <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('beneficiaries') }}</div>
+        <div style="border: 1px solid #D1D7DC; background: #fff;">
+          <div v-for="b in payoutModal.beneficiaries" :key="b.account" style="padding: 5px 10px; border-bottom: 1px solid #ECECEC; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(b.account); payoutModal.show=false">@{{ b.account }}</a></span>
+            <span class="gs">{{ (b.weight / 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+      </div>
       <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('voters') }} ({{ (payoutModal.post.active_votes || []).length }})</div>
       <div style="max-height: 200px; overflow-y: auto; border: 1px solid #D1D7DC; background: #fff;">
         <div v-for="v in payoutModal.post.active_votes" :key="v.voter" style="padding: 5px 10px; border-bottom: 1px solid #ECECEC; display: flex; justify-content: space-between; align-items: center;">
@@ -673,6 +682,36 @@
   </div>
 </div>
  
+<!-- OLD CONTENT SUPPORT MODAL -->
+<div v-if="oldContentModal.show" class="modal-overlay" @click.self="!oldContentModal.loading && (oldContentModal.show=false)">
+  <div class="modal-box" style="width: 500px;">
+    <div class="modal-header">
+      {{ t('oldContentTitle') }}
+      <button class="modal-close" @click="oldContentModal.show=false" :disabled="oldContentModal.loading">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-info" style="margin-bottom: 15px;">{{ t('oldContentDesc') }}</div>
+      <div class="gs" style="margin-bottom: 15px; padding: 8px 12px; background: var(--bg-page); border: 1px solid var(--border-main); border-radius: 4px;">
+        {{ t('oldContentBeneficiary').replace('{author}', oldContentModal.author) }}
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label class="form-label">{{ t('writeReply') }}</label>
+        <textarea v-model="oldContentModal.body" :placeholder="t('supportCommentPlaceholder')" :disabled="oldContentModal.loading"
+                  style="width:100%; height:100px; font-family:var(--sans); font-size:12px; padding:10px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);"></textarea>
+      </div>
+      <div v-if="oldContentModal.status" class="alert" :class="oldContentModal.status.startsWith('Error') ? 'alert-error' : 'alert-info'" style="margin-bottom: 15px;">
+        <span v-if="oldContentModal.loading" class="spin" style="margin-right:8px;"></span>{{ oldContentModal.status }}
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" @click="submitSupportComment" :disabled="oldContentModal.loading || !oldContentModal.body.trim()">
+          <span v-if="oldContentModal.loading" class="spin"></span>{{ t('send') }}
+        </button>
+        <button class="btn btn-ghost" @click="oldContentModal.show=false" :disabled="oldContentModal.loading">{{ t('cancel') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div><!-- /#app -->
 
 <script src="js/whalevault.js"></script>

@@ -69,7 +69,16 @@ const TR = {
     editPost: 'Edit Post',
     editComment: 'Edit Comment',
     updateSuccess: 'Updated successfully!',
-    updateError: 'Error updating.'
+    updateError: 'Error updating.',
+    oldContentTitle: 'Support Old Content',
+    oldContentDesc: 'This post is older than 7 days and cannot receive direct rewards. You can support the author by posting a "support comment" and voting on it instead.',
+    oldContentBeneficiary: 'The original author (@{author}) will be set as the beneficiary of this comment.',
+    supportCommentPlaceholder: 'Write a supportive message...',
+    supporting: 'Supporting author...',
+    waitingForBlock: 'Waiting for blockchain to register comment...',
+    votingOnSupport: 'Voting on support comment...',
+    beneficiaries: 'Beneficiaries',
+    supportSuccess: 'Support successful!'
   },
   pl: {
     home:'Strona główna', refresh:'Odśwież', newPost:'Nowy post', login:'Zaloguj', logout:'Wyloguj',
@@ -141,7 +150,16 @@ const TR = {
     editPost: 'Edytuj post',
     editComment: 'Edytuj komentarz',
     updateSuccess: 'Zaktualizowano pomyślnie!',
-    updateError: 'Błąd aktualizacji.'
+    updateError: 'Błąd aktualizacji.',
+    oldContentTitle: 'Wsparcie starej treści',
+    oldContentDesc: 'Ten post ma ponad 7 dni i nie może otrzymywać bezpośrednich nagród. Możesz wesprzeć autora, dodając "komentarz wsparcia" i głosując na niego.',
+    oldContentBeneficiary: 'Oryginalny autor (@{author}) zostanie ustawiony jako beneficjent tego komentarza.',
+    supportCommentPlaceholder: 'Napisz coś miłego...',
+    supporting: 'Wspieranie autora...',
+    waitingForBlock: 'Oczekiwanie na zarejestrowanie komentarza...',
+    votingOnSupport: 'Oddawanie głosu na komentarz wsparcia...',
+    beneficiaries: 'Beneficjenci',
+    supportSuccess: 'Wsparcie udzielone pomyślnie!'
   },
   eo: {
     home:'Hejmo', refresh:'Refreŝigi', newPost:'Nova Afiŝo', login:'Ensaluti', logout:'Elsaluti',
@@ -213,6 +231,15 @@ const TR = {
     editPost: 'Redakti afiŝon',
     editComment: 'Redakti komenton',
     updateSuccess: 'Ĝisdatigo sukcesis!',
-    updateError: 'Eraro dum ĝisdatigo.'
+    updateError: 'Eraro dum ĝisdatigo.',
+    oldContentTitle: 'Subteni malnovan enhavon',
+    oldContentDesc: 'Ĉi tiu afiŝo aĝas pli ol 7 tagojn kaj ne povas ricevi rektajn rekompencojn. Vi povas subteni la aŭtoron afiŝante "subtenan komenton" kaj voĉdonante pri ĝi anstataŭe.',
+    oldContentBeneficiary: 'La origina aŭtoro (@{author}) estos agordita kiel la profitanto de ĉi tiu komento.',
+    supportCommentPlaceholder: 'Skribu subtenan mesaĝon...',
+    supporting: 'Subtenante aŭtoron...',
+    waitingForBlock: 'Atendante ke la blokĉeno registru la komenton...',
+    votingOnSupport: 'Voĉdonante pri subtena komento...',
+    beneficiaries: 'Profitantoj',
+    supportSuccess: 'Subteno sukcesis!'
   }
 };

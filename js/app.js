@@ -220,8 +220,9 @@ createApp({
     const showNewPostForm = ref(false);
     const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false' });
 
-    const payoutModal = reactive({ show: false, post: {} });
+    const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
     const notifModal = reactive({ show: false, loading: false, list: [] });
+    const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '' });
  
     const fmtDate = (s) => new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
     const renderMD = renderMarkdown;
@@ -499,12 +500,29 @@ createApp({
       repliesLoading.value = false;
     };
  
+    const syncUrl = () => {
+      const params = new URLSearchParams();
+      params.set('community', config.communityAccount);
+      if (view.value !== 'index') params.set('view', view.value);
+      
+      if (view.value === 'topic' && activeTopic.value) {
+        params.set('author', activeTopic.value.author);
+        params.set('permlink', activeTopic.value.permlink);
+      } else if (view.value === 'profile' && profileUser.username) {
+        params.set('user', profileUser.username);
+      }
+
+      const newUrl = window.location.pathname + '?' + params.toString();
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    };
+
     const goHome = () => {
       view.value = 'index';
       activeForum.value = null;
       activeTopic.value = null;
       replies.value = [];
       showNewPostForm.value = false;
+      syncUrl();
     };
  
     const openForum = (forum) => {
@@ -512,6 +530,7 @@ createApp({
       view.value = 'forum';
       activeTopic.value = null;
       showNewPostForm.value = false;
+      syncUrl();
     };
  
     const openTopic = (topic) => {
@@ -519,6 +538,7 @@ createApp({
       bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
       view.value = 'topic';
       loadReplies(topic.author, topic.permlink);
+      syncUrl();
     };
 
     const openProfile = async (username) => {
@@ -528,6 +548,7 @@ createApp({
       profileUser.posts = [];
       profileUser.comments = [];
       view.value = 'profile';
+      syncUrl();
 
       try {
         const accounts = await client.condenser.getAccounts([username]);
@@ -726,6 +747,20 @@ createApp({
     const submitVote = async (post) => {
       if (!auth.user) { openLoginModal(); return; }
       
+      // Check if post is older than 7 days
+      const created = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z').getTime();
+      const isOld = (Date.now() - created) > (7 * 24 * 60 * 60 * 1000);
+
+      if (isOld) {
+        oldContentModal.author = post.author;
+        oldContentModal.permlink = post.permlink;
+        oldContentModal.body = 'Supporting original content by @' + post.author;
+        oldContentModal.status = '';
+        oldContentModal.loading = false;
+        oldContentModal.show = true;
+        return;
+      }
+
       let weight = 10000;
       if (hasVoted(post)) {
         if (!confirm(t('confirmUnvote'))) return;
@@ -744,6 +779,62 @@ createApp({
       } catch (err) {
         console.error('Vote error:', err);
       }
+    };
+
+    const submitSupportComment = async () => {
+      if (!auth.user || !oldContentModal.author) return;
+      oldContentModal.loading = true;
+      oldContentModal.status = t('supporting');
+      
+      const permlink = genPermlink('support-' + oldContentModal.author);
+      const beneficiaries = [{ account: oldContentModal.author, weight: 10000 }];
+
+      const op = ['comment', {
+        parent_author: oldContentModal.author,
+        parent_permlink: oldContentModal.permlink,
+        author: auth.user.username,
+        permlink,
+        title: '',
+        body: oldContentModal.body,
+        json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: [config.communityAccount] })
+      }];
+
+      const options = ['comment_options', {
+        author: auth.user.username,
+        permlink,
+        max_accepted_payout: '1000000.000 BLURT',
+        percent_steem_dollars: 10000,
+        allow_votes: true,
+        allow_curation_rewards: true,
+        extensions: [[0, { beneficiaries }]]
+      }];
+
+      try {
+        await broadcast([op, options]);
+        
+        oldContentModal.status = t('waitingForBlock');
+        // Wait 5 seconds for block inclusion
+        await new Promise(r => setTimeout(r, 5000));
+        
+        oldContentModal.status = t('votingOnSupport');
+        const voteOp = ['vote', {
+          voter: auth.user.username,
+          author: auth.user.username,
+          permlink,
+          weight: 10000
+        }];
+        await broadcast([voteOp]);
+        
+        oldContentModal.status = t('supportSuccess');
+        setTimeout(() => {
+          oldContentModal.show = false;
+          loadReplies(oldContentModal.author, oldContentModal.permlink);
+        }, 1500);
+      } catch (err) {
+        console.error('Support error:', err);
+        oldContentModal.status = 'Error: ' + err.message;
+      }
+      oldContentModal.loading = false;
     };
 
     const mutePost = async (post, mute = true) => {
@@ -808,7 +899,7 @@ createApp({
       return (post.active_votes || []).some(v => v.voter === auth.user.username && v.percent > 0);
     };
 
-    const openPayoutModal = (post) => {
+    const openPayoutModal = async (post) => {
       const isPaid = post.totalPayout > 0;
       const dateObj = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z');
       dateObj.setDate(dateObj.getDate() + 7);
@@ -818,7 +909,15 @@ createApp({
         isPaid,
         payoutDate: dateObj.toLocaleString()
       };
+      payoutModal.beneficiaries = [];
       payoutModal.show = true;
+
+      try {
+        const fullPost = await client.condenser.getContent(post.author, post.permlink);
+        if (fullPost && fullPost.beneficiaries) {
+          payoutModal.beneficiaries = fullPost.beneficiaries;
+        }
+      } catch (e) { /* ignore */ }
     };
 
     const openNotifModal = async () => {
@@ -1043,9 +1142,9 @@ createApp({
 
     const loadUserCommunities = async (username) => {
       try {
-        const subs = await client.nexus.getSubscriptions(username);
+        const subs = await client.condenser.call('bridge', 'list_communities', { last: '', limit: 100, query: username });
         if (subs && Array.isArray(subs)) {
-          userSubscriptions.value = subs.map(s => ({ account: s[0], title: s[1] }));
+          userSubscriptions.value = subs.map(s => ({ account: s.name, title: s.title }));
         }
       } catch (err) {
         console.error('Error loading communities:', err);
@@ -1086,7 +1185,21 @@ createApp({
         selectedCommunity.value = 'custom';
         customTag.value = comm;
       }
-      loadData();
+
+      const requestedView = params.get('view');
+      const requestedAuthor = params.get('author');
+      const requestedPermlink = params.get('permlink');
+      const requestedUser = params.get('user');
+
+      loadData().then(() => {
+        if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
+           client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
+              if (content && content.author) openTopic(content);
+           });
+        } else if (requestedView === 'profile' && requestedUser) {
+           openProfile(requestedUser);
+        }
+      });
     });
 
  
@@ -1104,7 +1217,8 @@ createApp({
       structureForm, showStructureDocs,
       forumPagination, loadMorePosts,
       pinModal, handlePinSubmit,
-      editModal, startEdit, submitEdit
+      editModal, startEdit, submitEdit,
+      oldContentModal, submitSupportComment
     };
   }
 }).mount('#app');
