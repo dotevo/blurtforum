@@ -215,10 +215,10 @@ createApp({
     const wvAvailable = computed(() => typeof window.whalevault !== 'undefined');
  
     const replyTarget = ref(null);
-    const replyForm   = reactive({ body: '', loading: false, error: '', success: '' });
+    const replyForm   = reactive({ body: '', loading: false, error: '', success: '', beneficiary: { account: '', weight: '' } });
  
     const showNewPostForm = ref(false);
-    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false' });
+    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' } });
 
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
     const notifModal = reactive({ show: false, loading: false, list: [] });
@@ -490,6 +490,7 @@ createApp({
             vote_count: r.active_votes ? r.active_votes.length : (r.net_votes || 0),
             active_votes: r.active_votes || [],
             net_rshares: parseFloat(r.net_rshares || 0),
+            beneficiaries: r.beneficiaries || [],
             _qOpen: false
           });
           if (r.children > 0) await recurse(r.author, r.permlink, depth + 1);
@@ -534,11 +535,20 @@ createApp({
     };
  
     const openTopic = (topic) => {
-      activeTopic.value = topic;
+      activeTopic.value = { ...topic, beneficiaries: topic.beneficiaries || [] };
       bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
       view.value = 'topic';
       loadReplies(topic.author, topic.permlink);
       syncUrl();
+
+      // Fetch full content in background to get beneficiaries
+      if (!topic.beneficiaries || !topic.beneficiaries.length) {
+        client.condenser.getContent(topic.author, topic.permlink).then(full => {
+          if (full && full.beneficiaries && full.beneficiaries.length && activeTopic.value && activeTopic.value.permlink === topic.permlink) {
+            activeTopic.value = { ...activeTopic.value, beneficiaries: full.beneficiaries };
+          }
+        }).catch(() => {});
+      }
     };
 
     const openProfile = async (username) => {
@@ -630,15 +640,44 @@ createApp({
       replyForm.success = '';
     };
 
-    const waitAndReload = (isTopic) => {
-      loading.value = true;
-      setTimeout(() => {
-        if (isTopic && activeTopic.value) {
-          loadReplies(activeTopic.value.author, activeTopic.value.permlink);
-        } else {
-          loadData();
+    const bcWait = reactive({ active: false, progress: 0 });
+
+    const waitAndReload = async (isTopic, author = null, permlink = null) => {
+      bcWait.active = true;
+      bcWait.progress = 0;
+
+      const maxMs = 15000;
+      const pollMs = 1500;
+      const start = Date.now();
+
+      if (author && permlink) {
+        // Poll until content appears in blockchain
+        while (Date.now() - start < maxMs) {
+          bcWait.progress = Math.min(((Date.now() - start) / maxMs) * 90, 90);
+          await new Promise(r => setTimeout(r, pollMs));
+          try {
+            const c = await client.condenser.getContent(author, permlink);
+            if (c && c.author === author) break;
+          } catch (e) { /* ignore */ }
         }
-      }, 4000);
+      } else {
+        // No permlink known — simple timed wait with progress
+        while (Date.now() - start < 4000) {
+          bcWait.progress = Math.min(((Date.now() - start) / 4000) * 90, 90);
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      bcWait.progress = 95;
+      if (isTopic && activeTopic.value) {
+        await loadReplies(activeTopic.value.author, activeTopic.value.permlink);
+      } else {
+        await loadData();
+      }
+      bcWait.progress = 100;
+      await new Promise(r => setTimeout(r, 200));
+      bcWait.active = false;
+      bcWait.progress = 0;
     };
  
     const submitReply = async () => {
@@ -651,6 +690,11 @@ createApp({
 
       const beneficiaries = [{ account: config.communityAccount, weight: 300 }];
       if (postForm.devTip) beneficiaries.push({ account: 'dotevo', weight: 100 });
+      if (replyForm.beneficiary.account.trim()) {
+        const w = Math.min(Math.max(Math.round(parseFloat(replyForm.beneficiary.weight) * 100) || 0, 1), 10000);
+        if (w > 0) beneficiaries.push({ account: replyForm.beneficiary.account.trim(), weight: w });
+      }
+      beneficiaries.sort((a, b) => a.account.localeCompare(b.account));
 
       const op = ['comment', {
         parent_author: replyTarget.value.author,
@@ -680,10 +724,8 @@ createApp({
         await broadcast([op, options]);
         replyForm.success = t('replySuccess');
         replyForm.body = '';
-        setTimeout(() => {
-          replyTarget.value = null;
-          waitAndReload(true);
-        }, 1000);
+        replyTarget.value = null;
+        waitAndReload(true, auth.user.username, op[1].permlink);
       } catch (err) {
         console.error('Reply error:', err);
         replyForm.error = t('replyError') + ' (' + (err.message || '') + ')';
@@ -704,6 +746,11 @@ createApp({
 
       const beneficiaries = [{ account: config.communityAccount, weight: 300 }];
       if (postForm.devTip) beneficiaries.push({ account: 'dotevo', weight: 100 });
+      if (postForm.beneficiary.account.trim()) {
+        const w = Math.min(Math.max(Math.round(parseFloat(postForm.beneficiary.weight) * 100) || 0, 1), 10000);
+        if (w > 0) beneficiaries.push({ account: postForm.beneficiary.account.trim(), weight: w });
+      }
+      beneficiaries.sort((a, b) => a.account.localeCompare(b.account));
 
       const op = ['comment', {
         parent_author: '',
@@ -736,7 +783,7 @@ createApp({
         postForm.title = '';
         postForm.body = '';
         showNewPostForm.value = false;
-        waitAndReload(false);
+        waitAndReload(false, auth.user.username, op[1].permlink);
       } catch (err) {
         console.error('Post error:', err);
         postForm.error = t('postError') + ' (' + (err.message || '') + ')';
@@ -1072,15 +1119,11 @@ createApp({
       try {
         await broadcast([op]);
         editModal.success = t('updateSuccess');
-        setTimeout(() => {
-          editModal.show = false;
-          // Refresh current view
-          if (view.value === 'topic') {
-            loadReplies(activeTopic.value.author, activeTopic.value.permlink);
-          } else {
-            loadData();
-          }
-        }, 1500);
+        const editedPermlink = editModal.permlink;
+        const editedAuthor = editModal.author;
+        const wasInTopic = view.value === 'topic';
+        editModal.show = false;
+        waitAndReload(wasInTopic, editedAuthor, editedPermlink);
       } catch (err) {
         console.error('Edit error:', err);
         editModal.error = t('updateError') + ' (' + (err.message || '') + ')';
@@ -1218,7 +1261,8 @@ createApp({
       forumPagination, loadMorePosts,
       pinModal, handlePinSubmit,
       editModal, startEdit, submitEdit,
-      oldContentModal, submitSupportComment
+      oldContentModal, submitSupportComment,
+      bcWait
     };
   }
 }).mount('#app');

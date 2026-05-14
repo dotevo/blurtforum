@@ -78,7 +78,10 @@ const TR = {
     waitingForBlock: 'Waiting for blockchain to register comment...',
     votingOnSupport: 'Voting on support comment...',
     beneficiaries: 'Beneficiaries',
-    supportSuccess: 'Support successful!'
+    supportSuccess: 'Support successful!',
+    addBeneficiary: 'Add Beneficiary',
+    beneficiaryAccount: 'account',
+    beneficiaryWeight: 'share %'
   },
   pl: {
     home:'Strona główna', refresh:'Odśwież', newPost:'Nowy post', login:'Zaloguj', logout:'Wyloguj',
@@ -159,7 +162,10 @@ const TR = {
     waitingForBlock: 'Oczekiwanie na zarejestrowanie komentarza...',
     votingOnSupport: 'Oddawanie głosu na komentarz wsparcia...',
     beneficiaries: 'Beneficjenci',
-    supportSuccess: 'Wsparcie udzielone pomyślnie!'
+    supportSuccess: 'Wsparcie udzielone pomyślnie!',
+    addBeneficiary: 'Dodaj beneficjenta',
+    beneficiaryAccount: 'konto',
+    beneficiaryWeight: 'udział %'
   },
   eo: {
     home:'Hejmo', refresh:'Refreŝigi', newPost:'Nova Afiŝo', login:'Ensaluti', logout:'Elsaluti',
@@ -240,6 +246,9 @@ const TR = {
     waitingForBlock: 'Atendante ke la blokĉeno registru la komenton...',
     votingOnSupport: 'Voĉdonante pri subtena komento...',
     beneficiaries: 'Profitantoj',
-    supportSuccess: 'Subteno sukcesis!'
+    supportSuccess: 'Subteno sukcesis!',
+    addBeneficiary: 'Aldoni profitanton',
+    beneficiaryAccount: 'konto',
+    beneficiaryWeight: 'parto %'
   }
 };
