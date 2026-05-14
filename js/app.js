@@ -184,7 +184,7 @@ createApp({
     const allCommunities = computed(() => {
       const defaults = [
         { account: 'blurt-179874', title: 'Blurt Polska' },
-        { account: 'blurt-171484', title: 'Blurt Polska Feed' }
+        { account: 'blurt-129105', title: 'Blurt Market' }
       ];
       const combined = [...defaults];
       userSubscriptions.value.forEach(s => {
