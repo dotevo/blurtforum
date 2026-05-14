@@ -7,6 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
 <script src="https://unpkg.com/@beblurt/dblurt@latest/dist/dblurt.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -441,14 +443,43 @@
     <!-- ========== PROFILE VIEW ========== -->
     <div v-if="view==='profile' && profileUser.username">
       <div class="forumline" style="padding: 20px;">
-        <div style="display: flex; gap: 20px; align-items: flex-start;">
+        <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
           <div class="avatar" :style="{width: '120px', height: '120px', backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+profileUser.username+'/128x128)'}"></div>
-          <div style="flex: 1;">
-            <h2 style="color: var(--primary); margin: 0 0 10px;">@{{ profileUser.username }}</h2>
-            <div v-if="profileUser.data">
-              <div style="margin-bottom: 5px;"><b>{{ t('walletValue') }}:</b> {{ profileUser.data.walletValue }} BLURT</div>
-              <div v-if="profileUser.data.about" class="gs" style="margin-bottom: 15px;">{{ profileUser.data.about }}</div>
+          <div style="flex: 1; min-width: 250px;">
+            <h2 style="color: var(--primary); margin: 0 0 5px;">{{ profileUser.data ? profileUser.data.displayName : '@' + profileUser.username }}</h2>
+            <div class="gs" style="margin-bottom: 10px; font-weight: bold;">@{{ profileUser.username }}</div>
+            
+            <div v-if="profileUser.data" style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+              <div v-if="profileUser.data.about" style="font-size: 12px; margin-bottom: 10px; padding: 10px; background: var(--bg-r2); border-left: 3px solid var(--primary);">
+                {{ profileUser.data.about }}
+              </div>
+              <div style="display: flex; gap: 15px; flex-wrap: wrap;" class="gs">
+                <span v-if="profileUser.data.location">📍 {{ profileUser.data.location }}</span>
+                <span v-if="profileUser.data.website">🔗 <a :href="profileUser.data.website" target="_blank">{{ profileUser.data.website }}</a></span>
+                <span>📅 {{ t('joined') }}: {{ fmtDate(profileUser.data.created).split(',')[0] }}</span>
+              </div>
             </div>
+
+            <div v-if="profileUser.data" class="profile-stats">
+              <div class="stat-box">
+                <div class="stat-label">BLURT</div>
+                <div class="stat-val">{{ profileUser.data.balance }}</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">BLURT POWER</div>
+                <div class="stat-val">
+                  {{ profileUser.data.totalBP }} BP
+                  <div class="gs" style="font-weight: normal; margin-top: 2px;">
+                    ({{ profileUser.data.bp }} + {{ profileUser.data.delegatedIn }} - {{ profileUser.data.delegatedOut }})
+                  </div>
+                </div>
+              </div>
+              <div class="stat-box" v-if="profileUser.data.proxy">
+                <div class="stat-label">PROXY</div>
+                <div class="stat-val">@{{ profileUser.data.proxy }}</div>
+              </div>
+            </div>
+
             <div v-if="profileUser.loading" class="loader"><span class="spin"></span>{{ t('loading') }}…</div>
           </div>
         </div>
@@ -764,6 +795,15 @@
         <button class="btn btn-ghost" @click="oldContentModal.show=false" :disabled="oldContentModal.loading">{{ t('cancel') }}</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- IMAGE LIGHTBOX -->
+<div v-if="imgModal.show" class="modal-overlay" @click.self="imgModal.show=false" style="background: rgba(0,0,0,0.9); z-index: 3000;">
+  <div style="position: relative; max-width: 98vw; max-height: 98vh; display: flex; align-items: center; justify-content: center;">
+    <button class="modal-close" @click="imgModal.show=false" 
+            style="position: fixed; top: 20px; right: 20px; font-size: 30px; background: rgba(0,0,0,0.5); width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 3100; color: #fff; border: 2px solid #fff;">✕</button>
+    <img :src="imgModal.src" style="max-width: 100%; max-height: 98vh; object-fit: contain; box-shadow: 0 0 30px rgba(0,0,0,1);">
   </div>
 </div>
 

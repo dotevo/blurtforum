@@ -93,19 +93,13 @@ function genPermlink(title) {
  
 function renderMarkdown(text) {
   if (!text) return '';
-  // Basic XSS protection: escape < and >
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-    
-  return html
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/\*([^*]+)\*/g, '<i>$1</i>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
+  try {
+    const html = marked.parse(text, { breaks: true, gfm: true });
+    return DOMPurify.sanitize(html);
+  } catch (e) {
+    console.error('Markdown error:', e);
+    return text;
+  }
 }
 
 function parsePayout(val) {
@@ -223,6 +217,11 @@ createApp({
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
     const notifModal = reactive({ show: false, loading: false, list: [] });
     const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '' });
+    const imgModal = reactive({ show: false, src: '' });
+    const openImgModal = (src) => {
+      imgModal.src = src;
+      imgModal.show = true;
+    };
  
     const fmtDate = (s) => new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
     const renderMD = renderMarkdown;
@@ -510,7 +509,9 @@ createApp({
       params.set('community', config.communityAccount);
       if (view.value !== 'index') params.set('view', view.value);
       
-      if (view.value === 'topic' && activeTopic.value) {
+      if (view.value === 'forum' && activeForum.value) {
+        params.set('forum', activeForum.value.id);
+      } else if (view.value === 'topic' && activeTopic.value) {
         params.set('author', activeTopic.value.author);
         params.set('permlink', activeTopic.value.permlink);
       } else if (view.value === 'profile' && profileUser.username) {
@@ -567,15 +568,29 @@ createApp({
       try {
         const accounts = await client.condenser.getAccounts([username]);
         if (accounts && accounts[0]) {
-          profileUser.data = accounts[0];
-          const bp = parseFloat(accounts[0].vesting_shares || 0) * 
-                     (parseFloat(globalProps.value.total_vesting_fund_blurt || 0) / 
-                      parseFloat(globalProps.value.total_vesting_shares || 1));
-          profileUser.data.walletValue = (parseFloat(accounts[0].balance || 0) + bp).toFixed(3);
+          const acc = accounts[0];
+          profileUser.data = acc;
+
+          const ratio = (parseFloat(globalProps.value.total_vesting_fund_blurt || 0) / 
+                         parseFloat(globalProps.value.total_vesting_shares || 1));
+          
+          const bp = parseFloat(acc.vesting_shares || 0) * ratio;
+          const delegatedIn = parseFloat(acc.received_vesting_shares || 0) * ratio;
+          const delegatedOut = parseFloat(acc.delegated_vesting_shares || 0) * ratio;
+          
+          profileUser.data.bp = bp.toFixed(3);
+          profileUser.data.delegatedIn = delegatedIn.toFixed(3);
+          profileUser.data.delegatedOut = delegatedOut.toFixed(3);
+          profileUser.data.totalBP = (bp + delegatedIn - delegatedOut).toFixed(3);
+          profileUser.data.walletValue = (parseFloat(acc.balance || 0) + bp).toFixed(3);
           
           try {
-            const meta = JSON.parse(accounts[0].posting_json_metadata || accounts[0].json_metadata || '{}');
-            profileUser.data.about = meta.profile ? meta.profile.about : '';
+            const meta = JSON.parse(acc.posting_json_metadata || acc.json_metadata || '{}');
+            const p = meta.profile || {};
+            profileUser.data.about = p.about || '';
+            profileUser.data.website = p.website || '';
+            profileUser.data.location = p.location || '';
+            profileUser.data.displayName = p.name || acc.name;
           } catch (e) { /* ignore */ }
         }
 
@@ -1005,7 +1020,7 @@ createApp({
       notifModal.show = true;
       notifModal.loading = true;
       try {
-        const list = await client.condenser.call('bridge', 'get_notifications', [{ account: auth.user.username, limit: 30 }]);
+        const list = await client.nexus.get_notifications({ account: auth.user.username, limit: 30 });
         notifModal.list = list || [];
       } catch (err) {
         console.error('Notif error:', err);
@@ -1235,6 +1250,13 @@ createApp({
  
     onMounted(() => {
       setTheme(theme.value);
+
+      // Image lightbox click handler
+      document.addEventListener('click', (e) => {
+        if (e.target.tagName === 'IMG' && e.target.closest('.post-body')) {
+          openImgModal(e.target.src);
+        }
+      });
       
       // Restore session
       const saved = localStorage.getItem('blurtforum_session');
@@ -1263,12 +1285,21 @@ createApp({
       }
 
       const requestedView = params.get('view');
+      const requestedForumId = params.get('forum');
       const requestedAuthor = params.get('author');
       const requestedPermlink = params.get('permlink');
       const requestedUser = params.get('user');
 
       loadData().then(() => {
-        if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
+        if (requestedView === 'forum' && requestedForumId) {
+          for (const cat of forumStructure.value) {
+            const f = cat.forums.find(f => f.id === requestedForumId);
+            if (f) {
+              openForum(f);
+              break;
+            }
+          }
+        } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
            client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
               if (content && content.author) openTopic(normalizePost(content));
            });
@@ -1295,7 +1326,8 @@ createApp({
       pinModal, handlePinSubmit,
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
-      bcWait
+      bcWait,
+      imgModal, openImgModal
     };
   }
 }).mount('#app');

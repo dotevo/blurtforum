@@ -234,6 +234,7 @@ const TR = {
     invalidPin: 'Nevalida PIN-kodo.',
     rememberMe: 'Memoru min en ĉi tiu retumilo',
     storageWarning: 'Averto: Ŝlosiloj estos ĉifritaj kaj konservitaj en via retumila memoro.',
+    joined: 'Aliĝis la',
     edit: 'Redakti',
     update: 'Ĝisdatigi',
     editPost: 'Redakti afiŝon',
