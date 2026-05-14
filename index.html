@@ -119,7 +119,7 @@
         <button class="btn btn-sm btn-ghost" @click="showStructureDocs=true">ℹ️ {{ t('structureDocs') }}</button>
       </div>
 
-      <table class="forumline" v-for="cat in forumStructure" :key="cat.name">
+      <table class="forumline index-table" v-for="cat in forumStructure" :key="cat.name">
         <tr><td colspan="4" class="catHead">{{ cat.name }}</td></tr>
         <tr>
           <td colspan="2" class="thHead" style="text-align:left;padding-left:15px">{{ t('forum') }}</td>
@@ -215,33 +215,35 @@
         </div>
       </div>
  
-      <table class="forumline">
+      <table class="forumline post-list-table">
         <tr>
           <td class="thHead" width="30"></td>
           <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
-          <td class="thHead" width="120" align="center">{{ t('author') }}</td>
-          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
-          <td class="thHead" width="180" align="center">{{ t('lastPost') }}</td>
+          <td class="thHead" width="120" align="center" class="col-author">{{ t('author') }}</td>
+          <td class="thHead" width="100" align="center" class="col-payout">{{ t('payout') }}</td>
+          <td class="thHead" width="180" align="center" class="col-lastpost">{{ t('lastPost') }}</td>
         </tr>
         <tr v-if="activeForum.posts.length===0">
           <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
         </tr>
         <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
             class="row-hover" @click="openTopic(post)">
-          <td :class="i%2===0?'row1':'row2'" align="center">
+          <td :class="i%2===0?'row1':'row2'" align="center" width="30">
             <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">▲</div>
           </td>
-          <td :class="i%2===0?'row1':'row2'">
+          <td :class="i%2===0?'row1':'row2'" class="col-topic">
             <a href="#" @click.stop.prevent="openTopic(post)" style="font-size:12px">{{ post.title }}</a><br>
             <span class="gs">{{ fmtDate(post.created) }}</span>
           </td>
-          <td :class="i%2===0?'row2':'row1'" align="center"><a href="#" @click.stop.prevent="openProfile(post.author)">@{{ post.author }}</a></td>
-          <td :class="i%2===0?'row2':'row1'" align="center">
+          <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
+            <a href="#" @click.stop.prevent="openProfile(post.author)">@{{ post.author }}</a>
+          </td>
+          <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
             <span class="badge payout-link" :class="post.totalPayout>0?'badge-green':'badge-blue'" @click.stop="openPayoutModal(post)">
               {{ post.payout.toFixed(2) }} B
             </span>
           </td>
-          <td :class="i%2===0?'row1':'row2'" align="center">
+          <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
             <span class="gs">{{ fmtDate(post.created) }}</span>
           </td>
         </tr>
@@ -259,7 +261,7 @@
     <div v-if="view==='topic' && activeTopic">
  
       <!-- ORIGINAL POST -->
-      <table class="forumline" style="margin-bottom:5px">
+      <table class="forumline topic-table" style="margin-bottom:5px">
         <tr>
           <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></b></td>
           <td class="row3">
@@ -347,7 +349,7 @@
         </div>
         <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
  
-        <table class="forumline" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
+        <table class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
           <tr>
             <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
             <td class="row3">
@@ -495,7 +497,7 @@
         </div>
       </div>
 
-      <table class="forumline" v-if="profileTab==='posts'">
+      <table class="forumline profile-list-table" v-if="profileTab==='posts'">
         <tr>
           <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
           <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
@@ -517,7 +519,7 @@
         <tr v-if="profileUser.posts.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
       </table>
 
-      <table class="forumline" v-if="profileTab==='comments'">
+      <table class="forumline profile-list-table" v-if="profileTab==='comments'">
         <tr>
           <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
           <td class="thHead" width="100" align="center">{{ t('payout') }}</td>

@@ -215,6 +215,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
   border-radius: 6px;
   overflow: hidden;
 }
+.topic-table, .profile-list-table { table-layout: fixed; }
 .catHead {
   background: var(--bg-r3);
   height: 28px;
@@ -235,6 +236,8 @@ a:hover { color: var(--accent); text-decoration: underline; }
 .row1 { background: var(--bg-r1); padding: 10px; border-top: 1px solid var(--bg-white); color: var(--text); }
 .row2 { background: var(--bg-r2); padding: 10px; border-top: 1px solid var(--bg-white); color: var(--text); }
 .row3 { background: var(--bg-r3); padding: 10px; border-top: 1px solid var(--bg-white); color: var(--text); }
+.forumline tr:first-child .row3:first-child { border-top-left-radius: 4px; }
+.forumline tr:first-child .row3:last-child { border-top-right-radius: 4px; }
 .row-hover { cursor: pointer; }
 .row-hover:hover td { background-color: var(--bg-r3) !important; opacity: 0.9; }
  
@@ -562,22 +565,98 @@ a:hover { color: var(--accent); text-decoration: underline; }
   .header-inner { flex-direction: column; text-align: center; gap: 15px; }
   .header-right { align-items: center; }
 
-  /* Stack post layout */
-  .forumline, .forumline tbody, .forumline tr, .forumline td { display: block; width: 100% !important; }
-  .post-profile { 
-    border-right: none; 
-    border-bottom: 1px solid var(--border-main); 
-    text-align: left; 
-    padding: 10px; 
-    display: flex;
+  /* Responsive Post List - Only for the main list */
+  .post-list-table { border-collapse: collapse; width: 100% !important; }
+  .post-list-table tr:first-child { display: none; } /* Hide headers on mobile */
+  
+  .post-list-table tr {
+    display: block;
+    padding: 12px 10px 12px 45px;
+    border-bottom: 1px solid var(--border-main);
+    position: relative;
+    background: var(--bg-main) !important;
+  }
+  
+  .post-list-table td {
+    display: inline;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    width: auto !important;
+    text-align: left !important;
+  }
+
+  .post-list-table td[colspan] {
+    display: block !important;
+    width: 100% !important;
+    padding: 20px !important;
+  }
+  
+  /* Vote button positioning */
+  .post-list-table td:first-child {
+    display: block !important;
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 30px !important;
+  }
+  
+  .col-topic {
+    display: block !important;
+    margin-bottom: 4px;
+  }
+  
+  .col-topic a {
+    font-size: 14px !important;
+    font-weight: bold;
+  }
+  
+  .col-topic .gs { display: none; } 
+  
+  .col-author, .col-payout, .col-lastpost {
+    font-size: 11px;
+    color: var(--gs);
+  }
+  
+  .col-author a { color: var(--gs); }
+  
+  .col-author::before { content: "by "; }
+  .col-payout::before { content: " • "; }
+  .col-lastpost::before { content: " • "; }
+  
+  .badge { padding: 1px 4px; font-size: 10px; }
+
+  /* Topic View Responsive */
+  .topic-table, .topic-table tbody, .topic-table tr, .topic-table td {
+    display: block;
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+  
+  .topic-table tr:first-child .post-profile { display: none; } /* Hide redundant author cell */
+  
+  .topic-table .post-profile {
+    display: flex !important;
+    flex-direction: row;
     align-items: center;
     gap: 10px;
+    padding: 8px 10px;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-main);
+    text-align: left !important;
   }
-  .post-profile .avatar { margin: 0; width: 40px; height: 40px; }
-  .post-profile .avatar-sm { width: 30px; height: 30px; }
-  .post-profile .gs { text-align: left; margin: 0; }
-  .post-body-cell { padding: 10px; overflow: hidden; }
   
-  /* Index table columns */
-  .thHead { font-size: 8px; padding: 2px 4px; }
+  .topic-table .post-profile .avatar { margin: 0; width: 32px; height: 32px; }
+  .topic-table .post-profile .avatar-sm { width: 24px; height: 24px; }
+  .topic-table .post-profile .gs { margin: 0; }
+  
+  .topic-table .post-body-cell {
+    padding: 12px 10px;
+  }
+  
+  .post-header {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
 }
