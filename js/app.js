@@ -388,6 +388,29 @@ createApp({
       forumPagination.loading = false;
     };
 
+    const normalizePost = (p) => {
+      let tags = [];
+      try { tags = JSON.parse(p.json_metadata || '{}').tags || []; } catch (e) { /* ignore */ }
+      return {
+        author: p.author,
+        permlink: p.permlink,
+        title: p.title || '(no title)',
+        body: p.body,
+        created: p.created,
+        parent_author: p.parent_author || '',
+        parent_permlink: p.parent_permlink || '',
+        pendingPayout: parsePayout(p.pending_payout_value),
+        totalPayout: parsePayout(p.total_payout_value),
+        payout: parsePayout(p.total_payout_value) + parsePayout(p.pending_payout_value),
+        vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
+        active_votes: p.active_votes || [],
+        net_rshares: parseFloat(p.net_rshares || 0),
+        beneficiaries: p.beneficiaries || [],
+        json_metadata: p.json_metadata,
+        tags
+      };
+    };
+
     const processBatch = (slice, catchAllForum) => {
       if (slice.length === 0) return;
       const last = slice[slice.length - 1];
@@ -396,33 +419,14 @@ createApp({
       if (slice.length < 99) forumPagination.hasMore = false;
 
       slice.forEach(p => {
-        let pm = {};
-        try { pm = JSON.parse(p.json_metadata || '{}'); } catch (e) { /* ignore */ }
-        const tags = Array.isArray(pm.tags) ? pm.tags : [];
-
-        const post = {
-          author: p.author,
-          permlink: p.permlink,
-          title: p.title || '(no title)',
-          body: p.body,
-          created: p.created,
-          pendingPayout: parsePayout(p.pending_payout_value),
-          totalPayout: parsePayout(p.total_payout_value),
-          payout: parsePayout(p.total_payout_value) + parsePayout(p.pending_payout_value),
-          vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
-          active_votes: p.active_votes || [],
-          net_rshares: parseFloat(p.net_rshares || 0),
-          json_metadata: p.json_metadata,
-          tags
-        };
-
+        const post = normalizePost(p);
         bodyCache[`${p.author}/${p.permlink}`] = p.body;
 
         let assigned = false;
         for (const cat of forumStructure.value) {
           for (const forum of cat.forums) {
             if (forum === catchAllForum) continue;
-            if (forum.targetTags.length > 0 && forum.targetTags.some(tag => tags.includes(tag))) {
+            if (forum.targetTags.length > 0 && forum.targetTags.some(tag => post.tags.includes(tag))) {
               if (!forum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
                 forum.posts.push(post);
               }
@@ -640,28 +644,31 @@ createApp({
       replyForm.success = '';
     };
 
-    const bcWait = reactive({ active: false, progress: 0 });
+    const bcWait = reactive({ active: false, progress: 0, label: '' });
 
-    const waitAndReload = async (isTopic, author = null, permlink = null) => {
+    const waitAndReload = async (isTopic, author = null, permlink = null, pollFn = null, label = null) => {
       bcWait.active = true;
       bcWait.progress = 0;
+      bcWait.label = label || t('waitingForBlock');
 
       const maxMs = 15000;
       const pollMs = 1500;
       const start = Date.now();
+      let lastContent = null;
 
       if (author && permlink) {
-        // Poll until content appears in blockchain
         while (Date.now() - start < maxMs) {
           bcWait.progress = Math.min(((Date.now() - start) / maxMs) * 90, 90);
           await new Promise(r => setTimeout(r, pollMs));
           try {
             const c = await client.condenser.getContent(author, permlink);
-            if (c && c.author === author) break;
+            if (c && c.author) {
+              lastContent = c;
+              if (!pollFn || pollFn(c)) break;
+            }
           } catch (e) { /* ignore */ }
         }
       } else {
-        // No permlink known — simple timed wait with progress
         while (Date.now() - start < 4000) {
           bcWait.progress = Math.min(((Date.now() - start) / 4000) * 90, 90);
           await new Promise(r => setTimeout(r, 300));
@@ -671,6 +678,19 @@ createApp({
       bcWait.progress = 95;
       if (isTopic && activeTopic.value) {
         await loadReplies(activeTopic.value.author, activeTopic.value.permlink);
+        // Refresh main post too if we polled it
+        if (lastContent && activeTopic.value &&
+            lastContent.author === activeTopic.value.author &&
+            lastContent.permlink === activeTopic.value.permlink) {
+          const refreshed = normalizePost(lastContent);
+          activeTopic.value = { ...activeTopic.value, ...refreshed };
+        } else if (activeTopic.value) {
+          // Always re-fetch main post when in topic view
+          try {
+            const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
+            if (fresh && fresh.author) activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
+          } catch (e) { /* ignore */ }
+        }
       } else {
         await loadData();
       }
@@ -822,7 +842,20 @@ createApp({
       }];
       try {
         await broadcast([op]);
-        waitAndReload(view.value === 'topic');
+        const voter = auth.user.username;
+        const isUnvote = weight === 0;
+        waitAndReload(
+          view.value === 'topic',
+          post.author,
+          post.permlink,
+          (c) => {
+            const votes = c.active_votes || [];
+            return isUnvote
+              ? !votes.some(v => v.voter === voter && v.percent > 0)
+              : votes.some(v => v.voter === voter && v.percent > 0);
+          },
+          t('syncingWithBlockchain')
+        );
       } catch (err) {
         console.error('Vote error:', err);
       }
@@ -1007,7 +1040,7 @@ createApp({
             }
           }
           
-          openTopic(content);
+          openTopic(normalizePost(content));
         }
       } catch (err) {
         console.error('Open notification error:', err);
@@ -1237,7 +1270,7 @@ createApp({
       loadData().then(() => {
         if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
            client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
-              if (content && content.author) openTopic(content);
+              if (content && content.author) openTopic(normalizePost(content));
            });
         } else if (requestedView === 'profile' && requestedUser) {
            openProfile(requestedUser);

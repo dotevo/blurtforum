@@ -97,7 +97,7 @@
     <div style="flex: 1; height: 5px; background: var(--bg-page); border-radius: 3px; overflow: hidden;">
       <div :style="{ width: bcWait.progress + '%', height: '100%', background: 'var(--primary)', transition: 'width 0.4s ease' }"></div>
     </div>
-    <span class="gs" style="white-space: nowrap;">⛓ {{ t('waitingForBlock') }}</span>
+    <span class="gs" style="white-space: nowrap;">⛓ {{ bcWait.label }}</span>
   </div>
  
   <template v-if="!loading">
