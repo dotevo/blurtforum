@@ -175,7 +175,7 @@ createApp({
     const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value));
 
     const bodyCache = {};
-    const selectedCommunity = ref('blurt-179874');
+    const selectedCommunity = ref('blurt-140455');
     const customTag = ref('');
     const userSubscriptions = ref([]);
 
@@ -285,16 +285,22 @@ createApp({
                 communityInfo.value = { title: cc.title || config.communityAccount, about: cc.about || '' };
                 rawDescription.value = cc.description || '';
                 const parsed = parseStructure(cc.description);
-                if (parsed) forumStructure.value = parsed;
-                else forumStructure.value = defaultStructure();
+                if (parsed) {
+                  forumStructure.value = parsed;
+                } else {
+                  forumStructure.value = defaultStructure();
+                  structureNote.value = true;
+                }
                 if (cc.team) moderators.value = cc.team.map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
               }
             } else {
               forumStructure.value = defaultStructure();
+              structureNote.value = true;
             }
           } catch (e) {
             console.warn('Nexus getCommunity error:', e.message);
             if (!forumStructure.value.length) forumStructure.value = defaultStructure();
+            structureNote.value = true;
           }
 
           // Accounts for title/about fallback
@@ -1364,10 +1370,29 @@ createApp({
         view.value = 'index';
         activeForum.value = null;
         activeTopic.value = null;
+        // Optional: refresh 5 posts per forum
+        const allForums = [];
+        forumStructure.value.forEach(cat => cat.forums.forEach(f => allForums.push(f)));
+        allForums.forEach(async (f) => {
+          const p = { community: config.communityAccount, limit: 5, sort: 'activity' };
+          if (f.targetTags.length > 0) p.tags_any = f.targetTags;
+          try {
+            const raw = await client.call('bridge', 'get_forum_posts', p);
+            if (raw && raw.length > 0) f.posts = raw.map(normalizePost);
+          } catch (e) { /* ignore */ }
+        });
       } else if (requestedView === 'forum' && requestedForumId) {
         for (const cat of forumStructure.value) {
           const f = cat.forums.find(f => f.id === requestedForumId);
           if (f) {
+            // Check if we are already viewing this forum to avoid double loading
+            if (view.value === 'forum' && activeForum.value && activeForum.value.id === f.id && f.posts.length > 0) {
+              return;
+            }
+            f.lastAuthor = "";
+            f.lastPermlink = "";
+            f.pageHistory = [];
+            f.hasMore = true;
             activeForum.value = f;
             view.value = "forum";
             activeTopic.value = null;
@@ -1376,6 +1401,12 @@ createApp({
           }
         }
       } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
+        // If we are already on this topic, don't reload
+        if (view.value === 'topic' && activeTopic.value && 
+            activeTopic.value.author === requestedAuthor && 
+            activeTopic.value.permlink === requestedPermlink) {
+          return;
+        }
         client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
           if (content && content.author) {
             activeTopic.value = { ...normalizePost(content), beneficiaries: content.beneficiaries || [] };
@@ -1384,6 +1415,9 @@ createApp({
           }
         });
       } else if (requestedView === 'profile' && requestedUser) {
+        if (view.value === 'profile' && profileUser.username === requestedUser) {
+          return;
+        }
         openProfile(requestedUser, false);
       }
     };
