@@ -581,14 +581,14 @@ createApp({
       }
     };
 
-    const openProfile = async (username) => {
+    const openProfile = async (username, sync = true) => {
       profileUser.username = username;
       profileUser.loading = true;
       profileUser.data = null;
       profileUser.posts = [];
       profileUser.comments = [];
       view.value = 'profile';
-      syncUrl();
+      if (sync) syncUrl();
 
       try {
         const accounts = await client.condenser.getAccounts([username]);
