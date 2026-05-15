@@ -39,7 +39,10 @@
         <button class="btn-hdr" @click="openLoginModal">{{ t('login') }}</button>
       </div>
       <div class="user-bar" v-else>
-        <button class="btn-hdr" @click="openNotifModal" style="margin-right: 5px;">🔔 {{ t('notifications') }}</button>
+        <button class="btn-hdr" @click="openNotifModal" style="margin-right: 5px; position:relative;">
+          🔔 {{ t('notifications') }}
+          <span v-if="notifModal.hasNew" style="position:absolute; top:-2px; right:-2px; width:8px; height:8px; background:#ff4400; border-radius:50%; border:1px solid #fff;"></span>
+        </button>
         <span style="margin-right: 5px;">
           {{ t('loggedInAs') }}: <b>@{{ auth.user.username }}</b>
           <span class="gs" style="margin-left: 5px;">(VP: {{ auth.user.vp }}%)</span>
@@ -708,13 +711,29 @@
     <div class="modal-body" style="padding: 0;">
       <div v-if="notifModal.loading" class="loader"><span class="spin"></span>{{ t('loading') }}</div>
       <div v-else>
-        <div v-for="n in notifModal.list" :key="n.id" class="notif-item row-hover" @click="openNotification(n)">
-          <b v-if="n.author" @click.stop="openProfile(n.author); notifModal.show=false">@{{ n.author }}</b> 
-          <span v-if="n.type==='reply'"> {{ t('repliedToYou') }}</span>
-          <span v-else-if="n.type==='mention'"> {{ t('mentionedYou') }}</span>
-          <span v-else-if="n.type==='vote'"> {{ t('votedYourPost') }}</span>
-          <span v-else> {{ n.msg || n.type }}</span>
-          <span class="gs">{{ fmtDate(n.date) }}</span>
+        <div v-for="n in notifModal.list" :key="n.id" class="notif-item row-hover" 
+             @click="openNotification(n)"
+             :style="{ 
+                padding: '10px 15px', 
+                borderBottom: '1px solid var(--border-main)',
+                background: n.id > notifModal.lastReadId ? 'var(--bg-r3)' : (notifModal.clickedIds.includes(n.id) ? 'transparent' : 'var(--bg-r2)'),
+                fontWeight: notifModal.clickedIds.includes(n.id) ? 'normal' : 'bold',
+                opacity: notifModal.clickedIds.includes(n.id) ? 0.7 : 1
+             }">
+          <div style="display:flex; gap:10px; align-items:center;">
+             <span v-if="n.id > notifModal.lastReadId" style="width:6px; height:6px; background:#ff4400; border-radius:50%; flex-shrink:0;"></span>
+             <div style="flex:1">
+               <span v-if="n.msg"> {{ n.msg }}</span>
+               <template v-else>
+                 <b v-if="n.author" @click.stop="openProfile(n.author); notifModal.show=false">@{{ n.author }}</b> 
+                 <span v-if="n.type==='reply'"> {{ t('repliedToYou') }}</span>
+                 <span v-else-if="n.type==='mention'"> {{ t('mentionedYou') }}</span>
+                 <span v-else-if="n.type==='vote'"> {{ t('votedYourPost') }}</span>
+                 <span v-else> {{ n.type }}</span>
+               </template>
+               <div class="gs" style="margin-top:2px;">{{ timeAgo(n.date) }}</div>
+             </div>
+          </div>
         </div>
         <div v-if="notifModal.list.length===0" style="padding: 20px; text-align: center; color: #999;">{{ t('noNotifications') }}</div>
       </div>

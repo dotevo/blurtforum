@@ -229,7 +229,14 @@ createApp({
     const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
 
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
-    const notifModal = reactive({ show: false, loading: false, list: [] });
+    const notifModal = reactive({ 
+      show: false, 
+      loading: false, 
+      list: [], 
+      lastReadId: parseInt(localStorage.getItem('bf_last_notif_id') || '0'),
+      hasNew: false,
+      clickedIds: JSON.parse(localStorage.getItem('bf_clicked_notif_ids') || '[]')
+    });
     const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '' });
     const imgModal = reactive({ show: false, src: '' });
     const openImgModal = (src) => {
@@ -1116,8 +1123,16 @@ createApp({
       notifModal.show = true;
       notifModal.loading = true;
       try {
-        const list = await client.call('nexus', 'get_notifications', { account: auth.user.username, limit: 30 });
+        const list = await client.call('bridge', 'account_notifications', { account: auth.user.username, limit: 50 });
         notifModal.list = list || [];
+        if (notifModal.list.length > 0) {
+          const maxId = Math.max(...notifModal.list.map(n => n.id));
+          if (maxId > notifModal.lastReadId) {
+            notifModal.lastReadId = maxId;
+            localStorage.setItem('bf_last_notif_id', maxId.toString());
+            notifModal.hasNew = false;
+          }
+        }
       } catch (err) {
         console.error('Notif error:', err);
       } finally {
@@ -1126,33 +1141,55 @@ createApp({
     };
 
     const openNotification = async (notif) => {
+      if (!notifModal.clickedIds.includes(notif.id)) {
+        notifModal.clickedIds.push(notif.id);
+        if (notifModal.clickedIds.length > 200) notifModal.clickedIds.shift();
+        localStorage.setItem('bf_clicked_notif_ids', JSON.stringify(notifModal.clickedIds));
+      }
+
       notifModal.show = false;
-      loading.value = true;
       
+      // Parse URL from notification
+      // Formats: @author/permlink, @author
+      if (!notif.url) return;
+      
+      loading.value = true;
       try {
-        let content = await client.condenser.getContent(notif.author, notif.permlink);
-        if (content && content.author) {
-          let root = content;
-          if (content.parent_author) {
-             const parts = content.url.split('#')[0].split('/');
-             // url format: /category/@author/permlink
-             const rootAuthor = parts[2].replace('@', '');
-             const rootPermlink = parts[3];
-             root = await client.condenser.getContent(rootAuthor, rootPermlink);
-          }
-          
-          let targetCommunity = root.category;
-          if (targetCommunity && targetCommunity.startsWith('blurt-') && targetCommunity !== config.communityAccount) {
-            if (config.lockedCommunity) {
-               console.log('Cannot switch community, locked to:', config.communityAccount);
-            } else {
-               config.communityAccount = targetCommunity;
-               client = new dblurt.Client(config.nodes);
-               await loadData();
+        const parts = notif.url.split('/');
+        const author = parts[0].replace('@', '');
+        const permlink = parts[1];
+
+        if (permlink) {
+          // It's a post or comment
+          let content = await client.condenser.getContent(author, permlink);
+          if (content && content.author) {
+            // Find root to determine community
+            let root = content;
+            if (content.parent_author) {
+              const urlParts = content.url.split('#')[0].split('/');
+              // Bridge API url usually: /category/@author/permlink
+              if (urlParts.length >= 4) {
+                const rootAuthor = urlParts[2].replace('@', '');
+                const rootPermlink = urlParts[3];
+                if (rootAuthor !== author || rootPermlink !== permlink) {
+                  root = await client.condenser.getContent(rootAuthor, rootPermlink);
+                }
+              }
             }
+
+            const targetCommunity = root.category;
+            if (targetCommunity && targetCommunity.startsWith('blurt-') && targetCommunity !== config.communityAccount) {
+              if (!config.lockedCommunity) {
+                config.communityAccount = targetCommunity;
+                client = new dblurt.Client(config.nodes);
+                await loadData();
+              }
+            }
+            openTopic(normalizePost(content));
           }
-          
-          openTopic(normalizePost(content));
+        } else {
+          // It's a profile
+          openProfile(author);
         }
       } catch (err) {
         console.error('Open notification error:', err);
@@ -1423,10 +1460,23 @@ createApp({
       }
     };
 
+    const checkNewNotifications = async () => {
+      if (!auth.user || notifModal.show) return;
+      try {
+        const list = await client.call('bridge', 'account_notifications', { account: auth.user.username, limit: 1 });
+        if (list && list.length > 0 && list[0].id > notifModal.lastReadId) {
+          notifModal.hasNew = true;
+        }
+      } catch (e) { /* ignore */ }
+    };
+
     onMounted(() => {
       setTheme(theme.value);
 
       window.addEventListener('popstate', handleUrlChange);
+
+      // Periodic check for notifications
+      setInterval(checkNewNotifications, 60000); // every minute
 
       // Image lightbox click handler
       document.addEventListener('click', (e) => {
@@ -1534,7 +1584,8 @@ createApp({
       oldContentModal, submitSupportComment,
       bcWait,
       imgModal, openImgModal,
-      claimRewards
+      claimRewards,
+      checkNewNotifications
     };
   }
 }).mount('#app');
