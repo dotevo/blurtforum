@@ -70,7 +70,7 @@
     <a class="nav-link" href="#" @click.prevent="goHome">{{ t('home') }}</a>
     <a class="nav-link" href="#" @click.prevent="loadData">{{ t('refresh') }}</a>
     <a class="nav-link" href="#" v-if="auth.user && view==='forum' && activeForum"
-       @click.prevent="showNewPostForm=true">+ {{ t('newPost') }}</a>
+       @click.prevent="openNewPostForm()">+ {{ t('newPost') }}</a>
   </div>
   <div class="nav-right gs" style="padding: 8px 10px; font-weight: bold;">{{ config.communityAccount }}</div>
 </div>
@@ -127,17 +127,20 @@
         </tr>
         <tr v-for="forum in cat.forums" :key="forum.id" class="row-hover" @click="openForum(forum)" 
             :style="{ opacity: forum.posts.length === 0 && !forum.hasMore ? 0.7 : 1 }">
-          <td class="row1" width="40" align="center" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '14px' : '20px' }">
+          <td class="row1" width="40" align="center" style="position:relative" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '14px' : '20px' }">
             {{ forum.posts.length === 0 && !forum.hasMore ? '📁' : '📂' }}
+            <span v-if="forumHasUnread(forum)"
+                  style="position:absolute;top:4px;right:4px;width:9px;height:9px;background:var(--accent,#e07b00);border-radius:50%;border:1px solid var(--bg-page,#fff);display:block;"></span>
           </td>
           <td class="row1">
-            <a href="#" @click.stop.prevent="openForum(forum)" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '11px' : '13px' }">{{ forum.name }}</a><br>
+            <a href="#" @click.stop.prevent="openForum(forum)"
+               :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '11px' : '13px', fontWeight: forumHasUnread(forum) ? 'bold' : 'normal' }">{{ forum.name }}</a><br>
             <span v-if="forum.targetTags.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
             <span v-if="forum.desc" class="gs"> — {{ forum.desc }}</span>
           </td>
           <td class="row1">
             <template v-if="forum.posts.length>0">
-              <span class="gs">{{ fmtDate(forum.posts[0].lastActivity) }}<br>
+              <span class="gs">{{ timeAgo(forum.posts[0].lastActivity) }}<br>
               <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
             </template>
             <span v-else class="gs" style="color: #999;">—</span>
@@ -170,7 +173,7 @@
           <b style="font-size:15px;color:var(--primary)">{{ activeForum.name }}</b>
           <span v-if="activeForum.desc" class="gs"> — {{ activeForum.desc }}</span>
         </div>
-        <button v-if="auth.user" class="btn btn-accent" @click="showNewPostForm=true">+ {{ t('newPost') }}</button>
+        <button v-if="auth.user" class="btn btn-accent" @click="openNewPostForm()">+ {{ t('newPost') }}</button>
         <span v-else class="gs" style="font-weight: bold;">{{ t('loginToPost') }}</span>
       </div>
  
@@ -186,6 +189,33 @@
         <div style="margin-bottom:10px">
           <label class="form-label">{{ t('postBody') }} (Markdown)</label>
           <textarea v-model="postForm.body" :placeholder="t('writePost')"></textarea>
+        </div>
+
+        <!-- TAG SELECTOR -->
+        <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
+          <div class="gs" style="font-weight:bold; margin-bottom:8px;">🏷️ Tagi</div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+            <div>
+              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">Kategoria (wybierz jeden)</label>
+              <select v-model="postForm.selectedTag"
+                      style="padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px;">
+                <option v-for="tag in activeForum.targetTags" :key="tag" :value="tag">#{{ tag }}</option>
+              </select>
+            </div>
+            <div style="flex:1; min-width:150px;">
+              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">Własne tagi (oddziel przecinkami)</label>
+              <input type="text" v-model="postForm.customTags" placeholder="np. fotografia, plener"
+                     style="width:100%; padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px; box-sizing:border-box;">
+            </div>
+          </div>
+          <!-- live preview of final tags -->
+          <div class="gs" style="font-size:11px;">
+            Wysłane tagi:
+            <template v-for="(tag, i) in [config.communityAccount, postForm.selectedTag, ...postForm.customTags.split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9-]/g,'')).filter(Boolean)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5)" :key="tag">
+              <span style="display:inline-block; background:var(--primary); color:#fff; border-radius:3px; padding:1px 6px; margin:2px 2px 0 0; font-size:10px;">#{{ tag }}</span>
+            </template>
+            <span style="opacity:0.5">(max 5)</span>
+          </div>
         </div>
         <div style="margin-bottom:10px">
           <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
@@ -364,6 +394,7 @@
               <div class="post-header">
                 <span class="gs">
                   #{{ i+1 }} · {{ fmtDate(r.created) }}
+                  <span v-if="r._pending" style="display:inline-block; background:#e07b00; color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">⏳ wysyłanie…</span>
                   <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
                 </span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">

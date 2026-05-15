@@ -133,7 +133,7 @@ createApp({
     };
  
     const config = reactive({
-      communityAccount: 'blurt-179874',
+      communityAccount: 'blurt-140455',
       nodes: ['https://rpc.drakernoise.com'],
       lockedCommunity: false
     });
@@ -181,6 +181,7 @@ createApp({
 
     const allCommunities = computed(() => {
       const defaults = [
+        { account: 'blurt-140455', title: 'General Forum'}, 
         { account: 'blurt-179874', title: 'Blurt Polska' },
         { account: 'blurt-129105', title: 'Blurt Market' }
       ];
@@ -216,7 +217,16 @@ createApp({
     const replyForm   = reactive({ body: '', loading: false, error: '', success: '', beneficiary: { account: '', weight: '' } });
  
     const showNewPostForm = ref(false);
-    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' } });
+    const openNewPostForm = () => {
+      postForm.selectedTag = activeForum.value?.targetTags[0] || '';
+      postForm.customTags  = '';
+      postForm.title       = '';
+      postForm.body        = '';
+      postForm.error       = '';
+      postForm.success     = '';
+      showNewPostForm.value = true;
+    };
+    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
 
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
     const notifModal = reactive({ show: false, loading: false, list: [] });
@@ -228,6 +238,19 @@ createApp({
     };
  
     const fmtDate = (s) => new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
+
+    const timeAgo = (s) => {
+      if (!s) return '';
+      const date = new Date(s.endsWith('Z') ? s : s + 'Z');
+      const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (diff < 60)     return `${diff}s ago`;
+      if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+      if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+      return date.toLocaleDateString();
+    };
+
+    const forumHasUnread = (forum) => forum.posts.slice(0, 5).some(p => p.isUnread);
     const renderMD = renderMarkdown;
     const isNestedReply = (r) => {
       if (!activeTopic.value) return false;
@@ -636,7 +659,10 @@ createApp({
  
     const broadcastKey = async (ops) => {
       const privKey = dblurt.PrivateKey.from(auth.user.key);
-      await client.broadcast.sendOperations(ops, privKey);
+      // dblurt's local binary serializer fails on comment_options extensions (static_variant).
+      // WhaleVault handles this itself; for key-based auth we skip comment_options entirely.
+      const filtered = ops.filter(op => op[0] !== 'comment_options');
+      await client.broadcast.sendOperations(filtered, privKey);
     };
  
     const broadcastWV = async (ops) => {
@@ -760,6 +786,30 @@ createApp({
       try {
         await broadcast([op, options]);
         replyForm.success = t('replySuccess');
+
+        // ── Optimistic UI ──────────────────────────────────────────────────
+        // Show the comment immediately while the blockchain confirms it.
+        // waitAndReload will later replace this with the real on-chain data.
+        const parentPermlink = op[1].parent_permlink;
+        const parentReply    = replies.value.find(r => r.permlink === parentPermlink);
+        const optimisticDepth = parentReply ? parentReply.depth + 1 : 1;
+        const optimistic = {
+          author:         auth.user.username,
+          permlink:       op[1].permlink,
+          parent_author:  op[1].parent_author,
+          parent_permlink: parentPermlink,
+          body,
+          created:        new Date().toISOString().slice(0, 19),
+          depth:          optimisticDepth,
+          pendingPayout:  0, totalPayout: 0, payout: 0,
+          vote_count:     0, active_votes: [], net_rshares: 0,
+          beneficiaries:  [],
+          _qOpen:         false,
+          _pending:       true
+        };
+        replies.value = [...replies.value, optimistic];
+        // ──────────────────────────────────────────────────────────────────
+
         replyForm.body = '';
         replyTarget.value = null;
         waitAndReload(true, auth.user.username, op[1].permlink);
@@ -778,8 +828,19 @@ createApp({
       postForm.loading = true;
       postForm.error = '';
       postForm.success = '';
-      const extraTags = activeForum.value.targetTags.filter(t => t !== config.communityAccount);
-      const tags = [config.communityAccount, ...extraTags].slice(0, 5);
+
+      // Build tags: community account is always first, then the one selected forum tag,
+      // then any custom tags the user typed — max 5 total.
+      const customTagsList = postForm.customTags
+        .split(',')
+        .map(s => s.trim().toLowerCase().replace(/[^a-z0-9-]/g, ''))
+        .filter(Boolean);
+      const tags = [config.communityAccount];
+      if (postForm.selectedTag && !tags.includes(postForm.selectedTag)) tags.push(postForm.selectedTag);
+      for (const ct of customTagsList) {
+        if (tags.length >= 5) break;
+        if (!tags.includes(ct)) tags.push(ct);
+      }
 
       const beneficiaries = [{ account: config.communityAccount, weight: 300 }];
       if (postForm.devTip) beneficiaries.push({ account: 'dotevo', weight: 100 });
@@ -1317,7 +1378,7 @@ createApp({
       activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
       structureNote, selectedCommunity, customTag, allCommunities, auth, showLoginModal, loginTab,
       loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
-      showNewPostForm, postForm, fmtDate, renderMD, isNestedReply, getParentBody,
+      showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
       goHome, openForum, openTopic, handleCommunityChange, openLoginModal,
       doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
       nextPage, prevPage,
