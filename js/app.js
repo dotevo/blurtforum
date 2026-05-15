@@ -1116,12 +1116,13 @@ createApp({
       notifModal.show = true;
       notifModal.loading = true;
       try {
-        const list = await client.nexus.get_notifications({ account: auth.user.username, limit: 30 });
+        const list = await client.call('bridge', 'get_notifications', { account: auth.user.username, limit: 30 });
         notifModal.list = list || [];
       } catch (err) {
         console.error('Notif error:', err);
+      } finally {
+        notifModal.loading = false;
       }
-      notifModal.loading = false;
     };
 
     const openNotification = async (notif) => {
