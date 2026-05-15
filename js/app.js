@@ -175,7 +175,7 @@ createApp({
     const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value));
 
     const bodyCache = {};
-    const selectedCommunity = ref('blurt-179874');
+    const selectedCommunity = ref('blurt-140455');
     const customTag = ref('');
     const userSubscriptions = ref([]);
 
@@ -1337,7 +1337,7 @@ createApp({
 
     const loadUserCommunities = async (username) => {
       try {
-        const subs = await client.condenser.call('bridge', 'list_communities', { last: '', limit: 100, query: username });
+        const subs = await client.call('bridge', 'list_communities', { last: '', limit: 100, query: username });
         if (subs && Array.isArray(subs)) {
           userSubscriptions.value = subs.map(s => ({ account: s.name, title: s.title }));
         }

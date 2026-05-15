@@ -145,11 +145,12 @@
             <span v-if="forum.targetTags.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
             <span v-if="forum.desc" class="gs"> — {{ forum.desc }}</span>
           </td>
-          <td class="row1">
+          <td class="row1" align="center">
             <template v-if="forum.posts.length>0">
               <span class="gs">{{ timeAgo(forum.posts[0].lastActivity) }}<br>
               <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
             </template>
+            <div v-else-if="loading" class="spin" style="width:16px; height:16px; border-width:2px; margin:0 auto;"></div>
             <span v-else class="gs" style="color: #999;">—</span>
           </td>
         </tr>
