@@ -123,24 +123,21 @@
         <tr><td colspan="4" class="catHead">{{ cat.name }}</td></tr>
         <tr>
           <td colspan="2" class="thHead" style="text-align:left;padding-left:15px">{{ t('forum') }}</td>
-          <td class="thHead" width="70" align="center">{{ t('posts') }}</td>
           <td class="thHead" width="220" align="center">{{ t('lastPost') }}</td>
         </tr>
         <tr v-for="forum in cat.forums" :key="forum.id" class="row-hover" @click="openForum(forum)" 
-            :style="{ opacity: forum.posts.length === 0 ? 0.7 : 1 }">
-          <td class="row1" width="40" align="center" :style="{ fontSize: forum.posts.length === 0 ? '14px' : '20px' }">
-            {{ forum.posts.length === 0 ? '📁' : '📂' }}
+            :style="{ opacity: forum.posts.length === 0 && !forum.hasMore ? 0.7 : 1 }">
+          <td class="row1" width="40" align="center" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '14px' : '20px' }">
+            {{ forum.posts.length === 0 && !forum.hasMore ? '📁' : '📂' }}
           </td>
           <td class="row1">
-            <a href="#" @click.stop.prevent="openForum(forum)" :style="{ fontSize: forum.posts.length === 0 ? '11px' : '13px' }">{{ forum.name }}</a><br>
-            <span v-if="forum.posts.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
-            <span v-if="forum.desc && forum.posts.length > 0" class="gs"> — {{ forum.desc }}</span>
-            <span v-if="forum.posts.length === 0" class="gs" style="font-style: italic;">({{ t('noPosts') }})</span>
+            <a href="#" @click.stop.prevent="openForum(forum)" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '11px' : '13px' }">{{ forum.name }}</a><br>
+            <span v-if="forum.targetTags.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
+            <span v-if="forum.desc" class="gs"> — {{ forum.desc }}</span>
           </td>
-          <td class="row2" align="center"><span class="gs" :style="{ fontWeight: forum.posts.length === 0 ? 'normal' : 'bold' }">{{ forum.posts.length }}</span></td>
           <td class="row1">
             <template v-if="forum.posts.length>0">
-              <span class="gs">{{ fmtDate(forum.posts[0].created) }}<br>
+              <span class="gs">{{ fmtDate(forum.posts[0].lastActivity) }}<br>
               <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
             </template>
             <span v-else class="gs" style="color: #999;">—</span>
@@ -219,9 +216,9 @@
         <tr>
           <td class="thHead" width="30"></td>
           <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
-          <td class="thHead" width="120" align="center" class="col-author">{{ t('author') }}</td>
-          <td class="thHead" width="100" align="center" class="col-payout">{{ t('payout') }}</td>
-          <td class="thHead" width="180" align="center" class="col-lastpost">{{ t('lastPost') }}</td>
+          <td class="thHead col-author" width="120" align="center">{{ t('author') }}</td>
+          <td class="thHead col-payout" width="100" align="center">{{ t('payout') }}</td>
+          <td class="thHead col-lastpost" width="180" align="center">{{ t('lastPost') }}</td>
         </tr>
         <tr v-if="activeForum.posts.length===0">
           <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
@@ -232,8 +229,14 @@
             <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">▲</div>
           </td>
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
-            <a href="#" @click.stop.prevent="openTopic(post)" style="font-size:12px">{{ post.title }}</a><br>
-            <span class="gs">{{ fmtDate(post.created) }}</span>
+            <span v-if="post.isUnread" style="margin-right:5px; color: var(--primary); font-size: 14px;" title="Unread">📂</span>
+            <span v-else style="margin-right:5px; color: #999; font-size: 14px;" title="Read">📄</span>
+            <a href="#" @click.stop.prevent="openTopic(post)" 
+               :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a><br>
+            <span class="gs">
+              {{ fmtDate(post.created) }}
+              <span v-if="post.tags && post.tags.length" style="opacity: 0.7;"> • #{{ post.tags.join(' #') }}</span>
+            </span>
           </td>
           <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
             <a href="#" @click.stop.prevent="openProfile(post.author)">@{{ post.author }}</a>
@@ -244,15 +247,20 @@
             </span>
           </td>
           <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
-            <span class="gs">{{ fmtDate(post.created) }}</span>
+            <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br>
+            <a href="#" @click.stop.prevent="openProfile(post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
+            <span class="gs" style="font-size: 10px; opacity: 0.8;">💬 {{ post.replyCount }} {{ t('replies') }}</span>
           </td>
         </tr>
       </table>
 
-      <div v-if="forumPagination.hasMore || activeForum.posts.length > forumPagination.visibleCount" style="text-align: center; margin-top: 15px;">
-        <button class="btn btn-primary" @click="loadMorePosts" :disabled="forumPagination.loading">
-          <span v-if="forumPagination.loading" class="spin"></span>
-          {{ t('loadMore') }}
+      <div v-if="view==='forum' && activeForum" style="display: flex; justify-content: center; gap: 20px; margin-top: 20px; align-items: center;">
+        <button class="btn btn-primary" @click="prevPage" :disabled="loading || !activeForum.pageHistory.length">
+          « {{ t('prev') }}
+        </button>
+        <span class="gs" style="font-weight: bold;">{{ t('page') }} {{ activeForum.pageHistory.length + 1 }}</span>
+        <button class="btn btn-primary" @click="nextPage" :disabled="loading || !activeForum.hasMore">
+          {{ t('next') }} »
         </button>
       </div>
     </div><!-- /forum -->

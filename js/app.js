@@ -27,7 +27,10 @@ function parseStructure(text) {
         name,
         targetTags: tags.length ? tags : [],
         desc,
-        posts: []
+        posts: [],
+        lastAuthor: '',
+        lastPermlink: '',
+        hasMore: true
       });
     }
   }
@@ -39,43 +42,43 @@ function defaultStructure() {
     {
       name: 'Daily & Life',
       forums: [
-        { id:'f1', name:'Daily Activity',     targetTags:['actifit','mydailypost','blurtlife','life'], desc:'', posts:[] },
-        { id:'f2', name:'Social & Family',    targetTags:['introduceyourself','parenting','moms','love','motivation'], desc:'', posts:[] }
+        { id:'f1', name:'Daily Activity',     targetTags:['actifit','mydailypost','blurtlife','life'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f2', name:'Social & Family',    targetTags:['introduceyourself','parenting','moms','love','motivation'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
       name: 'Arts & Media',
       forums: [
-        { id:'f3', name:'Art & Photography',  targetTags:['art','blurtart','photography','stockphotos'], desc:'', posts:[] },
-        { id:'f4', name:'Videos & Podcasts',  targetTags:['video','podcast','music','gymmusic'], desc:'', posts:[] },
-        { id:'f5', name:'Gaming',             targetTags:['games','game','arcadecolony'], desc:'', posts:[] }
+        { id:'f3', name:'Art & Photography',  targetTags:['art','blurtart','photography','stockphotos'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f4', name:'Videos & Podcasts',  targetTags:['video','podcast','music','gymmusic'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f5', name:'Gaming',             targetTags:['games','game','arcadecolony'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
       name: 'News & World',
       forums: [
-        { id:'f6', name:'General News',       targetTags:['news','activistpost','centurywire','thepeoplesvoice'], desc:'', posts:[] },
-        { id:'f7', name:'Politics & Society', targetTags:['politics','antiwar','war','truth','reclaimthenet','naturalnews'], desc:'', posts:[] }
+        { id:'f6', name:'General News',       targetTags:['news','activistpost','centurywire','thepeoplesvoice'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f7', name:'Politics & Society', targetTags:['politics','antiwar','war','truth','reclaimthenet','naturalnews'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
       name: 'Science & Tech',
       forums: [
-        { id:'f8', name:'Development',        targetTags:['dev','computing','ai','research'], desc:'', posts:[] }
+        { id:'f8', name:'Development',        targetTags:['dev','computing','ai','research'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
       name: 'Community & Meta',
       forums: [
-        { id:'f9', name:'Blurt Meta',         targetTags:['blurt','blurtecho','proposals','witness-category'], desc:'', posts:[] },
-        { id:'f10', name:'Contests & Rewards',targetTags:['blurtcontests','rewards'], desc:'', posts:[] }
+        { id:'f9', name:'Blurt Meta',         targetTags:['blurt','blurtecho','proposals','witness-category'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f10', name:'Contests & Rewards',targetTags:['blurtcontests','rewards'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
       name: 'Regional',
       forums: [
-        { id:'f11', name:'Polska (Poland)',   targetTags:['polish','polska','kresy','strefa44'], desc:'', posts:[] },
-        { id:'f12', name:'International',     targetTags:['kr','cn','deutsch','germany','indonesia','japan','blurtlatam','blurthispano'], desc:'', posts:[] }
+        { id:'f11', name:'Polska (Poland)',   targetTags:['polish','polska','kresy','strefa44'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f12', name:'International',     targetTags:['kr','cn','deutsch','germany','indonesia','japan','blurtlatam','blurthispano'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     }
   ];
@@ -131,7 +134,7 @@ createApp({
  
     const config = reactive({
       communityAccount: 'blurt-179874',
-      nodes: ['https://rpc.beblurt.com', 'https://rpc.blurt.world'],
+      nodes: ['https://rpc.drakernoise.com'],
       lockedCommunity: false
     });
  
@@ -151,7 +154,8 @@ createApp({
       loading: false,
       bgLoading: false,
       fetchedCount: 0,
-      visibleCount: 10
+      visibleCount: 20,
+      pageHistory: [] // To store [author, permlink] for previous pages
     });
     const replies      = ref([]);
     const moderators   = ref([]);
@@ -232,12 +236,12 @@ createApp({
     };
     const getParentBody = (r) => bodyCache[`${r.parent_author}/${r.parent_permlink}`] || '';
  
-    const loadData = async (append = false) => {
-      if (append) forumPagination.loading = true; else loading.value = true;
+    const loadData = async (direction = 'current', targetForum = null) => {
+      loading.value = true;
       structureNote.value = false;
  
       try {
-        if (!append) {
+        if (direction === 'current' && !targetForum) {
           const props = await client.condenser.getDynamicGlobalProperties();
           globalProps.value = props;
  
@@ -246,161 +250,144 @@ createApp({
           forumPagination.lastAuthor = '';
           forumPagination.lastPermlink = '';
           forumPagination.hasMore = true;
-          forumPagination.fetchedCount = 0;
-          forumPagination.visibleCount = 10;
+          forumPagination.pageHistory = [];
         }
 
-        // Fetch Community Details (Nexus)
-        try {
-          if (config.communityAccount.startsWith('blurt-')) {
-            const cc = await client.nexus.getCommunity(config.communityAccount);
-            if (cc) {
-              communityInfo.value = {
-                title: cc.title || config.communityAccount,
-                about: cc.about || ''
-              };
-              rawDescription.value = cc.description || '';
-              const parsed = parseStructure(cc.description);
-              if (parsed) {
-                if (!append) forumStructure.value = parsed;
-              } else if (!append) {
-                forumStructure.value = defaultStructure();
-                structureNote.value = true;
+        // Fetch Community Details (Nexus) - only on initial load
+        if (direction === 'current' && !targetForum) {
+          try {
+            if (config.communityAccount.startsWith('blurt-')) {
+              const cc = await client.nexus.getCommunity(config.communityAccount);
+              if (cc) {
+                communityInfo.value = { title: cc.title || config.communityAccount, about: cc.about || '' };
+                rawDescription.value = cc.description || '';
+                const parsed = parseStructure(cc.description);
+                if (parsed) forumStructure.value = parsed;
+                else forumStructure.value = defaultStructure();
+                if (cc.team) moderators.value = cc.team.map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
               }
-              if (cc.team) {
-                moderators.value = cc.team.map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
-              }
-            }
-          } else {
-            if (!append) {
+            } else {
               forumStructure.value = defaultStructure();
-              structureNote.value = true;
             }
+          } catch (e) {
+            console.warn('Nexus getCommunity error:', e.message);
+            if (!forumStructure.value.length) forumStructure.value = defaultStructure();
           }
-        } catch (e) {
-          console.warn('Nexus getCommunity error:', e.message);
-          if (!append && !forumStructure.value.length) {
-            forumStructure.value = defaultStructure();
-            structureNote.value = true;
-          }
-        }
 
-        // Fetch Accounts (Condenser) for title/about fallback
-        try {
-          const accounts = await client.condenser.getAccounts([config.communityAccount]);
-          const acc = accounts && accounts[0];
-          if (acc && (!communityInfo.value || !communityInfo.value.title)) {
-            let meta = {};
-            try { meta = JSON.parse(acc.posting_json_metadata || acc.json_metadata || '{}'); } catch (err) { /* ignore */ }
-            const profile = meta.profile || {};
-            communityInfo.value = {
-              title: profile.name || acc.name,
-              about: profile.about || ''
-            };
-          }
-        } catch (e) { console.warn('Condenser getAccounts error:', e.message); }
-
-        // Fetch Roles (Bridge)
-        try {
-          if (moderators.value.length === 0) {
-            const roles = await client.condenser.call('bridge', 'list_community_roles', [{ community: config.communityAccount }]);
-            if (Array.isArray(roles) && roles.length > 0) {
-              moderators.value = roles.map(r => ({ account: r[0], role: r[1], title: r[2] || '' }));
+          // Accounts for title/about fallback
+          try {
+            const accounts = await client.condenser.getAccounts([config.communityAccount]);
+            const acc = accounts && accounts[0];
+            if (acc && (!communityInfo.value || !communityInfo.value.title)) {
+              let meta = {};
+              try { meta = JSON.parse(acc.posting_json_metadata || acc.json_metadata || '{}'); } catch (err) { /* ignore */ }
+              const profile = meta.profile || {};
+              communityInfo.value = { title: profile.name || acc.name, about: profile.about || '' };
             }
-          }
-        } catch (e) { console.warn('Bridge list_community_roles error:', e.message); }
+          } catch (e) { console.warn('Condenser getAccounts error:', e.message); }
 
-        if (!append) {
-          // Ensure "Other" section exists
+          // Roles
+          try {
+            if (moderators.value.length === 0) {
+              const roles = await client.call('bridge', 'list_community_roles', { community: config.communityAccount });
+              if (Array.isArray(roles) && roles.length > 0) moderators.value = roles.map(r => ({ account: r[0], role: r[1], title: r[2] || '' }));
+            }
+          } catch (e) { console.warn('Bridge list_community_roles error:', e.message); }
+
+          // Ensure "Other" section exists and init forums
           let hasOther = false;
-          for (const cat of forumStructure.value) {
-            for (const forum of cat.forums) {
-              if (forum.targetTags.length === 0 || forum.name.toLowerCase().includes('other') || forum.name.toLowerCase().includes('inne')) {
-                hasOther = true;
-                break;
-              }
-            }
-          }
+          forumStructure.value.forEach(cat => cat.forums.forEach(f => {
+            f.posts = []; f.lastAuthor = ''; f.lastPermlink = ''; f.hasMore = true; f.pageHistory = [];
+            if (!f.targetTags.length || f.name.toLowerCase().includes('other')) hasOther = true;
+          }));
           if (!hasOther) {
-            const otherCat = {
-              name: 'General',
-              forums: [{
-                id: 'f-other',
-                name: 'Other / Inne',
-                targetTags: [],
-                desc: 'Posts that do not fit elsewhere',
-                posts: []
-              }]
-            };
-            forumStructure.value.push(otherCat);
-          }
-          forumStructure.value.forEach(cat => cat.forums.forEach(f => f.posts = []));
-        }
-
-        let catchAllForum = null;
-        for (const cat of forumStructure.value) {
-          for (const forum of cat.forums) {
-             if (forum.targetTags.length === 0 || forum.name.toLowerCase().includes('other') || forum.name.toLowerCase().includes('inne')) {
-               catchAllForum = forum;
-               break;
-             }
+            forumStructure.value.push({ name: 'General', forums: [{ id: 'f-other', name: 'Other / Inne', targetTags: [], desc: 'Posts', posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] }] });
           }
         }
- 
-        // Initial load: Render 1st batch immediately, then background
-        const query = { tag: config.communityAccount, limit: 100 };
-        if (forumPagination.lastAuthor) {
-          query.start_author = forumPagination.lastAuthor;
-          query.start_permlink = forumPagination.lastPermlink;
+
+        const pag = targetForum || forumPagination;
+        const params = { community: config.communityAccount, limit: 21, sort: 'activity' };
+        
+        if (direction === 'next' && pag.lastAuthor) {
+          pag.pageHistory.push({ author: pag.lastAuthor, permlink: pag.lastPermlink });
+        } else if (direction === 'prev') {
+          pag.pageHistory.pop(); // pop current page
+          const prev = pag.pageHistory.pop(); // get previous page cursor
+          if (prev) {
+            params.start_author = prev.author;
+            params.start_permlink = prev.permlink;
+          } else {
+            params.start_author = undefined;
+            params.start_permlink = undefined;
+          }
+        } else if (pag.lastAuthor) {
+          params.start_author = pag.lastAuthor;
+          params.start_permlink = pag.lastPermlink;
         }
 
-        const rawPosts = await client.condenser.getDiscussions('created', query);
+        if (targetForum && targetForum.targetTags.length > 0) params.tags_any = targetForum.targetTags;
+
+        const rawPosts = await client.call('bridge', 'get_forum_posts', params);
         if (!rawPosts || rawPosts.length === 0) {
-          forumPagination.hasMore = false;
+          pag.hasMore = false;
+          if (targetForum) targetForum.posts = [];
         } else {
-          const slice = (forumPagination.fetchedCount > 0 || append) ? rawPosts.slice(1) : rawPosts;
-          processBatch(slice, catchAllForum);
-          forumPagination.fetchedCount += slice.length;
+          if (targetForum) targetForum.posts = []; // Clear for page-based view
           
-          if (!append && forumPagination.hasMore && forumPagination.fetchedCount < 300) {
-            forumPagination.bgLoading = true;
-            (async () => {
-              while (forumPagination.fetchedCount < 300 && forumPagination.hasMore) {
-                const q = { tag: config.communityAccount, limit: 100, start_author: forumPagination.lastAuthor, start_permlink: forumPagination.lastPermlink };
-                const res = await client.condenser.getDiscussions('created', q);
-                if (!res || res.length <= 1) { forumPagination.hasMore = false; break; }
-                const s = res.slice(1);
-                processBatch(s, catchAllForum);
-                forumPagination.fetchedCount += s.length;
-              }
-              forumPagination.bgLoading = false;
-            })();
-          }
+          processBatch(rawPosts, null, targetForum);
+          
+          const lastItem = rawPosts[rawPosts.length - 1];
+          pag.lastAuthor = lastItem.author;
+          pag.lastPermlink = lastItem.permlink;
+          pag.hasMore = rawPosts.length >= 20; // 21st item check not needed if we don't slice
         }
  
       } catch (err) {
         console.error('loadData error:', err);
-        if (!forumStructure.value.length) forumStructure.value = defaultStructure();
         structureNote.value = true;
+      } finally {
+        loading.value = false;
       }
-      loading.value = false;
-      forumPagination.loading = false;
+    };
+
+    const nextPage = () => {
+      if (activeForum.value) loadData('next', activeForum.value);
+    };
+    const prevPage = () => {
+      if (activeForum.value) loadData('prev', activeForum.value);
     };
 
     const normalizePost = (p) => {
       let tags = [];
-      try { tags = JSON.parse(p.json_metadata || '{}').tags || []; } catch (e) { /* ignore */ }
+      try { 
+        const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata || '{}') : p.json_metadata;
+        if (meta && meta.tags) tags = meta.tags;
+      } catch (e) { /* ignore */ }
+      
+      const pending = parsePayout(p.pending_payout_value || 0);
+      const total = parsePayout(p.total_payout_value || 0);
+      const bridgePayout = typeof p.payout === 'number' ? p.payout : parsePayout(p.payout || 0);
+
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
+      const lastReadId = readStatus[`${p.author}/${p.permlink}`] || 0;
+      const isUnread = (p.last_activity_post_id || 0) > lastReadId;
+
       return {
         author: p.author,
         permlink: p.permlink,
         title: p.title || '(no title)',
         body: p.body,
         created: p.created,
+        lastActivity: p.last_activity || p.created,
+        lastAuthor: p.last_activity_author,
+        lastActivityPostId: p.last_activity_post_id || 0,
+        isUnread,
+        replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
         parent_permlink: p.parent_permlink || '',
-        pendingPayout: parsePayout(p.pending_payout_value),
-        totalPayout: parsePayout(p.total_payout_value),
-        payout: parsePayout(p.total_payout_value) + parsePayout(p.pending_payout_value),
+        pendingPayout: pending,
+        totalPayout: total,
+        payout: bridgePayout || (pending + total),
         vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
         active_votes: p.active_votes || [],
         net_rshares: parseFloat(p.net_rshares || 0),
@@ -410,18 +397,21 @@ createApp({
       };
     };
 
-    const processBatch = (slice, catchAllForum) => {
+    const processBatch = (slice, catchAllForum, targetForum = null) => {
       if (slice.length === 0) return;
-      const last = slice[slice.length - 1];
-      forumPagination.lastAuthor = last.author;
-      forumPagination.lastPermlink = last.permlink;
-      if (slice.length < 99) forumPagination.hasMore = false;
 
       slice.forEach(p => {
         const post = normalizePost(p);
         bodyCache[`${p.author}/${p.permlink}`] = p.body;
 
-        let assigned = false;
+        if (targetForum) {
+           if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
+             targetForum.posts.push(post);
+           }
+           return;
+        }
+
+        let assignedCount = 0;
         for (const cat of forumStructure.value) {
           for (const forum of cat.forums) {
             if (forum === catchAllForum) continue;
@@ -429,12 +419,12 @@ createApp({
               if (!forum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
                 forum.posts.push(post);
               }
-              assigned = true;
+              assignedCount++;
             }
           }
         }
 
-        if (!assigned && catchAllForum) {
+        if (assignedCount === 0 && catchAllForum) {
           if (!catchAllForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
             catchAllForum.posts.push(post);
           }
@@ -452,10 +442,10 @@ createApp({
           return;
         }
         
-        if (!forumPagination.hasMore) return;
+        if (!activeForum.value.hasMore) return;
         
         const prevCount = activeForum.value.posts.length;
-        await loadData(true);
+        await loadData(true, activeForum.value);
         attempts++;
         
         if (activeForum.value.posts.length > prevCount) {
@@ -464,7 +454,6 @@ createApp({
         }
       }
     };
-
  
     const loadReplies = async (author, permlink) => {
       repliesLoading.value = true;
@@ -532,11 +521,18 @@ createApp({
     };
  
     const openForum = (forum) => {
+      // Reset pagination to start from page 1
+      forum.lastAuthor = "";
+      forum.lastPermlink = "";
+      forum.pageHistory = [];
+      forum.hasMore = true;
+
       activeForum.value = forum;
-      view.value = 'forum';
+      view.value = "forum";
       activeTopic.value = null;
       showNewPostForm.value = false;
       syncUrl();
+      loadData("current", forum);
     };
  
     const openTopic = (topic) => {
@@ -545,6 +541,12 @@ createApp({
       view.value = 'topic';
       loadReplies(topic.author, topic.permlink);
       syncUrl();
+
+      // Mark as read
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
+      readStatus[`${topic.author}/${topic.permlink}`] = topic.lastActivityPostId || 0;
+      localStorage.setItem('bf_read_status', JSON.stringify(readStatus));
+      topic.isUnread = false;
 
       // Fetch full content in background to get beneficiaries
       if (!topic.beneficiaries || !topic.beneficiaries.length) {
@@ -1318,6 +1320,7 @@ createApp({
       showNewPostForm, postForm, fmtDate, renderMD, isNestedReply, getParentBody,
       goHome, openForum, openTopic, handleCommunityChange, openLoginModal,
       doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
+      nextPage, prevPage,
       submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
       openProfile, profileUser, profileTab, openNotification,
       userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
