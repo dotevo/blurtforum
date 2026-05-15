@@ -14,7 +14,10 @@ module.exports = [
                 dblurt: "readonly",
                 TR: "readonly",
                 whalevault: "readonly",
-                confirm: "readonly"
+                confirm: "readonly",
+                marked: "readonly",
+                DOMPurify: "readonly",
+                CryptoJS: "readonly"
             }
         },
         rules: {

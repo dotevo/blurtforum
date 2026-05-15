@@ -659,12 +659,11 @@ createApp({
  
     const broadcastKey = async (ops) => {
       const privKey = dblurt.PrivateKey.from(auth.user.key);
-      // dblurt's local binary serializer fails on comment_options extensions (static_variant).
-      // WhaleVault handles this itself; for key-based auth we skip comment_options entirely.
-      const filtered = ops.filter(op => op[0] !== 'comment_options');
-      await client.broadcast.sendOperations(filtered, privKey);
+      // dblurt's local binary serializer should handle comment_options. 
+      // If it fails, we will know from the error message.
+      await client.broadcast.sendOperations(ops, privKey);
     };
- 
+
     const broadcastWV = async (ops) => {
       return new Promise((resolve, reject) => {
         if (!window.blurt_keychain) {
@@ -679,6 +678,34 @@ createApp({
     };
 
     const broadcast = (ops) => auth.user.type === 'key' ? broadcastKey(ops) : broadcastWV(ops);
+
+    const claimRewards = async () => {
+      if (!auth.user) return;
+      try {
+        const accounts = await client.condenser.getAccounts([auth.user.username]);
+        const acc = accounts && accounts[0];
+        if (!acc) return;
+
+        if (parsePayout(acc.reward_blurt_balance) === 0 && parsePayout(acc.reward_vesting_balance) === 0) {
+          return;
+        }
+
+        const ops = [
+          ['claim_reward_balance', {
+            account: auth.user.username,
+            reward_blurt: acc.reward_blurt_balance,
+            reward_vesting: acc.reward_vesting_balance
+          }]
+        ];
+        
+        await broadcast(ops);
+        auth.user.rewardBlurt = '0.000 BLURT';
+        auth.user.rewardVesting = '0.000000 VESTS';
+        auth.user.hasRewards = false;
+      } catch (err) {
+        console.error('Claim rewards error:', err);
+      }
+    };
  
     const startReply = (target) => {
       replyTarget.value = target;
@@ -1250,7 +1277,14 @@ createApp({
       let vp = acc.voting_power + (10000 * delta / 432000);
       vp = Math.min(vp / 100, 100).toFixed(2);
 
-      auth.user = { username, type: 'key', key, vp };
+      const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+
+      auth.user = { 
+        username, type: 'key', key, vp,
+        rewardBlurt: acc.reward_blurt_balance,
+        rewardVesting: acc.reward_vesting_balance,
+        hasRewards
+      };
       showLoginModal.value = false;
       loginForm.key = '';
       loadUserCommunities(username);
@@ -1274,15 +1308,22 @@ createApp({
         const accounts = await client.condenser.getAccounts([username]);
         const acc = accounts && accounts[0];
         let vp = 100;
+        let hasRewards = false;
+        let rewardBlurt = '0.000 BLURT';
+        let rewardVesting = '0.000000 VESTS';
+
         if (acc) {
           const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
           const now = new Date().getTime();
           const delta = (now - lastVoteTime) / 1000;
           vp = acc.voting_power + (10000 * delta / 432000);
           vp = Math.min(vp / 100, 100).toFixed(2);
+          hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+          rewardBlurt = acc.reward_blurt_balance;
+          rewardVesting = acc.reward_vesting_balance;
         }
 
-        auth.user = { username, type: 'whalevault', key: null, vp };
+        auth.user = { username, type: 'whalevault', key: null, vp, hasRewards, rewardBlurt, rewardVesting };
         // WhaleVault session doesn't need PIN as keys aren't stored
         localStorage.setItem('bf-session', JSON.stringify({ username, type: 'whalevault', expires: Date.now() + (24 * 60 * 60 * 1000) }));
         showLoginModal.value = false;
@@ -1324,18 +1365,36 @@ createApp({
       // Restore session
       const saved = localStorage.getItem('blurtforum_session');
       if (saved) {
-        const session = JSON.parse(saved);
-        if (session.expires > Date.now()) {
-          if (session.type === 'whalevault') {
-            auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
-            loadUserCommunities(session.username);
+        try {
+          const session = JSON.parse(saved);
+          if (session.expires > Date.now()) {
+            if (session.type === 'whalevault') {
+              auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
+              loadUserCommunities(session.username);
+              // Refresh full data
+              client.condenser.getAccounts([session.username]).then(accounts => {
+                if (accounts && accounts[0]) {
+                  const acc = accounts[0];
+                  const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
+                  const now = new Date().getTime();
+                  const delta = (now - lastVoteTime) / 1000;
+                  let vp = acc.voting_power + (10000 * delta / 432000);
+                  vp = Math.min(vp / 100, 100).toFixed(2);
+                  const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+                  auth.user = { 
+                    username: session.username, type: 'whalevault', key: null, vp, 
+                    hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance 
+                  };
+                }
+              });
+            } else {
+              pinModal.mode = 'unlock';
+              pinModal.show = true;
+            }
           } else {
-            pinModal.mode = 'unlock';
-            pinModal.show = true;
+            localStorage.removeItem('blurtforum_session');
           }
-        } else {
-          localStorage.removeItem('blurtforum_session');
-        }
+        } catch (e) { /* ignore */ }
       }
 
       const params = new URLSearchParams(window.location.search);
@@ -1391,7 +1450,8 @@ createApp({
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
       bcWait,
-      imgModal, openImgModal
+      imgModal, openImgModal,
+      claimRewards
     };
   }
 }).mount('#app');

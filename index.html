@@ -85,6 +85,13 @@
  
 <!-- MAIN CONTENT -->
 <div class="content">
+
+  <!-- REWARD NOTIFICATION -->
+  <div v-if="auth.user && auth.user.hasRewards" 
+       style="background:var(--accent); color:#fff; padding:10px 15px; margin-bottom:15px; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+    <div style="flex:1">🎁 {{ t('rewardsAvailable') }}: {{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
+    <button class="btn btn-sm" @click="claimRewards" style="background:#fff; color:var(--accent); border:none">{{ t('claimRewards') }}</button>
+  </div>
  
   <div v-if="loading" class="loader"><span class="spin"></span>{{ t('loading') }} {{ config.communityAccount }}…</div>
   
@@ -193,28 +200,28 @@
 
         <!-- TAG SELECTOR -->
         <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
-          <div class="gs" style="font-weight:bold; margin-bottom:8px;">🏷️ Tagi</div>
+          <div class="gs" style="font-weight:bold; margin-bottom:8px;">🏷️ {{ t('tags') }}</div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
             <div>
-              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">Kategoria (wybierz jeden)</label>
+              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('category') }}</label>
               <select v-model="postForm.selectedTag"
                       style="padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px;">
                 <option v-for="tag in activeForum.targetTags" :key="tag" :value="tag">#{{ tag }}</option>
               </select>
             </div>
             <div style="flex:1; min-width:150px;">
-              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">Własne tagi (oddziel przecinkami)</label>
+              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('customTags') }}</label>
               <input type="text" v-model="postForm.customTags" placeholder="np. fotografia, plener"
                      style="width:100%; padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px; box-sizing:border-box;">
             </div>
           </div>
           <!-- live preview of final tags -->
           <div class="gs" style="font-size:11px;">
-            Wysłane tagi:
+            {{ t('sentTags') }}:
             <template v-for="(tag, i) in [config.communityAccount, postForm.selectedTag, ...postForm.customTags.split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9-]/g,'')).filter(Boolean)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5)" :key="tag">
               <span style="display:inline-block; background:var(--primary); color:#fff; border-radius:3px; padding:1px 6px; margin:2px 2px 0 0; font-size:10px;">#{{ tag }}</span>
             </template>
-            <span style="opacity:0.5">(max 5)</span>
+            <span style="opacity:0.5">{{ t('max5') }}</span>
           </div>
         </div>
         <div style="margin-bottom:10px">
@@ -394,7 +401,7 @@
               <div class="post-header">
                 <span class="gs">
                   #{{ i+1 }} · {{ fmtDate(r.created) }}
-                  <span v-if="r._pending" style="display:inline-block; background:#e07b00; color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">⏳ wysyłanie…</span>
+                  <span v-if="r._pending" style="display:inline-block; background:#e07b00; color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">⏳ {{ t('sending') }}</span>
                   <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
                 </span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
