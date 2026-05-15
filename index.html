@@ -134,10 +134,11 @@
         </tr>
         <tr v-for="forum in cat.forums" :key="forum.id" class="row-hover" @click="openForum(forum)" 
             :style="{ opacity: forum.posts.length === 0 && !forum.hasMore ? 0.7 : 1 }">
-          <td class="row1" width="40" align="center" style="position:relative" :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '14px' : '20px' }">
-            {{ forum.posts.length === 0 && !forum.hasMore ? '📁' : '📂' }}
+          <td class="row1" width="40" align="center" style="position:relative">
+            <span v-if="forumHasUnread(forum)" style="font-size:22px; color:var(--accent);">📂</span>
+            <span v-else style="font-size:20px; opacity:0.5;">📁</span>
             <span v-if="forumHasUnread(forum)"
-                  style="position:absolute;top:4px;right:4px;width:9px;height:9px;background:var(--accent,#e07b00);border-radius:50%;border:1px solid var(--bg-page,#fff);display:block;"></span>
+                  style="position:absolute;top:6px;right:6px;width:8px;height:8px;background:#ff4400;border-radius:50%;border:1px solid #fff;display:block;box-shadow:0 0 4px rgba(0,0,0,0.2);"></span>
           </td>
           <td class="row1">
             <a href="#" @click.stop.prevent="openForum(forum)"
@@ -267,8 +268,8 @@
             <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">▲</div>
           </td>
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
-            <span v-if="post.isUnread" style="margin-right:5px; color: var(--primary); font-size: 14px;" title="Unread">📂</span>
-            <span v-else style="margin-right:5px; color: #999; font-size: 14px;" title="Read">📄</span>
+            <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
+            <span v-else style="display:inline-block; width:8px; height:8px; background:#ccc; border-radius:50%; margin-right:8px;" title="Read"></span>
             <a href="#" @click.stop.prevent="openTopic(post)" 
                :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a><br>
             <span class="gs">
