@@ -175,7 +175,7 @@ createApp({
     const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value));
 
     const bodyCache = {};
-    const selectedCommunity = ref('blurt-140455');
+    const selectedCommunity = ref('blurt-179874');
     const customTag = ref('');
     const userSubscriptions = ref([]);
 
@@ -581,14 +581,14 @@ createApp({
       }
     };
 
-    const openProfile = async (username, sync = true) => {
+    const openProfile = async (username) => {
       profileUser.username = username;
       profileUser.loading = true;
       profileUser.data = null;
       profileUser.posts = [];
       profileUser.comments = [];
       view.value = 'profile';
-      if (sync) syncUrl();
+      syncUrl();
 
       try {
         const accounts = await client.condenser.getAccounts([username]);
@@ -1352,8 +1352,46 @@ createApp({
       localStorage.removeItem('blurtforum_session');
     };
  
+    const handleUrlChange = () => {
+      const params = new URLSearchParams(window.location.search);
+      const requestedView = params.get('view') || 'index';
+      const requestedForumId = params.get('forum');
+      const requestedAuthor = params.get('author');
+      const requestedPermlink = params.get('permlink');
+      const requestedUser = params.get('user');
+
+      if (requestedView === 'index') {
+        view.value = 'index';
+        activeForum.value = null;
+        activeTopic.value = null;
+      } else if (requestedView === 'forum' && requestedForumId) {
+        for (const cat of forumStructure.value) {
+          const f = cat.forums.find(f => f.id === requestedForumId);
+          if (f) {
+            activeForum.value = f;
+            view.value = "forum";
+            activeTopic.value = null;
+            loadData("current", f);
+            break;
+          }
+        }
+      } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
+        client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
+          if (content && content.author) {
+            activeTopic.value = { ...normalizePost(content), beneficiaries: content.beneficiaries || [] };
+            view.value = 'topic';
+            loadReplies(content.author, content.permlink);
+          }
+        });
+      } else if (requestedView === 'profile' && requestedUser) {
+        openProfile(requestedUser, false);
+      }
+    };
+
     onMounted(() => {
       setTheme(theme.value);
+
+      window.addEventListener('popstate', handleUrlChange);
 
       // Image lightbox click handler
       document.addEventListener('click', (e) => {
@@ -1406,29 +1444,39 @@ createApp({
         customTag.value = comm;
       }
 
-      const requestedView = params.get('view');
-      const requestedForumId = params.get('forum');
-      const requestedAuthor = params.get('author');
-      const requestedPermlink = params.get('permlink');
-      const requestedUser = params.get('user');
-
       loadData().then(() => {
-        if (requestedView === 'forum' && requestedForumId) {
-          for (const cat of forumStructure.value) {
-            const f = cat.forums.find(f => f.id === requestedForumId);
-            if (f) {
-              openForum(f);
-              break;
-            }
-          }
-        } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
-           client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
-              if (content && content.author) openTopic(normalizePost(content));
-           });
-        } else if (requestedView === 'profile' && requestedUser) {
-           openProfile(requestedUser);
-        }
+        handleUrlChange();
       });
+
+      // Periodic refresh of VP
+      setInterval(() => {
+        if (auth.user) {
+          // just a rough estimation
+          let val = parseFloat(auth.user.vp) + (0.01 / 43.2); // 20% per day = 0.01% per 43.2s
+          if (val < 100) auth.user.vp = val.toFixed(2);
+        }
+      }, 30000);
+
+      const session = JSON.parse(localStorage.getItem('bf-session') || '{}');
+      if (session.username) {
+        if (session.key) {
+          pinModal.mode = 'enter';
+          pinModal.show = true;
+        } else if (session.type === 'whalevault') {
+          client.condenser.getAccounts([session.username]).then(accounts => {
+            if (accounts && accounts[0]) {
+              const acc = accounts[0];
+              const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
+              const now = new Date().getTime();
+              const delta = (now - lastVoteTime) / 1000;
+              let vp = acc.voting_power + (10000 * delta / 432000);
+              vp = Math.min(vp / 100, 100).toFixed(2);
+              const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+              auth.user = { username: session.username, type: 'whalevault', key: null, vp, hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance };
+            }
+          });
+        }
+      }
     });
 
  
