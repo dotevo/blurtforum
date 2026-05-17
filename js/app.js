@@ -1,7 +1,7 @@
 /**
  * BlurtForum — complete Blurt blockchain forum frontend
  */
-const { createApp, ref, reactive, computed, onMounted } = Vue;
+const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
  
 function parseStructure(text) {
   if (!text || !text.trim()) return null;
@@ -97,7 +97,16 @@ function genPermlink(title) {
 function renderMarkdown(text) {
   if (!text) return '';
   try {
-    const html = marked.parse(text, { breaks: true, gfm: true });
+    // Basic mention linking: @username -> link to profile
+    // We do this before marked to avoid issues with code blocks if possible, 
+    // but better after if we want to respect code blocks.
+    // However, a simple replacement on the final HTML might be easier if we are careful.
+    let html = marked.parse(text, { breaks: true, gfm: true });
+    
+    // Simple regex for @username, avoiding things like email addresses
+    // Matches @ followed by alphanum, dots, or dashes, starting with a letter.
+    html = html.replace(/(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g, '$1<a href="#" class="mention" onclick="event.preventDefault(); if(window.app && window.app.openProfile) window.app.openProfile(\'$2\')">@$2</a>');
+
     return DOMPurify.sanitize(html);
   } catch (e) {
     console.error('Markdown error:', e);
@@ -137,12 +146,41 @@ createApp({
       nodes: ['https://rpc.drakernoise.com'],
       lockedCommunity: false
     });
- 
-    let client = new dblurt.Client(config.nodes);
+
+    // RPC settings — separate nodes for data vs broadcast
+    const rpcMenuOpen  = ref(false);
+    const rpcDataNode      = ref(localStorage.getItem('bf-rpc-data')      || 'https://rpc.drakernoise.com');
+    const rpcBroadcastNode = ref(localStorage.getItem('bf-rpc-broadcast') || 'https://rpc.beblurt.com');
+    const rpcDataCustom      = ref('');
+    const rpcBroadcastCustom = ref('');
+
+    const getDataUrl      = () => rpcDataNode.value      === 'custom' ? rpcDataCustom.value      : rpcDataNode.value;
+    const getBroadcastUrl = () => rpcBroadcastNode.value === 'custom' ? rpcBroadcastCustom.value : rpcBroadcastNode.value;
+
+    let client          = new dblurt.Client([getDataUrl()]);
+    let broadcastClient = new dblurt.Client([getBroadcastUrl()]);
+
+    const applyRpcSettings = () => {
+      const dUrl = getDataUrl();
+      const bUrl = getBroadcastUrl();
+      if (!dUrl || !bUrl) return;
+      config.nodes = [dUrl];
+      client          = new dblurt.Client([dUrl]);
+      broadcastClient = new dblurt.Client([bUrl]);
+      localStorage.setItem('bf-rpc-data',      rpcDataNode.value      === 'custom' ? rpcDataCustom.value      : rpcDataNode.value);
+      localStorage.setItem('bf-rpc-broadcast', rpcBroadcastNode.value === 'custom' ? rpcBroadcastCustom.value : rpcBroadcastNode.value);
+    };
+
+    // Close RPC menu on outside click
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest) return;
+      if (!e.target.closest('[data-rpc-menu]')) rpcMenuOpen.value = false;
+    }, true);
  
     const view         = ref('index');
     const loading      = ref(true);
     const repliesLoading = ref(false);
+    const targetNotifPermlink = ref(null);
     const globalProps  = ref({});
     const forumStructure = ref([]);
     const activeForum  = ref(null);
@@ -189,6 +227,10 @@ createApp({
       userSubscriptions.value.forEach(s => {
         if (!combined.find(c => c.account === s.account)) combined.push(s);
       });
+      // Ensure current community is in the list
+      if (config.communityAccount && !combined.find(c => c.account === config.communityAccount)) {
+        combined.push({ account: config.communityAccount, title: communityInfo.value.title || config.communityAccount });
+      }
       return combined;
     });
  
@@ -217,6 +259,31 @@ createApp({
     const replyForm   = reactive({ body: '', loading: false, error: '', success: '', beneficiary: { account: '', weight: '' } });
  
     const showNewPostForm = ref(false);
+    const postPreview = ref(false);
+    const replyPreview = ref(false);
+
+    // Draft helpers
+    const getDraftKey = () => `bf-draft-${config.communityAccount}-${activeForum.value?.id || 'x'}`;
+    const saveDraft = () => {
+      if (!postForm.title && !postForm.body) return;
+      localStorage.setItem(getDraftKey(), JSON.stringify({ title: postForm.title, body: postForm.body }));
+    };
+    const clearDraft = () => {
+      localStorage.removeItem(getDraftKey());
+      postForm.hasDraft = false;
+    };
+    const loadDraft = () => {
+      try {
+        const d = localStorage.getItem(getDraftKey());
+        if (d) {
+          const p = JSON.parse(d);
+          postForm.title = p.title || '';
+          postForm.body = p.body || '';
+          postForm.hasDraft = true;
+        }
+      } catch (e) { /* ignore */ }
+    };
+
     const openNewPostForm = () => {
       postForm.selectedTag = activeForum.value?.targetTags[0] || '';
       postForm.customTags  = '';
@@ -224,9 +291,12 @@ createApp({
       postForm.body        = '';
       postForm.error       = '';
       postForm.success     = '';
+      postForm.hasDraft    = false;
+      postPreview.value    = false;
       showNewPostForm.value = true;
+      loadDraft();
     };
-    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
+    const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', hasDraft: false, devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
 
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
     const notifModal = reactive({ 
@@ -291,7 +361,20 @@ createApp({
               if (cc) {
                 communityInfo.value = { title: cc.title || config.communityAccount, about: cc.about || '' };
                 rawDescription.value = cc.description || '';
-                const parsed = parseStructure(cc.description);
+                
+                let structureSource = cc.description || '';
+                // Check for external config
+                const extMatch = structureSource.match(/\[\[Forum config:(@?)([a-z0-9.-]+)\/([a-z0-9-]+)\]\]/i);
+                if (extMatch) {
+                  const author = extMatch[2];
+                  const permlink = extMatch[3];
+                  try {
+                    const post = await client.condenser.getContent(author, permlink);
+                    if (post && post.body) structureSource = post.body;
+                  } catch (err) { console.warn('External config load error:', err); }
+                }
+
+                const parsed = parseStructure(structureSource);
                 if (parsed) {
                   forumStructure.value = parsed;
                 } else {
@@ -393,6 +476,20 @@ createApp({
       if (activeForum.value) loadData('prev', activeForum.value);
     };
 
+    const getNotifIcon = (type) => {
+      const icons = {
+        reply: '💬',
+        reply_comment: '💬',
+        vote: '👍',
+        mention: '🔔',
+        follow: '👤',
+        reblog: '🔄',
+        transfer: '💰',
+        witness_vote: '🗳️'
+      };
+      return icons[type] || '🔵';
+    };
+
     const normalizePost = (p) => {
       let tags = [];
       try { 
@@ -406,7 +503,10 @@ createApp({
 
       const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
       const lastReadId = readStatus[`${p.author}/${p.permlink}`] || 0;
-      const isUnread = (p.last_activity_post_id || 0) > lastReadId;
+      
+      // Use last_activity_post_id if available, otherwise post_id, otherwise 0
+      const currentActivityId = p.last_activity_post_id || p.post_id || 0;
+      const isUnread = currentActivityId > lastReadId;
 
       return {
         author: p.author,
@@ -414,9 +514,11 @@ createApp({
         title: p.title || '(no title)',
         body: p.body,
         created: p.created,
+        url: p.url, // Keep URL for context parsing
+        category: p.category, // Community/Category
         lastActivity: p.last_activity || p.created,
         lastAuthor: p.last_activity_author,
-        lastActivityPostId: p.last_activity_post_id || 0,
+        lastActivityPostId: currentActivityId,
         isUnread,
         replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
@@ -431,6 +533,34 @@ createApp({
         json_metadata: p.json_metadata,
         tags
       };
+    };
+
+    const isPostInCommunity = (post) => {
+      if (!post || !post.category) return false;
+      return post.category === config.communityAccount;
+    };
+
+    const loadTopicContext = async () => {
+      if (!activeTopic.value || !activeTopic.value.parent_author) return;
+      loading.value = true;
+      try {
+        const url = activeTopic.value.url;
+        if (url) {
+          const parts = url.split('#')[0].split('/');
+          // Bridge API url usually: /category/@author/permlink
+          if (parts.length >= 4) {
+            const rootAuthor = parts[2].replace('@', '');
+            const rootPermlink = parts[3];
+            const root = await client.condenser.getContent(rootAuthor, rootPermlink);
+            if (root && root.author) {
+              openTopic(normalizePost(root));
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Load context error:', err);
+      }
+      loading.value = false;
     };
 
     const processBatch = (slice, catchAllForum, targetForum = null) => {
@@ -527,6 +657,18 @@ createApp({
       await recurse(author, permlink, 1);
       replies.value = flat.sort((a, b) => new Date(a.created) - new Date(b.created));
       repliesLoading.value = false;
+
+      if (targetNotifPermlink.value) {
+        nextTick(() => {
+          const el = document.getElementById('post-' + targetNotifPermlink.value);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('highlighted-post');
+            setTimeout(() => { el.classList.remove('highlighted-post'); }, 3000);
+          }
+          targetNotifPermlink.value = null;
+        });
+      }
     };
  
     const syncUrl = () => {
@@ -661,20 +803,31 @@ createApp({
       profileUser.loading = false;
     };
  
-    const handleCommunityChange = () => {
-      const tag = selectedCommunity.value === 'custom' ? customTag.value.trim() : selectedCommunity.value;
-      if (!tag) return;
-      config.communityAccount = tag;
-      client = new dblurt.Client(config.nodes);
+    const switchCommunity = (account) => {
+      if (!account) return;
+      config.communityAccount = account;
+      // If it's in our known list, select it. Otherwise use 'custom'.
+      const found = allCommunities.value.find(c => c.account === account);
+      if (found) {
+        selectedCommunity.value = account;
+      } else {
+        selectedCommunity.value = 'custom';
+        customTag.value = account;
+      }
+      client = new dblurt.Client([getDataUrl()]);
+      broadcastClient = new dblurt.Client([getBroadcastUrl()]);
       goHome();
       loadData();
+    };
+
+    const handleCommunityChange = () => {
+      const tag = selectedCommunity.value === 'custom' ? customTag.value.trim() : selectedCommunity.value;
+      switchCommunity(tag);
     };
  
     const broadcastKey = async (ops) => {
       const privKey = dblurt.PrivateKey.from(auth.user.key);
-      // dblurt's local binary serializer should handle comment_options. 
-      // If it fails, we will know from the error message.
-      await client.broadcast.sendOperations(ops, privKey);
+      await broadcastClient.broadcast.sendOperations(ops, privKey);
     };
 
     const broadcastWV = async (ops) => {
@@ -691,6 +844,122 @@ createApp({
     };
 
     const broadcast = (ops) => auth.user.type === 'key' ? broadcastKey(ops) : broadcastWV(ops);
+
+    // ── Image upload to img-upload.blurt.blog ──────────────────────────────
+    // Protocol: POST https://img-upload.blurt.blog/{username}/{sig}
+    // sig = hex(secp256k1_sign(sha256(fileBytes), postingKey))
+    const uploadImageFile = async (file) => {
+      if (!auth.user) throw new Error('Not logged in');
+      // Protocol: SHA256("ImageSigningChallenge" + fileBytes) signed with posting key
+      // Signature must be 65 bytes (130 hex) including recovery byte
+      const arrayBuf = await file.arrayBuffer();
+      const fileBytes = new Uint8Array(arrayBuf);
+      const prefix = new TextEncoder().encode('ImageSigningChallenge');
+      const combined = new Uint8Array(prefix.length + fileBytes.length);
+      combined.set(prefix, 0);
+      combined.set(fileBytes, prefix.length);
+      // SHA-256 via CryptoJS (works on HTTP too, unlike crypto.subtle)
+      const wordArray = CryptoJS.lib.WordArray.create(combined);
+      const hashHex = CryptoJS.SHA256(wordArray).toString(CryptoJS.enc.Hex);
+      const hashBytes = new Uint8Array(hashHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+
+      let sigHex;
+      if (auth.user.type === 'key') {
+        const privKey = dblurt.PrivateKey.from(auth.user.key);
+        const sig = privKey.sign(hashBytes);
+        // Keep full 65-byte signature (130 hex) including recovery byte
+        sigHex = typeof sig.toString === 'function' ? sig.toString() : Array.from(sig).map(b => b.toString(16).padStart(2,'0')).join('');
+      } else {
+        // WhaleVault: sign the hash hex with posting key
+        sigHex = await new Promise((resolve, reject) => {
+          if (!window.blurt_keychain) { reject(new Error('WhaleVault not available')); return; }
+          window.blurt_keychain.requestSignBuffer(auth.user.username, hashHex, 'posting', (res) => {
+            if (res && res.success) resolve(res.result || '');
+            else reject(new Error(res ? res.message : 'WV sign error'));
+          });
+        });
+      }
+
+      const url = `https://img-upload.blurt.blog/${auth.user.username}/${sigHex}`;
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await fetch(url, { method: 'POST', body: formData });
+      if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+      const data = await resp.json();
+      // blurt returns { url: "https://..." }
+      if (!data.url) throw new Error('No URL in response: ' + JSON.stringify(data));
+      return data.url;
+    };
+
+    const insertImageIntoBody = (textareaRef, imgUrl) => {
+      const md = `\n![image](${imgUrl})\n`;
+      if (textareaRef === 'post') {
+        postForm.body += md;
+        saveDraft();
+      } else {
+        replyForm.body += md;
+      }
+    };
+
+    const handleImageUpload = async (file, target) => {
+      if (!file || !file.type.startsWith('image/')) return;
+      const key = target === 'post' ? 'postImgUploading' : 'replyImgUploading';
+      try {
+        window[key] = true;
+        const imgUrl = await uploadImageFile(file);
+        insertImageIntoBody(target, imgUrl);
+      } catch (err) {
+        console.error('Image upload error:', err);
+        if (target === 'post') postForm.error = 'Image upload failed: ' + err.message;
+        else replyForm.error = 'Image upload failed: ' + err.message;
+      } finally {
+        window[key] = false;
+      }
+    };
+    // Expose for template event handlers
+    const postImgUpload = ref(false);
+    const replyImgUpload = ref(false);
+    const onPostImagePick = async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      postImgUpload.value = true;
+      try { await handleImageUpload(file, 'post'); } finally { postImgUpload.value = false; }
+    };
+    const onReplyImagePick = async (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      replyImgUpload.value = true;
+      try { await handleImageUpload(file, 'reply'); } finally { replyImgUpload.value = false; }
+    };
+    const onPostPaste = async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          postImgUpload.value = true;
+          try { await handleImageUpload(file, 'post'); } finally { postImgUpload.value = false; }
+          break;
+        }
+      }
+    };
+    const onReplyPaste = async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          replyImgUpload.value = true;
+          try { await handleImageUpload(file, 'reply'); } finally { replyImgUpload.value = false; }
+          break;
+        }
+      }
+    };
+    // ──────────────────────────────────────────────────────────────────────
 
     const claimRewards = async () => {
       if (!auth.user) return;
@@ -813,6 +1082,8 @@ createApp({
         })
       }];
 
+      const beneficiaryExt = [[0, { beneficiaries }]];
+
       const options = ['comment_options', {
         author: auth.user.username,
         permlink: op[1].permlink,
@@ -820,7 +1091,7 @@ createApp({
         percent_steem_dollars: 10000,
         allow_votes: true,
         allow_curation_rewards: true,
-        extensions: [[0, { beneficiaries }]]
+        extensions: beneficiaryExt
       }];
 
       try {
@@ -905,6 +1176,8 @@ createApp({
         })
       }];
 
+      const beneficiaryExtPost = [[0, { beneficiaries }]];
+
       const options = ['comment_options', {
         author: auth.user.username,
         permlink: op[1].permlink,
@@ -912,7 +1185,7 @@ createApp({
         percent_steem_dollars: 10000,
         allow_votes: true,
         allow_curation_rewards: true,
-        extensions: [[0, { beneficiaries }]]
+        extensions: beneficiaryExtPost
       }];
 
       try {
@@ -920,6 +1193,7 @@ createApp({
         postForm.success = t('postSuccess');
         postForm.title = '';
         postForm.body = '';
+        clearDraft();
         showNewPostForm.value = false;
         waitAndReload(false, auth.user.username, op[1].permlink);
       } catch (err) {
@@ -1067,6 +1341,12 @@ createApp({
 
     const saveStructure = async () => {
       if (!auth.user || !canEditStructure.value) return;
+      
+      if (structureForm.text.length > 1000) {
+        structureForm.error = 'Description too long (max 1000 chars). Save config in a post and use [[Forum config:author/permlink]] instead.';
+        return;
+      }
+
       structureForm.loading = true;
       structureForm.error = '';
       
@@ -1123,14 +1403,51 @@ createApp({
       notifModal.show = true;
       notifModal.loading = true;
       try {
+        // Fetch standard notifications
         const list = await client.call('bridge', 'account_notifications', { account: auth.user.username, limit: 50 });
-        notifModal.list = list || [];
+        const results = list || [];
+
+        // Fetch recent transfers from history
+        try {
+          const history = await client.call('condenser_api', 'get_account_history', [auth.user.username, -1, 50]);
+          if (history && Array.isArray(history)) {
+            history.forEach(item => {
+              const op = item[1].op;
+              if (op[0] === 'transfer' && op[1].to === auth.user.username) {
+                const tx = op[1];
+                const notifId = 'tx-' + item[0];
+                // Check if already in list (optional, but keep consistent)
+                if (!results.find(n => n.id === notifId)) {
+                  results.push({
+                    id: notifId,
+                    type: 'transfer',
+                    author: tx.from,
+                    date: item[1].timestamp,
+                    msg: `Received ${tx.amount} from @${tx.from}` + (tx.memo ? `: ${tx.memo}` : ''),
+                    url: `@${tx.from}`
+                  });
+                }
+              }
+            });
+          }
+        } catch (e) { console.warn('History fetch error:', e); }
+
+        // Sort by date descending
+        results.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        notifModal.list = results;
+        
         if (notifModal.list.length > 0) {
-          const maxId = Math.max(...notifModal.list.map(n => n.id));
-          if (maxId > notifModal.lastReadId) {
-            notifModal.lastReadId = maxId;
-            localStorage.setItem('bf_last_notif_id', maxId.toString());
-            notifModal.hasNew = false;
+          // Use only numeric IDs for lastReadId tracking if possible, 
+          // or just take the max from standard ones
+          const numericIds = notifModal.list.filter(n => typeof n.id === 'number').map(n => n.id);
+          if (numericIds.length > 0) {
+            const maxId = Math.max(...numericIds);
+            if (maxId > notifModal.lastReadId) {
+              notifModal.lastReadId = maxId;
+              localStorage.setItem('bf_last_notif_id', maxId.toString());
+              notifModal.hasNew = false;
+            }
           }
         }
       } catch (err) {
@@ -1163,7 +1480,7 @@ createApp({
           // It's a post or comment
           let content = await client.condenser.getContent(author, permlink);
           if (content && content.author) {
-            // Find root to determine community
+            // Find root to determine community and show full thread
             let root = content;
             if (content.parent_author) {
               const urlParts = content.url.split('#')[0].split('/');
@@ -1181,11 +1498,16 @@ createApp({
             if (targetCommunity && targetCommunity.startsWith('blurt-') && targetCommunity !== config.communityAccount) {
               if (!config.lockedCommunity) {
                 config.communityAccount = targetCommunity;
-                client = new dblurt.Client(config.nodes);
+                selectedCommunity.value = targetCommunity;
+                client = new dblurt.Client([getDataUrl()]);
+                broadcastClient = new dblurt.Client([getBroadcastUrl()]);
+                // Reload community data (moderators, etc)
                 await loadData();
               }
             }
-            openTopic(normalizePost(content));
+            
+            targetNotifPermlink.value = permlink;
+            openTopic(normalizePost(root));
           }
         } else {
           // It's a profile
@@ -1368,8 +1690,8 @@ createApp({
         }
 
         auth.user = { username, type: 'whalevault', key: null, vp, hasRewards, rewardBlurt, rewardVesting };
-        // WhaleVault session doesn't need PIN as keys aren't stored
-        localStorage.setItem('bf-session', JSON.stringify({ username, type: 'whalevault', expires: Date.now() + (24 * 60 * 60 * 1000) }));
+        // Unify session storage
+        localStorage.setItem('blurtforum_session', JSON.stringify({ username, type: 'whalevault', expires: Date.now() + (24 * 60 * 60 * 1000) }));
         showLoginModal.value = false;
         loadUserCommunities(username);
       } catch (err) {
@@ -1381,9 +1703,19 @@ createApp({
 
     const loadUserCommunities = async (username) => {
       try {
-        const subs = await client.call('bridge', 'list_communities', { last: '', limit: 100, query: username });
+        console.log('Loading subscriptions for:', username);
+        let subs = await client.call('bridge', 'list_all_subscriptions', { account: username });
+        
+        // Fallback for some nodes/client versions
+        if (!subs || !subs.length) {
+          console.log('No subscriptions found with named params, trying positional...');
+          subs = await client.condenser.call('bridge', 'list_all_subscriptions', [username]);
+        }
+
+        console.log('Found subscriptions:', subs);
         if (subs && Array.isArray(subs)) {
-          userSubscriptions.value = subs.map(s => ({ account: s.name, title: s.title }));
+          // list_all_subscriptions returns [community_name, title, role, cur-payout]
+          userSubscriptions.value = subs.map(s => ({ account: s[0], title: s[1] || s[0] }));
         }
       } catch (err) {
         console.error('Error loading communities:', err);
@@ -1518,6 +1850,19 @@ createApp({
             localStorage.removeItem('blurtforum_session');
           }
         } catch (e) { /* ignore */ }
+      } else {
+        // Check legacy session too (one-time migration)
+        const legacy = localStorage.getItem('bf-session');
+        if (legacy) {
+          try {
+            const session = JSON.parse(legacy);
+            if (session.username && session.type === 'whalevault') {
+              localStorage.setItem('blurtforum_session', legacy);
+              // Small hack to re-run session logic after migration
+              location.reload();
+            }
+          } catch (e) {}
+        }
       }
 
       const params = new URLSearchParams(window.location.search);
@@ -1525,8 +1870,14 @@ createApp({
       if (comm) {
         config.communityAccount = comm;
         config.lockedCommunity = true;
-        selectedCommunity.value = 'custom';
-        customTag.value = comm;
+        // Correctly set selectedCommunity by checking known list
+        const found = allCommunities.value.find(c => c.account === comm);
+        if (found) {
+          selectedCommunity.value = comm;
+        } else {
+          selectedCommunity.value = 'custom';
+          customTag.value = comm;
+        }
       }
 
       loadData().then(() => {
@@ -1541,37 +1892,16 @@ createApp({
           if (val < 100) auth.user.vp = val.toFixed(2);
         }
       }, 30000);
-
-      const session = JSON.parse(localStorage.getItem('bf-session') || '{}');
-      if (session.username) {
-        if (session.key) {
-          pinModal.mode = 'enter';
-          pinModal.show = true;
-        } else if (session.type === 'whalevault') {
-          client.condenser.getAccounts([session.username]).then(accounts => {
-            if (accounts && accounts[0]) {
-              const acc = accounts[0];
-              const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
-              const now = new Date().getTime();
-              const delta = (now - lastVoteTime) / 1000;
-              let vp = acc.voting_power + (10000 * delta / 432000);
-              vp = Math.min(vp / 100, 100).toFixed(2);
-              const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
-              auth.user = { username: session.username, type: 'whalevault', key: null, vp, hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance };
-            }
-          });
-        }
-      }
     });
 
- 
-    return {
-      lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
+      window.app = { openProfile };
+
+      return {      lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
       activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
       structureNote, selectedCommunity, customTag, allCommunities, auth, showLoginModal, loginTab,
       loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
       showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
-      goHome, openForum, openTopic, handleCommunityChange, openLoginModal,
+      goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openLoginModal,
       doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
       nextPage, prevPage,
       submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
@@ -1585,7 +1915,13 @@ createApp({
       bcWait,
       imgModal, openImgModal,
       claimRewards,
-      checkNewNotifications
+      postPreview, replyPreview, saveDraft, clearDraft,
+      postImgUpload, replyImgUpload, onPostImagePick, onReplyImagePick, onPostPaste, onReplyPaste,
+      rpcMenuOpen, rpcDataNode, rpcBroadcastNode, rpcDataCustom, rpcBroadcastCustom, applyRpcSettings,
+      checkNewNotifications,
+      getNotifIcon,
+      loadTopicContext,
+      isPostInCommunity
     };
   }
 }).mount('#app');

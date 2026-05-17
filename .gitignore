@@ -1,2 +1,3 @@
 node_modules
 test-results
+/vendor_libs/

@@ -164,6 +164,39 @@ a:hover { color: var(--accent); text-decoration: underline; }
   color: var(--text-muted);
   margin-top: 5px;
 }
+.active-community-badge {
+  display: inline-block !important;
+  margin-top: 15px !important;
+  background: var(--primary) !important;
+  color: var(--accent) !important;
+  padding: 10px 25px !important;
+  border-radius: 8px !important;
+  font-weight: bold !important;
+  font-size: 44px !important;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3) !important;
+  font-family: 'Trebuchet MS', sans-serif !important;
+  text-transform: uppercase !important;
+  letter-spacing: 2px !important;
+  width: fit-content !important;
+  border: 3px solid var(--accent) !important;
+}
+
+.warning-link {
+  display: inline-block;
+  background: var(--primary);
+  color: var(--accent) !important;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-decoration: none !important;
+  border: 1px solid var(--accent);
+  margin-left: 5px;
+  transition: all 0.2s;
+}
+.warning-link:hover, .warning-link:active {
+  background: var(--accent);
+  color: var(--primary) !important;
+}
+
 .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .block-status {
   font-size: 10px;
@@ -498,6 +531,15 @@ a:hover { color: var(--accent); text-decoration: underline; }
 .gs { font-size: 10px; color: var(--text-muted); }
 .depth-badge { display: inline-block; font-size: 9px; color: var(--accent); margin-left: 5px; }
 
+.highlighted-post {
+  animation: highlight-fade 3s ease-out;
+  border: 2px solid var(--accent) !important;
+}
+@keyframes highlight-fade {
+  0% { box-shadow: 0 0 20px var(--accent); background-color: var(--accent-lt); }
+  100% { box-shadow: 0 0 0 transparent; }
+}
+
 /* PROFILE STATS */
 .profile-stats {
   display: flex;
@@ -563,6 +605,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
   body { padding: 0; }
   #app { border: none; border-radius: 0; width: 100vw; overflow-x: hidden; }
   .header-inner { flex-direction: column; text-align: center; gap: 15px; }
+  .active-community-badge { font-size: 30px !important; padding: 10px 20px !important; margin: 15px auto 0 !important; width: 90% !important; }
   .header-right { align-items: center; }
 
   /* Responsive Post List - Only for the main list */

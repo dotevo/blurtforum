@@ -3,7 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BlurtForum</title>
+<title>BlurtForum - Blockchain Powered Community</title>
+<meta name="description" content="BlurtForum is a decentralized community platform powered by the Blurt blockchain. Engage, post, and earn rewards.">
+<meta property="og:title" content="BlurtForum">
+<meta property="og:description" content="Blockchain-powered community platform on the Blurt network.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="BlurtForum">
+<meta name="twitter:description" content="Decentralized community platform on the Blurt network.">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
 <script src="https://unpkg.com/@beblurt/dblurt@latest/dist/dblurt.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
@@ -20,6 +27,46 @@
     <span class="gs" style="margin-right: 5px;">{{ t('theme') }}:</span>
     <button v-for="th in themes" :key="th.id" class="theme-btn" :class="{active: theme===th.id}" @click="setTheme(th.id)">{{ th.label }}</button>
   </div>
+
+  <!-- RPC SETTINGS (temporary workaround for data-node bug) -->
+  <div style="position:relative; margin-right:6px;">
+    <button class="lang-btn" @click="rpcMenuOpen=!rpcMenuOpen" :style="rpcMenuOpen ? 'background:var(--primary);color:#fff' : ''" title="RPC settings">⚙ RPC</button>
+    <div v-if="rpcMenuOpen"
+         style="position:absolute; right:0; top:calc(100% + 4px); z-index:200; background:var(--bg); border:1px solid var(--border-main); border-radius:6px; padding:10px 12px; min-width:280px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+      <div style="font-size:11px; font-weight:bold; opacity:0.6; margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">{{ t('rpcSettings') }}</div>
+
+      <label style="display:block; font-size:11px; margin-bottom:3px;">📡 {{ t('rpcBroadcast') }}</label>
+      <div style="display:flex; gap:4px; margin-bottom:8px;">
+        <select v-model="rpcBroadcastNode" @change="applyRpcSettings"
+                style="flex:1; padding:4px 6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:3px;">
+          <option value="https://rpc.beblurt.com">rpc.beblurt.com</option>
+          <option value="https://rpc.drakernoise.com">rpc.drakernoise.com</option>
+          <option value="https://rpc.blurt.world">rpc.blurt.world</option>
+          <option value="custom">— {{ t('custom') }} —</option>
+        </select>
+        <input v-if="rpcBroadcastNode==='custom'" type="text" v-model="rpcBroadcastCustom" placeholder="https://..."
+               style="width:130px; padding:4px 6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:3px;"
+               @change="applyRpcSettings">
+      </div>
+
+      <label style="display:block; font-size:11px; margin-bottom:3px;">🗄 {{ t('rpcData') }}</label>
+      <div style="display:flex; gap:4px; margin-bottom:4px;">
+        <select v-model="rpcDataNode" @change="applyRpcSettings"
+                style="flex:1; padding:4px 6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:3px;">
+          <option value="https://rpc.drakernoise.com">rpc.drakernoise.com</option>
+          <option value="https://rpc.beblurt.com">rpc.beblurt.com</option>
+          <option value="https://rpc.blurt.world">rpc.blurt.world</option>
+          <option value="custom">— {{ t('custom') }} —</option>
+        </select>
+        <input v-if="rpcDataNode==='custom'" type="text" v-model="rpcDataCustom" placeholder="https://..."
+               style="width:130px; padding:4px 6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:3px;"
+               @change="applyRpcSettings">
+      </div>
+
+      <div style="font-size:10px; opacity:0.5; margin-top:6px;">{{ t('rpcNote') }}</div>
+    </div>
+  </div>
+
   <button v-for="l in langs" :key="l" class="lang-btn" :class="{active: lang===l}" @click="setLang(l)">{{ l.toUpperCase() }}</button>
 </div>
  
@@ -29,6 +76,9 @@
     <div class="logo" @click="goHome">
       <div class="logo-title">Blurt<em>Forum</em></div>
       <div class="logo-sub">BLOCKCHAIN-POWERED COMMUNITY PLATFORM • BLURT NETWORK</div>
+      <div class="active-community-badge">
+        🏛️ {{ communityInfo.title || config.communityAccount }}
+      </div>
     </div>
     <div class="header-right">
       <div class="block-status">
@@ -54,7 +104,7 @@
 </div>
  
 <!-- COMMUNITY SELECTOR -->
-<div v-if="!config.lockedCommunity" class="community-bar forumline">
+<div class="community-bar forumline">
   <span style="font-weight: bold; color: var(--primary);">{{ t('community') }}:</span>
   <select v-model="selectedCommunity" @change="handleCommunityChange">
     <option v-for="c in allCommunities" :key="c.account" :value="c.account">{{ c.title }} ({{ c.account }})</option>
@@ -196,11 +246,30 @@
         </div>
         <div style="margin-bottom:10px">
           <label class="form-label">{{ t('postTitle') }}</label>
-          <input type="text" v-model="postForm.title" :placeholder="t('postTitle')">
+          <input type="text" v-model="postForm.title" :placeholder="t('postTitle')" @input="saveDraft">
         </div>
+        <!-- Draft notice -->
+        <div v-if="postForm.hasDraft" style="background:var(--bg2); border:1px solid var(--accent); border-radius:4px; padding:8px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+          <span>📝 {{ t('draftRestored') }}</span>
+          <button class="btn btn-sm btn-ghost" @click="postForm.title=''; postForm.body=''; clearDraft()">🗑 {{ t('clearDraft') }}</button>
+        </div>
+
         <div style="margin-bottom:10px">
-          <label class="form-label">{{ t('postBody') }} (Markdown)</label>
-          <textarea v-model="postForm.body" :placeholder="t('writePost')"></textarea>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label class="form-label" style="margin:0">{{ t('postBody') }} (Markdown)</label>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <!-- Image upload button -->
+              <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: postImgUpload ? 0.5 : 1}">
+                <span v-if="postImgUpload" class="spin"></span><span v-else>📎</span> {{ t('addImage') }}
+                <input type="file" accept="image/*" style="display:none" @change="onPostImagePick">
+              </label>
+              <!-- Write / Preview toggle -->
+              <button class="btn btn-sm" :class="postPreview ? 'btn-ghost' : 'btn-primary'" @click="postPreview=false; saveDraft()">{{ t('write') }}</button>
+              <button class="btn btn-sm" :class="postPreview ? 'btn-primary' : 'btn-ghost'" @click="postPreview=true; saveDraft()">{{ t('preview') }}</button>
+            </div>
+          </div>
+          <textarea v-if="!postPreview" v-model="postForm.body" :placeholder="t('writePost')" @input="saveDraft" @paste="onPostPaste"></textarea>
+          <div v-else class="post-body" style="min-height:120px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="postForm.body ? renderMD(postForm.body) : '<span style=&quot;opacity:0.4&quot;>...' + t('writePost') + '...</span>'"></div>
         </div>
 
         <!-- TAG SELECTOR -->
@@ -250,7 +319,7 @@
           <button class="btn btn-primary" @click="submitPost" :disabled="postForm.loading">
             <span v-if="postForm.loading" class="spin"></span>{{ t('submit') }}
           </button>
-          <button class="btn btn-ghost" @click="showNewPostForm=false">{{ t('cancel') }}</button>
+          <button class="btn btn-ghost" @click="showNewPostForm=false; clearDraft()">{{ t('cancel') }}</button>
         </div>
       </div>
  
@@ -310,8 +379,22 @@
     <!-- ========== TOPIC VIEW ========== -->
     <div v-if="view==='topic' && activeTopic">
  
+      <!-- EXTERNAL POST WARNING -->
+      <div v-if="!isPostInCommunity(activeTopic)" class="alert alert-info" style="margin-bottom:15px">
+        🌐 {{ t('externalPostWarning') || 'This post is outside the currently selected community.' }} 
+        (Category: 
+        <a v-if="activeTopic.category && activeTopic.category.startsWith('blurt-')" href="#" 
+           class="warning-link" @click.prevent="switchCommunity(activeTopic.category)">#{{ activeTopic.category }}</a>
+        <span v-else>#{{ activeTopic.category }}</span>)
+      </div>
+
       <!-- ORIGINAL POST -->
-      <table class="forumline topic-table" style="margin-bottom:5px">
+      <div v-if="activeTopic.parent_author" class="alert alert-info" style="margin-bottom:15px; display:flex; align-items:center; gap:10px;">
+        <div style="flex:1">ℹ️ {{ t('viewingComment') || 'You are viewing a specific comment context.' }}</div>
+        <button class="btn btn-sm btn-hdr" @click="loadTopicContext">{{ t('loadFullThread') }}</button>
+      </div>
+
+      <table :id="'post-' + activeTopic.permlink" class="forumline topic-table" style="margin-bottom:5px">
         <tr>
           <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></b></td>
           <td class="row3">
@@ -332,9 +415,8 @@
                 </template>
                 <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)" style="font-size: 16px;">▲</span>
                 <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
-                <button v-if="canMute" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic)">🚫 {{ t('mute') }}</button>
-              </div>
-            </div>
+                <button v-if="canMute && isPostInCommunity(activeTopic)" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic)">🚫 {{ t('mute') }}</button>
+                </div>            </div>
           </td>
         </tr>
         <tr>
@@ -360,7 +442,16 @@
               <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
                 {{ t('replyTo') }}: <i>{{ activeTopic.title }}</i>
               </div>
-              <textarea v-model="replyForm.body" :placeholder="t('writeReply')"></textarea>
+              <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
+                <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
+                  <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
+                  <input type="file" accept="image/*" style="display:none" @change="onReplyImagePick">
+                </label>
+                <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="replyPreview=false">{{ t('write') }}</button>
+                <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="replyPreview=true">{{ t('preview') }}</button>
+              </div>
+              <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="onReplyPaste"></textarea>
+              <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
               <div style="margin-top:10px">
                 <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                   <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
@@ -399,7 +490,7 @@
         </div>
         <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
  
-        <table class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
+        <table :id="'post-' + r.permlink" class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
           <tr>
             <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
             <td class="row3">
@@ -424,9 +515,8 @@
                   </template>
                   <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)">▲</span>
                   <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
-                  <button v-if="canMute" class="btn btn-sm btn-hdr" @click="mutePost(r)">🚫 {{ t('mute') }}</button>
-                </div>
-              </div>
+                  <button v-if="canMute && isPostInCommunity(r)" class="btn btn-sm btn-hdr" @click="mutePost(r)">🚫 {{ t('mute') }}</button>
+                  </div>              </div>
             </td>
           </tr>
           <tr>
@@ -461,7 +551,16 @@
                 <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
                   {{ t('replyTo') }}: <b>@{{ r.author }}</b>
                 </div>
-                <textarea v-model="replyForm.body" :placeholder="t('writeReply')"></textarea>
+                <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
+                <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
+                  <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
+                  <input type="file" accept="image/*" style="display:none" @change="onReplyImagePick">
+                </label>
+                <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="replyPreview=false">{{ t('write') }}</button>
+                <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="replyPreview=true">{{ t('preview') }}</button>
+              </div>
+              <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="onReplyPaste"></textarea>
+                <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
                 <div style="margin-top:10px">
                   <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                     <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
@@ -721,7 +820,7 @@
                 opacity: notifModal.clickedIds.includes(n.id) ? 0.7 : 1
              }">
           <div style="display:flex; gap:10px; align-items:center;">
-             <span v-if="n.id > notifModal.lastReadId" style="width:6px; height:6px; background:#ff4400; border-radius:50%; flex-shrink:0;"></span>
+             <span style="font-size: 18px;">{{ getNotifIcon(n.type) }}</span>
              <div style="flex:1">
                <span v-if="n.msg"> {{ n.msg }}</span>
                <template v-else>
@@ -733,6 +832,7 @@
                </template>
                <div class="gs" style="margin-top:2px;">{{ timeAgo(n.date) }}</div>
              </div>
+             <span v-if="n.id > notifModal.lastReadId" style="width:8px; height:8px; background:#ff4400; border-radius:50%; flex-shrink:0;"></span>
           </div>
         </div>
         <div v-if="notifModal.list.length===0" style="padding: 20px; text-align: center; color: #999;">{{ t('noNotifications') }}</div>
