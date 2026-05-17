@@ -147,28 +147,32 @@ createApp({
       lockedCommunity: false
     });
 
-    // RPC settings — separate nodes for data vs broadcast
+    // RPC settings
     const rpcMenuOpen  = ref(false);
-    const rpcDataNode      = ref(localStorage.getItem('bf-rpc-data')      || 'https://rpc.drakernoise.com');
-    const rpcBroadcastNode = ref(localStorage.getItem('bf-rpc-broadcast') || 'https://rpc.beblurt.com');
-    const rpcDataCustom      = ref('');
-    const rpcBroadcastCustom = ref('');
+    // Nexus/Forum node: drakernoise is the primary supporter of forum API
+    const rpcForumNode = ref(localStorage.getItem('bf-rpc-forum') || 'https://rpc.drakernoise.com');
+    // Data/Broadcast node: beblurt is reliable for general operations
+    const rpcDataNode  = ref(localStorage.getItem('bf-rpc-data')  || 'https://rpc.beblurt.com');
+    
+    const rpcForumCustom = ref('');
+    const rpcDataCustom  = ref('');
 
-    const getDataUrl      = () => rpcDataNode.value      === 'custom' ? rpcDataCustom.value      : rpcDataNode.value;
-    const getBroadcastUrl = () => rpcBroadcastNode.value === 'custom' ? rpcBroadcastCustom.value : rpcBroadcastNode.value;
+    const getForumUrl = () => rpcForumNode.value === 'custom' ? rpcForumCustom.value : rpcForumNode.value;
+    const getDataUrl  = () => rpcDataNode.value  === 'custom' ? rpcDataCustom.value  : rpcDataNode.value;
 
-    let client          = new dblurt.Client([getDataUrl()]);
-    let broadcastClient = new dblurt.Client([getBroadcastUrl()]);
+    let forumClient = new dblurt.Client([getForumUrl()]);
+    let client      = new dblurt.Client([getDataUrl()]);
 
     const applyRpcSettings = () => {
+      const fUrl = getForumUrl();
       const dUrl = getDataUrl();
-      const bUrl = getBroadcastUrl();
-      if (!dUrl || !bUrl) return;
-      config.nodes = [dUrl];
-      client          = new dblurt.Client([dUrl]);
-      broadcastClient = new dblurt.Client([bUrl]);
-      localStorage.setItem('bf-rpc-data',      rpcDataNode.value      === 'custom' ? rpcDataCustom.value      : rpcDataNode.value);
-      localStorage.setItem('bf-rpc-broadcast', rpcBroadcastNode.value === 'custom' ? rpcBroadcastCustom.value : rpcBroadcastNode.value);
+      if (!fUrl || !dUrl) return;
+      
+      forumClient = new dblurt.Client([fUrl]);
+      client      = new dblurt.Client([dUrl]);
+      
+      localStorage.setItem('bf-rpc-forum', rpcForumNode.value === 'custom' ? rpcForumCustom.value : rpcForumNode.value);
+      localStorage.setItem('bf-rpc-data',  rpcDataNode.value  === 'custom' ? rpcDataCustom.value  : rpcDataNode.value);
     };
 
     // Close RPC menu on outside click
@@ -357,7 +361,7 @@ createApp({
         if (direction === 'current' && !targetForum) {
           try {
             if (config.communityAccount.startsWith('blurt-')) {
-              const cc = await client.nexus.getCommunity(config.communityAccount);
+              const cc = await forumClient.nexus.getCommunity(config.communityAccount);
               if (cc) {
                 communityInfo.value = { title: cc.title || config.communityAccount, about: cc.about || '' };
                 rawDescription.value = cc.description || '';
@@ -408,7 +412,7 @@ createApp({
           // Roles
           try {
             if (moderators.value.length === 0) {
-              const roles = await client.call('bridge', 'list_community_roles', { community: config.communityAccount });
+              const roles = await forumClient.call('bridge', 'list_community_roles', { community: config.communityAccount });
               if (Array.isArray(roles) && roles.length > 0) moderators.value = roles.map(r => ({ account: r[0], role: r[1], title: r[2] || '' }));
             }
           } catch (e) { console.warn('Bridge list_community_roles error:', e.message); }
@@ -446,7 +450,7 @@ createApp({
 
         if (targetForum && targetForum.targetTags.length > 0) params.tags_any = targetForum.targetTags;
 
-        const rawPosts = await client.call('bridge', 'get_forum_posts', params);
+        const rawPosts = await forumClient.call('bridge', 'get_forum_posts', params);
         if (!rawPosts || rawPosts.length === 0) {
           pag.hasMore = false;
           if (targetForum) targetForum.posts = [];
@@ -715,6 +719,14 @@ createApp({
       loadData("current", forum);
     };
  
+    const markTopicAsRead = (topic) => {
+      if (!topic) return;
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
+      readStatus[`${topic.author}/${topic.permlink}`] = topic.lastActivityPostId || 0;
+      localStorage.setItem('bf_read_status', JSON.stringify(readStatus));
+      topic.isUnread = false;
+    };
+
     const openTopic = (topic) => {
       activeTopic.value = { ...topic, beneficiaries: topic.beneficiaries || [] };
       bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
@@ -722,11 +734,7 @@ createApp({
       loadReplies(topic.author, topic.permlink);
       syncUrl();
 
-      // Mark as read
-      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
-      readStatus[`${topic.author}/${topic.permlink}`] = topic.lastActivityPostId || 0;
-      localStorage.setItem('bf_read_status', JSON.stringify(readStatus));
-      topic.isUnread = false;
+      markTopicAsRead(activeTopic.value);
 
       // Fetch full content in background to get beneficiaries
       if (!topic.beneficiaries || !topic.beneficiaries.length) {
@@ -816,8 +824,8 @@ createApp({
         selectedCommunity.value = 'custom';
         customTag.value = account;
       }
-      client = new dblurt.Client([getDataUrl()]);
-      broadcastClient = new dblurt.Client([getBroadcastUrl()]);
+      forumClient = new dblurt.Client([getForumUrl()]);
+      client      = new dblurt.Client([getDataUrl()]);
       goHome();
       loadData();
     };
@@ -826,12 +834,11 @@ createApp({
       const tag = selectedCommunity.value === 'custom' ? customTag.value.trim() : selectedCommunity.value;
       switchCommunity(tag);
     };
- 
+
     const broadcastKey = async (ops) => {
       const privKey = dblurt.PrivateKey.from(auth.user.key);
-      await broadcastClient.broadcast.sendOperations(ops, privKey);
+      await client.broadcast.sendOperations(ops, privKey);
     };
-
     const broadcastWV = async (ops) => {
       return new Promise((resolve, reject) => {
         if (!window.blurt_keychain) {
@@ -1005,19 +1012,23 @@ createApp({
       bcWait.progress = 0;
       bcWait.label = label || t('waitingForBlock');
 
-      const maxMs = 20000;
-      const pollMs = 2000;
+      const maxMs = 80000;
+      const pollMs = 3000;
       const start = Date.now();
       let lastContent = null;
       let found = false;
+
+      const isReal = (c) => c && c.author && c.body && c.body.trim().length > 0 && c.created !== '1970-01-01T00:00:00';
 
       if (author && permlink) {
         while (Date.now() - start < maxMs) {
           bcWait.progress = Math.min(((Date.now() - start) / maxMs) * 90, 90);
           await new Promise(r => setTimeout(r, pollMs));
+
+          // Check Data Node (the one we use for UI and broadcast)
           try {
             const c = await client.condenser.getContent(author, permlink);
-            if (c && c.author) {
+            if (isReal(c)) {
               lastContent = c;
               if (!pollFn || pollFn(c)) {
                 found = true;
@@ -1025,17 +1036,22 @@ createApp({
               }
             }
           } catch (e) { /* ignore */ }
+
+          if (!found) {
+            bcWait.label = "Waiting for data node synchronization...";
+          }
         }
 
         if (!found) {
-          // Extra attempt for RPC lag as requested
+          // Final desperate check
           bcWait.progress = 92;
-          bcWait.label = "RPC lag... retrying in 5s";
-          await new Promise(r => setTimeout(r, 5000));
+          bcWait.label = "Still syncing... final attempt";
+          await new Promise(r => setTimeout(r, 10000));
           try {
             const c = await client.condenser.getContent(author, permlink);
-            if (c && c.author) {
+            if (isReal(c)) {
               lastContent = c;
+              found = true;
             }
           } catch (e) { /* ignore */ }
         }
@@ -1048,18 +1064,35 @@ createApp({
 
       bcWait.progress = 95;
       if (isTopic && activeTopic.value) {
-        // Surgical update: Refresh replies and main post WITHOUT resetting scroll or view
-        await loadReplies(activeTopic.value.author, activeTopic.value.permlink, true);
+        // Surgical update
+        let retries = 3;
+        while (retries > 0) {
+          await loadReplies(activeTopic.value.author, activeTopic.value.permlink, true);
+          // If we were looking for a specific new comment, check if it's in the replies list
+          if (author && permlink && author !== activeTopic.value.author) {
+            const exists = replies.value.some(r => r.author === author && r.permlink === permlink);
+            if (exists) break;
+            // If not found in replies, wait and retry loadReplies
+            await new Promise(r => setTimeout(r, 3000));
+            retries--;
+          } else {
+            break;
+          }
+        }
         
         if (lastContent && activeTopic.value &&
             lastContent.author === activeTopic.value.author &&
             lastContent.permlink === activeTopic.value.permlink) {
           const refreshed = normalizePost(lastContent);
           activeTopic.value = { ...activeTopic.value, ...refreshed };
+          markTopicAsRead(activeTopic.value);
         } else if (activeTopic.value) {
           try {
             const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
-            if (fresh && fresh.author) activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
+            if (isReal(fresh)) {
+              activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
+              markTopicAsRead(activeTopic.value);
+            }
           } catch (e) { /* ignore */ }
         }
       } else {
@@ -1518,8 +1551,8 @@ createApp({
               if (!config.lockedCommunity) {
                 config.communityAccount = targetCommunity;
                 selectedCommunity.value = targetCommunity;
-                client = new dblurt.Client([getDataUrl()]);
-                broadcastClient = new dblurt.Client([getBroadcastUrl()]);
+                forumClient = new dblurt.Client([getForumUrl()]);
+                client      = new dblurt.Client([getDataUrl()]);
                 // Reload community data (moderators, etc)
                 await loadData();
               }
@@ -1880,7 +1913,7 @@ createApp({
               // Small hack to re-run session logic after migration
               location.reload();
             }
-          } catch (e) {}
+          } catch (e) { /* ignore */ }
         }
       }
 
@@ -1936,7 +1969,7 @@ createApp({
       claimRewards,
       postPreview, replyPreview, saveDraft, clearDraft,
       postImgUpload, replyImgUpload, onPostImagePick, onReplyImagePick, onPostPaste, onReplyPaste,
-      rpcMenuOpen, rpcDataNode, rpcBroadcastNode, rpcDataCustom, rpcBroadcastCustom, applyRpcSettings,
+      rpcMenuOpen, rpcDataNode, rpcForumNode, rpcDataCustom, rpcForumCustom, applyRpcSettings,
       checkNewNotifications,
       getNotifIcon,
       loadTopicContext,
