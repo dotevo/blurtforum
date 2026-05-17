@@ -1003,10 +1003,11 @@ createApp({
       bcWait.progress = 0;
       bcWait.label = label || t('waitingForBlock');
 
-      const maxMs = 15000;
-      const pollMs = 1500;
+      const maxMs = 20000;
+      const pollMs = 2000;
       const start = Date.now();
       let lastContent = null;
+      let found = false;
 
       if (author && permlink) {
         while (Date.now() - start < maxMs) {
@@ -1016,7 +1017,23 @@ createApp({
             const c = await client.condenser.getContent(author, permlink);
             if (c && c.author) {
               lastContent = c;
-              if (!pollFn || pollFn(c)) break;
+              if (!pollFn || pollFn(c)) {
+                found = true;
+                break;
+              }
+            }
+          } catch (e) { /* ignore */ }
+        }
+
+        if (!found) {
+          // Extra attempt for RPC lag as requested
+          bcWait.progress = 92;
+          bcWait.label = "RPC lag... retrying in 5s";
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            const c = await client.condenser.getContent(author, permlink);
+            if (c && c.author) {
+              lastContent = c;
             }
           } catch (e) { /* ignore */ }
         }
