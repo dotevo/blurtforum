@@ -16,6 +16,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -40,7 +41,7 @@
 
   <!-- RPC SETTINGS TRIGGER -->
   <div style="margin-right:6px;">
-    <button class="lang-btn" @click="rpcMenuOpen=true" title="RPC settings">⚙ RPC</button>
+    <button class="lang-btn" @click="rpcMenuOpen=true" title="RPC settings"><i class="fa-solid fa-gear"></i> RPC</button>
   </div>
 
   <!-- RPC SETTINGS MODAL -->
@@ -55,9 +56,10 @@
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:15px;">
           <select v-model="rpcDataNode" @change="applyRpcSettings"
                   style="width:100%; padding:6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:4px;">
+            <option value="https://blurtrpc.dagobert.uk">blurtrpc.dagobert.uk</option>
+            <option value="https://rpc.blurt.blog">rpc.blurt.blog</option>
             <option value="https://rpc.beblurt.com">rpc.beblurt.com</option>
             <option value="https://rpc.drakernoise.com">rpc.drakernoise.com</option>
-            <option value="https://rpc.blurt.world">rpc.blurt.world</option>
             <option value="custom">— {{ t('custom') }} —</option>
           </select>
           <input v-if="rpcDataNode==='custom'" type="text" v-model="rpcDataCustom" placeholder="https://..."
@@ -69,6 +71,7 @@
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
           <select v-model="rpcForumNode" @change="applyRpcSettings"
                   style="width:100%; padding:6px; font-size:12px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); border-radius:4px;">
+            <option value="https://blurtrpc.dagobert.uk">blurtrpc.dagobert.uk</option>
             <option value="https://rpc.drakernoise.com">rpc.drakernoise.com</option>
             <option value="https://rpc.beblurt.com">rpc.beblurt.com</option>
             <option value="custom">— {{ t('custom') }} —</option>
@@ -104,14 +107,14 @@
       </div>
       <div class="user-bar" v-else>
         <button class="btn-hdr" @click="openNotifModal" style="margin-right: 5px; position:relative;">
-          🔔 {{ t('notifications') }}
+          <i class="fa-solid fa-bell"></i> {{ t('notifications') }}
           <span v-if="notifModal.hasNew" style="position:absolute; top:-2px; right:-2px; width:8px; height:8px; background:#ff4400; border-radius:50%; border:1px solid #fff;"></span>
         </button>
         <span style="margin-right: 5px;">
           {{ t('loggedInAs') }}: <b>@{{ auth.user.username }}</b>
           <span class="gs" style="margin-left: 5px;">(VP: {{ auth.user.vp }}%)</span>
         </span>
-        <button class="btn-hdr" @click="logout">{{ t('logout') }}</button>
+        <button class="btn-hdr" @click="logout"><i class="fa-solid fa-right-from-bracket"></i> {{ t('logout') }}</button>
       </div>
     </div>
   </div>
@@ -134,10 +137,10 @@
 <!-- NAV BAR -->
 <div class="nav-bar">
   <div class="nav-links">
-    <a class="nav-link" href="#" @click.prevent="goHome">{{ t('home') }}</a>
-    <a class="nav-link" href="#" @click.prevent="loadData">{{ t('refresh') }}</a>
+    <a class="nav-link" href="#" @click.prevent="goHome"><i class="fa-solid fa-house"></i> {{ t('home') }}</a>
+    <a class="nav-link" href="#" @click.prevent="loadData"><i class="fa-solid fa-arrows-rotate"></i> {{ t('refresh') }}</a>
     <a class="nav-link" href="#" v-if="auth.user && view==='forum' && activeForum"
-       @click.prevent="openNewPostForm()">+ {{ t('newPost') }}</a>
+       @click.prevent="openNewPostForm()"><i class="fa-solid fa-plus"></i> {{ t('newPost') }}</a>
   </div>
   <div class="nav-right gs" style="padding: 8px 10px; font-weight: bold;">{{ config.communityAccount }}</div>
 </div>
@@ -156,7 +159,7 @@
   <!-- REWARD NOTIFICATION -->
   <div v-if="auth.user && auth.user.hasRewards" 
        style="background:var(--accent); color:#fff; padding:10px 15px; margin-bottom:15px; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-    <div style="flex:1">🎁 {{ t('rewardsAvailable') }}: {{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
+    <div style="flex:1"><i class="fa-solid fa-gift"></i> {{ t('rewardsAvailable') }}: {{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
     <button class="btn btn-sm" @click="claimRewards" style="background:#fff; color:var(--accent); border:none">{{ t('claimRewards') }}</button>
   </div>
  
@@ -169,11 +172,23 @@
     <span class="gs">{{ t('fetchingMore') }} ({{ forumPagination.fetchedCount }}/300)</span>
   </div>
 
-  <div v-if="bcWait.active" style="position: fixed; bottom: 0; left: 0; right: 0; z-index: 9999; background: var(--nav-bg); padding: 6px 15px; display: flex; align-items: center; gap: 10px; border-top: 2px solid var(--primary); box-shadow: 0 -2px 8px rgba(0,0,0,0.15);">
-    <div style="flex: 1; height: 5px; background: var(--bg-page); border-radius: 3px; overflow: hidden;">
-      <div :style="{ width: bcWait.progress + '%', height: '100%', background: 'var(--primary)', transition: 'width 0.4s ease' }"></div>
+  <!-- BLOCKCHAIN WAIT QUEUE PANEL -->
+  <div v-if="bcWaitQueue.length > 0" class="bc-queue-panel">
+    <div class="bc-queue-inner">
+      <template v-for="(entry, idx) in (bcQueueExpanded ? bcWaitQueue : bcWaitQueue.slice(0, 3))" :key="entry.id">
+        <div class="bc-queue-item">
+          <div class="bc-queue-bar-wrap">
+            <div class="bc-queue-bar-fill" :style="{ width: entry.progress + '%' }"></div>
+          </div>
+          <span class="bc-queue-label">⛓ {{ entry.label }}</span>
+        </div>
+      </template>
+      <button v-if="bcWaitQueue.length > 3 && !bcQueueExpanded"
+              class="bc-queue-more"
+              @click="bcQueueExpanded = true">
+        +{{ bcWaitQueue.length - 3 }} {{ t('more') || 'more' }} ▾
+      </button>
     </div>
-    <span class="gs" style="white-space: nowrap;">⛓ {{ bcWait.label }}</span>
   </div>
  
   <template v-if="!loading">
@@ -202,8 +217,8 @@
         <tr v-for="forum in cat.forums" :key="forum.id" class="row-hover" @click="openForum(forum)" 
             :style="{ opacity: forum.posts.length === 0 && !forum.hasMore ? 0.7 : 1 }">
           <td class="row1" width="40" align="center" style="position:relative">
-            <span v-if="forumHasUnread(forum)" style="font-size:22px; color:var(--accent);">📂</span>
-            <span v-else style="font-size:20px; opacity:0.5;">📁</span>
+            <span v-if="forumHasUnread(forum)" style="font-size:20px; color:var(--accent);"><i class="fa-solid fa-folder-open"></i></span>
+            <span v-else style="font-size:18px; opacity:0.5;"><i class="fa-solid fa-folder"></i></span>
             <span v-if="forumHasUnread(forum)"
                   style="position:absolute;top:6px;right:6px;width:8px;height:8px;background:#ff4400;border-radius:50%;border:1px solid #fff;display:block;box-shadow:0 0 4px rgba(0,0,0,0.2);"></span>
           </td>
@@ -289,17 +304,17 @@
         <!-- TAG SELECTOR -->
         <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
           <div class="gs" style="font-weight:bold; margin-bottom:8px;">🏷️ {{ t('tags') }}</div>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+          <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px;">
             <div>
               <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('category') }}</label>
-              <select v-model="postForm.selectedTag"
+              <select v-model="postForm.selectedTag" @change="saveDraft"
                       style="padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px;">
                 <option v-for="tag in activeForum.targetTags" :key="tag" :value="tag">#{{ tag }}</option>
               </select>
             </div>
             <div style="flex:1; min-width:150px;">
               <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('customTags') }}</label>
-              <input type="text" v-model="postForm.customTags" placeholder="np. fotografia, plener"
+              <input type="text" v-model="postForm.customTags" placeholder="np. fotografia, plener" @input="saveDraft"
                      style="width:100%; padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px; box-sizing:border-box;">
             </div>
           </div>
@@ -319,31 +334,29 @@
         </div>
         <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
           <div class="gs" style="font-weight:bold; margin-bottom:6px;">👥 {{ t('addBeneficiary') }}</div>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" v-model="postForm.beneficiary.account" :placeholder="t('beneficiaryAccount')"
-                   style="flex:1; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-            <input type="number" v-model="postForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')"
-                   style="width:70px; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-            <span class="gs">%</span>
+          <div class="ben-form-row">
+            <input type="text" v-model="postForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
+            <input type="number" v-model="postForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
+            <span class="gs ben-pct-label">%</span>
           </div>
         </div>
         <div v-if="postForm.error" class="alert alert-error">{{ postForm.error }}</div>
         <div v-if="postForm.success" class="alert alert-success">{{ postForm.success }}</div>
         <div style="display:flex;gap:10px">
           <button class="btn btn-primary" @click="submitPost" :disabled="postForm.loading">
-            <span v-if="postForm.loading" class="spin"></span>{{ t('submit') }}
+            <span v-if="postForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('submit') }}
           </button>
-          <button class="btn btn-ghost" @click="showNewPostForm=false; clearDraft()">{{ t('cancel') }}</button>
+          <button class="btn btn-ghost" @click="showNewPostForm=false; clearDraft()"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
         </div>
       </div>
  
       <table class="forumline post-list-table">
         <tr>
           <td class="thHead" width="30"></td>
-          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
-          <td class="thHead col-author" width="120" align="center">{{ t('author') }}</td>
-          <td class="thHead col-payout" width="100" align="center">{{ t('payout') }}</td>
-          <td class="thHead col-lastpost" width="180" align="center">{{ t('lastPost') }}</td>
+          <td class="thHead" style="text-align:left;padding-left:10px"><i class="fa-solid fa-comments"></i> {{ t('topic') }}</td>
+          <td class="thHead col-author" width="120" align="center"><i class="fa-solid fa-user"></i> {{ t('author') }}</td>
+          <td class="thHead col-payout" width="100" align="center"><i class="fa-solid fa-coins"></i> {{ t('payout') }}</td>
+          <td class="thHead col-lastpost" width="180" align="center"><i class="fa-solid fa-clock"></i> {{ t('lastPost') }}</td>
         </tr>
         <tr v-if="activeForum.posts.length===0">
           <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
@@ -351,7 +364,7 @@
         <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
             class="row-hover" @click="openTopic(post)">
           <td :class="i%2===0?'row1':'row2'" align="center" width="30">
-            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">▲</div>
+            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)"><i class="fa-solid fa-caret-up"></i></div>
           </td>
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
             <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
@@ -367,7 +380,7 @@
             <a href="#" @click.stop.prevent="openProfile(post.author)">@{{ post.author }}</a>
           </td>
           <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
-            <span class="badge payout-link" :class="post.totalPayout>0?'badge-green':'badge-blue'" @click.stop="openPayoutModal(post)">
+            <span class="badge payout-link" :class="post.isPaid?'badge-green':'badge-blue'" @click.stop="openPayoutModal(post)">
               {{ post.payout.toFixed(2) }} B
             </span>
           </td>
@@ -415,19 +428,21 @@
             <div class="post-header">
               <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
               <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-                <span class="badge payout-link" :class="activeTopic.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
-                  {{ activeTopic.payout.toFixed(3) }} BLURT
+                <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
+                  {{ activeTopic.payout.toFixed(2) }} BLURT
                 </span>
                 <template v-if="activeTopic.beneficiaries && activeTopic.beneficiaries.length">
-                  <span class="gs" style="font-size:10px; display:flex; align-items:center; gap:3px;">
-                    👥
+                  <div class="beneficiaries-inline">
+                    <span class="ben-icon">👥</span>
                     <template v-for="(b, bi) in activeTopic.beneficiaries.slice(0,3)" :key="b.account">
-                      <a href="#" @click.prevent="openProfile(b.account)">@{{ b.account }}</a>&nbsp;{{ (b.weight/100).toFixed(0) }}%<template v-if="bi < activeTopic.beneficiaries.slice(0,3).length-1">,</template>
+                      <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
+                      <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
+                      <span v-if="bi < activeTopic.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
                     </template>
-                    <span v-if="activeTopic.beneficiaries.length > 3">…</span>
-                  </span>
+                    <span v-if="activeTopic.beneficiaries.length > 3" class="ben-more">+{{ activeTopic.beneficiaries.length - 3 }}</span>
+                  </div>
                 </template>
-                <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)" style="font-size: 16px;">▲</span>
+                <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)" style="font-size: 16px;"><i class="fa-solid fa-caret-up"></i></span>
                 <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
                 <button v-if="canMute && isPostInCommunity(activeTopic)" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic)">🚫 {{ t('mute') }}</button>
                 </div>            </div>
@@ -473,21 +488,19 @@
               </div>
               <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
                 <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
-                <div style="display:flex; gap:8px; align-items:center;">
-                  <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')"
-                         style="flex:1; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-                  <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')"
-                         style="width:70px; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-                  <span class="gs">%</span>
+                <div class="ben-form-row">
+                  <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
+                  <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
+                  <span class="gs ben-pct-label">%</span>
                 </div>
               </div>
               <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
               <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
               <div style="margin-top:10px;display:flex;gap:10px">
                 <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
-                  <span v-if="replyForm.loading" class="spin"></span>{{ t('send') }}
+                  <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
                 </button>
-                <button class="btn btn-sm" @click="replyTarget=null">{{ t('cancel') }}</button>
+                <button class="btn btn-sm" @click="replyTarget=null"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
               </div>
             </div>
           </td>
@@ -511,7 +524,9 @@
               <div class="post-header">
                 <span class="gs">
                   #{{ i+1 }} · {{ fmtDate(r.created) }}
-                  <span v-if="r._pending" style="display:inline-block; background:#e07b00; color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">⏳ {{ t('sending') }}</span>
+                  <span v-if="r._pending" style="display:inline-block; background:var(--accent); color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i> {{ r._pending === 'sending' ? t('sending') : (r._pending === 'syncing' ? t('syncing') : t('indexing')) }}
+                  </span>
                   <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
                 </span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -519,15 +534,17 @@
                     {{ r.payout.toFixed(3) }} B
                   </span>
                   <template v-if="r.beneficiaries && r.beneficiaries.length">
-                    <span class="gs" style="font-size:10px; display:flex; align-items:center; gap:3px;">
-                      👥
+                    <div class="beneficiaries-inline">
+                      <span class="ben-icon">👥</span>
                       <template v-for="(b, bi) in r.beneficiaries.slice(0,3)" :key="b.account">
-                        <a href="#" @click.prevent="openProfile(b.account)">@{{ b.account }}</a>&nbsp;{{ (b.weight/100).toFixed(0) }}%<template v-if="bi < r.beneficiaries.slice(0,3).length-1">,</template>
+                        <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
+                        <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
+                        <span v-if="bi < r.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
                       </template>
-                      <span v-if="r.beneficiaries.length > 3">…</span>
-                    </span>
+                      <span v-if="r.beneficiaries.length > 3" class="ben-more">+{{ r.beneficiaries.length - 3 }}</span>
+                    </div>
                   </template>
-                  <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)">▲</span>
+                  <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)"><i class="fa-solid fa-caret-up"></i></span>
                   <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
                   <button v-if="canMute && isPostInCommunity(r)" class="btn btn-sm btn-hdr" @click="mutePost(r)">🚫 {{ t('mute') }}</button>
                   </div>              </div>
@@ -582,21 +599,19 @@
                 </div>
                 <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
                   <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
-                  <div style="display:flex; gap:8px; align-items:center;">
-                    <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')"
-                           style="flex:1; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-                    <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')"
-                           style="width:70px; display:block; height:28px; line-height:28px; padding:0 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:11px; border-radius:4px;">
-                    <span class="gs">%</span>
+                  <div class="ben-form-row">
+                    <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
+                    <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
+                    <span class="gs ben-pct-label">%</span>
                   </div>
                 </div>
                 <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
                 <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
                 <div style="margin-top:10px;display:flex;gap:10px">
                   <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
-                    <span v-if="replyForm.loading" class="spin"></span>{{ t('send') }}
+                    <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
                   </button>
-                  <button class="btn btn-sm" @click="replyTarget=null">{{ t('cancel') }}</button>
+                  <button class="btn btn-sm" @click="replyTarget=null"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
                 </div>
               </div>
             </td>
@@ -750,7 +765,7 @@
           <div v-if="loginForm.remember" class="gs" style="color: #DD6900; margin-top: 5px;">{{ t('storageWarning') }}</div>
         </div>
         <button class="btn btn-primary" style="width:100%; padding: 10px;" @click="doKeyLogin" :disabled="loginBusy">
-          <span v-if="loginBusy" class="spin"></span>{{ t('login') }}
+          <span v-if="loginBusy" class="spin"></span><i v-else class="fa-solid fa-key"></i> {{ t('login') }}
         </button>
       </template>
  
@@ -762,7 +777,7 @@
                  style="width:100%;padding:8px;border:1px solid #999;font-family:var(--sans);font-size:12px">
         </div>
         <button class="wv-btn" @click="doWVLogin" :disabled="!wvAvailable||loginBusy">
-          🐋 <span v-if="loginBusy" class="spin"></span>{{ t('loginWV') }}
+          <span v-if="!loginBusy">🐋</span> <span v-if="loginBusy" class="spin"></span>{{ t('loginWV') }}
         </button>
         <div class="gs" style="margin-top:15px;text-align:center; font-weight: bold;">{{ t('wvDesc') }}</div>
       </template>
@@ -788,18 +803,20 @@
           <span class="gs">{{ t('expectedOn') }}: {{ payoutModal.post.payoutDate }}</span>
         </div>
       </div>
-      <div v-if="payoutModal.beneficiaries && payoutModal.beneficiaries.length" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #D1D7DC;">
+      <div v-if="payoutModal.beneficiaries && payoutModal.beneficiaries.length" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid var(--border-main);">
         <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('beneficiaries') }}</div>
-        <div style="border: 1px solid #D1D7DC; background: #fff;">
-          <div v-for="b in payoutModal.beneficiaries" :key="b.account" style="padding: 5px 10px; border-bottom: 1px solid #ECECEC; display: flex; justify-content: space-between; align-items: center;">
+        <div style="border: 1px solid var(--border-main); background: var(--bg-r1); border-radius: 4px; overflow: hidden;">
+          <div v-for="b in payoutModal.beneficiaries" :key="b.account"
+               style="padding: 6px 10px; border-bottom: 1px solid var(--border-main); display: flex; justify-content: space-between; align-items: center;">
             <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(b.account); payoutModal.show=false">@{{ b.account }}</a></span>
             <span class="gs">{{ (b.weight / 100).toFixed(0) }}%</span>
           </div>
         </div>
       </div>
       <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('voters') }} ({{ (payoutModal.post.active_votes || []).length }})</div>
-      <div style="max-height: 200px; overflow-y: auto; border: 1px solid #D1D7DC; background: #fff;">
-        <div v-for="v in payoutModal.post.active_votes" :key="v.voter" style="padding: 5px 10px; border-bottom: 1px solid #ECECEC; display: flex; justify-content: space-between; align-items: center;">
+      <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-main); background: var(--bg-r1); border-radius: 4px; overflow: hidden;">
+        <div v-for="v in payoutModal.post.active_votes" :key="v.voter"
+             style="padding: 5px 10px; border-bottom: 1px solid var(--border-main); display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(v.voter); payoutModal.show=false">@{{ v.voter }}</a></span>
           <span class="gs">
             {{ (v.percent / 100).toFixed(0) }}%
@@ -808,7 +825,7 @@
             </template>
           </span>
         </div>
-        <div v-if="!(payoutModal.post.active_votes || []).length" style="padding: 10px; text-align: center; color: #999;">{{ t('noVotes') }}</div>
+        <div v-if="!(payoutModal.post.active_votes || []).length" style="padding: 10px; text-align: center; color: var(--text-muted);">{{ t('noVotes') }}</div>
       </div>
     </div>
   </div>
@@ -987,6 +1004,89 @@
     <button class="modal-close" @click="imgModal.show=false" 
             style="position: fixed; top: 20px; right: 20px; font-size: 30px; background: rgba(0,0,0,0.5); width: 45px; height: 45px; border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 3100; color: #fff; border: 2px solid #fff;">✕</button>
     <img :src="imgModal.src" style="max-width: 100%; max-height: 98vh; object-fit: contain; box-shadow: 0 0 30px rgba(0,0,0,1);">
+  </div>
+</div>
+
+<!-- VOTE WEIGHT MODAL -->
+<div v-if="voteModal.show" class="modal-overlay" @click.self="voteModal.show=false">
+  <div class="modal-box" style="width: 360px;">
+    <div class="modal-header">
+      <i class="fa-solid fa-caret-up"></i> {{ t('voteWeight') || 'Vote Strength' }}
+      <button class="modal-close" @click="voteModal.show=false">×</button>
+    </div>
+    <div class="modal-body">
+      <!-- Post being voted -->
+      <div v-if="voteModal.post" style="font-size:11px; color:var(--text-muted); margin-bottom:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        ✍ {{ voteModal.post.title || ('@' + voteModal.post.author) }}
+      </div>
+
+      <!-- Slider -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
+          <label class="form-label" style="margin:0;">{{ t('strength') || 'Strength' }}</label>
+          <span style="font-size:20px; font-weight:bold; color:var(--primary);">{{ voteModal.weight }}%</span>
+        </div>
+        <input type="range" min="1" max="100" v-model.number="voteModal.weight"
+               @input="estimateVote(voteModal.weight)"
+               class="vote-slider"
+               :style="`background: linear-gradient(to right, var(--primary) ${voteModal.weight}%, var(--bg-r3) ${voteModal.weight}%)`">
+        <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-muted); margin-top:2px;">
+          <span>1%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+        </div>
+      </div>
+
+      <!-- Estimated values -->
+      <div class="vote-estimate-box">
+        <div v-if="voteModal.estimating" style="text-align:center; padding:10px;">
+          <span class="spin"></span> calculating…
+        </div>
+        <template v-else-if="voteModal.estimatedValue">
+          <div class="vote-est-row">
+            <span>⚡ VP cost</span>
+            <strong>−{{ voteModal.estimatedValue.vpCostPct }}%</strong>
+          </div>
+          <div class="vote-est-row">
+            <span>🔋 VP after</span>
+            <strong>{{ voteModal.estimatedValue.vpAfter }}%</strong>
+          </div>
+          <div v-if="voteModal.estimatedValue.voteValue !== null" class="vote-est-row" style="border-top:1px solid var(--border-main); margin-top:6px; padding-top:6px;">
+            <span>💰 Est. value</span>
+            <strong style="color:var(--primary);">~{{ voteModal.estimatedValue.voteValue }} BLURT</strong>
+          </div>
+          <div v-else class="vote-est-row" style="border-top:1px solid var(--border-main); margin-top:6px; padding-top:6px;">
+            <span>💰 Est. value</span>
+            <span style="opacity:0.5; font-size:10px;">unavailable</span>
+          </div>
+        </template>
+        <div v-else style="text-align:center; font-size:11px; opacity:0.5; padding:8px;">—</div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="btn btn-primary" style="flex:1; padding:8px;" @click="submitVoteConfirmed">
+          <i class="fa-solid fa-caret-up"></i> {{ t('vote') || 'Vote' }} {{ voteModal.weight }}%
+        </button>
+        <button class="btn btn-ghost" @click="voteModal.show=false">{{ t('cancel') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICATION POPUP -->
+<div v-if="statusModal.show" class="modal-overlay" @click.self="statusModal.show=false" style="z-index: 5000;">
+  <div class="modal-box" style="width: 350px;">
+    <div class="modal-header" :style="{ background: statusModal.type === 'error' ? 'var(--error-border)' : (statusModal.type === 'success' ? 'var(--success-border)' : 'var(--primary)') }">
+      <span>{{ statusModal.title }}</span>
+      <button class="modal-close" @click="statusModal.show=false">×</button>
+    </div>
+    <div class="modal-body" style="text-align: center;">
+      <div style="font-size: 40px; margin-bottom: 15px;">
+        <i v-if="statusModal.type === 'success'" class="fa-solid fa-circle-check" style="color: var(--success-border);"></i>
+        <i v-else-if="statusModal.type === 'error'" class="fa-solid fa-circle-xmark" style="color: var(--error-border);"></i>
+        <i v-else class="fa-solid fa-circle-info" style="color: var(--primary);"></i>
+      </div>
+      <div style="font-size: 13px; line-height: 1.5; margin-bottom: 20px;">{{ statusModal.body }}</div>
+      <button class="btn btn-primary" style="width: 100%; padding: 10px;" @click="statusModal.show=false">OK</button>
+    </div>
   </div>
 </div>
 

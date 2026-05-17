@@ -129,10 +129,12 @@ createApp({
     const t = (k) => (TR[lang.value] || TR.en)[k] || k;
 
     const themes = [
-      { id: 'subsilver', label: 'Classic' },
-      { id: 'modern',    label: 'Modern' },
-      { id: 'deepnight', label: 'Night' },
-      { id: 'ocean',     label: 'Ocean' }
+      { id: 'subsilver', label: '🏛 Classic' },
+      { id: 'modern',    label: '📱 Modern' },
+      { id: 'deepnight', label: '🌑 Night' },
+      { id: 'ocean',     label: '🌊 Ocean' },
+      { id: 'forest',    label: '🌿 Forest' },
+      { id: 'midnight',  label: '🌙 Midnight' }
     ];
     const theme = ref(localStorage.getItem('bf-theme') || 'subsilver');
     const setTheme = (id) => {
@@ -143,16 +145,16 @@ createApp({
  
     const config = reactive({
       communityAccount: 'blurt-140455',
-      nodes: ['https://rpc.drakernoise.com'],
+      nodes: ['https://blurtrpc.dagobert.uk', 'https://rpc.blurt.blog', 'https://rpc.beblurt.com', 'https://rpc.drakernoise.com'],
       lockedCommunity: false
     });
 
     // RPC settings
     const rpcMenuOpen  = ref(false);
-    // Nexus/Forum node: drakernoise is the primary supporter of forum API
+    // Nexus/Forum node: dagobert supports both APIs
     const rpcForumNode = ref(localStorage.getItem('bf-rpc-forum') || 'https://rpc.drakernoise.com');
-    // Data/Broadcast node: beblurt is reliable for general operations
-    const rpcDataNode  = ref(localStorage.getItem('bf-rpc-data')  || 'https://rpc.beblurt.com');
+    // Data/Broadcast node: dagobert supports both APIs
+    const rpcDataNode  = ref(localStorage.getItem('bf-rpc-data')  || 'https://blurtrpc.dagobert.uk');
     
     const rpcForumCustom = ref('');
     const rpcDataCustom  = ref('');
@@ -175,12 +177,6 @@ createApp({
       localStorage.setItem('bf-rpc-data',  rpcDataNode.value  === 'custom' ? rpcDataCustom.value  : rpcDataNode.value);
     };
 
-    // Close RPC menu on outside click
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest) return;
-      if (!e.target.closest('[data-rpc-menu]')) rpcMenuOpen.value = false;
-    }, true);
- 
     const view         = ref('index');
     const loading      = ref(true);
     const repliesLoading = ref(false);
@@ -252,6 +248,21 @@ createApp({
     const editModal = reactive({ show: false, loading: false, isPost: false, author: '', permlink: '', title: '', body: '', error: '', success: '', target: null });
 
     const auth = reactive({ user: null });
+    
+    // Generic status modal (success/error/info)
+    const statusModal = reactive({
+      show: false,
+      title: '',
+      body: '',
+      type: 'info' // info, success, error
+    });
+
+    const showStatus = (title, body, type = 'info') => {
+      statusModal.title = title;
+      statusModal.body = body;
+      statusModal.type = type;
+      statusModal.show = true;
+    };
     const showLoginModal = ref(false);
     const loginTab  = ref('key');
     const loginForm = reactive({ username: '', key: '', remember: false });
@@ -270,7 +281,12 @@ createApp({
     const getDraftKey = () => `bf-draft-${config.communityAccount}-${activeForum.value?.id || 'x'}`;
     const saveDraft = () => {
       if (!postForm.title && !postForm.body) return;
-      localStorage.setItem(getDraftKey(), JSON.stringify({ title: postForm.title, body: postForm.body }));
+      localStorage.setItem(getDraftKey(), JSON.stringify({
+        title: postForm.title,
+        body: postForm.body,
+        selectedTag: postForm.selectedTag,
+        customTags: postForm.customTags
+      }));
     };
     const clearDraft = () => {
       localStorage.removeItem(getDraftKey());
@@ -283,6 +299,8 @@ createApp({
           const p = JSON.parse(d);
           postForm.title = p.title || '';
           postForm.body = p.body || '';
+          if (p.selectedTag) postForm.selectedTag = p.selectedTag;
+          if (p.customTags)  postForm.customTags  = p.customTags;
           postForm.hasDraft = true;
         }
       } catch (e) { /* ignore */ }
@@ -512,6 +530,15 @@ createApp({
       const currentActivityId = p.last_activity_post_id || p.post_id || 0;
       const isUnread = currentActivityId > lastReadId;
 
+      // Payout status logic: on Blurt content pays out after 7 days.
+      // A post is considered paid if cashout_time has passed or is 1970 (indicating it's already cashed out).
+      const createdDate = new Date(p.created.endsWith('Z') ? p.created : p.created + 'Z');
+      const now = new Date();
+      const ageDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+      
+      let isPaid = total > 0 || ageDays > 7.5; // Use 7.5 to be safe with timezones
+      if (p.cashout_time && p.cashout_time.startsWith('1970')) isPaid = true;
+
       return {
         author: p.author,
         permlink: p.permlink,
@@ -524,6 +551,7 @@ createApp({
         lastAuthor: p.last_activity_author,
         lastActivityPostId: currentActivityId,
         isUnread,
+        isPaid,
         replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
         parent_permlink: p.parent_permlink || '',
@@ -628,7 +656,8 @@ createApp({
     const loadReplies = async (author, permlink, keepState = false) => {
       if (!keepState) {
         repliesLoading.value = true;
-        replies.value = [];
+        // Keep pending comments even when clearing the list for refresh
+        replies.value = replies.value.filter(r => r._pending);
         replyTarget.value = null;
       }
       const flat = [];
@@ -661,7 +690,14 @@ createApp({
         }
       };
       await recurse(author, permlink, 1);
-      replies.value = flat.sort((a, b) => new Date(a.created) - new Date(b.created));
+      
+      // Preserve pending comments that aren't on the server yet
+      const pendingOnes = replies.value.filter(r => r._pending);
+      const serverIds = new Set(flat.map(r => (r.author + '/' + r.permlink).toLowerCase()));
+      const stillPending = pendingOnes.filter(p => !serverIds.has((p.author + '/' + p.permlink).toLowerCase()));
+      
+      replies.value = [...flat, ...stillPending].sort((a, b) => new Date(a.created) - new Date(b.created));
+      
       if (!keepState) {
         repliesLoading.value = false;
         if (targetNotifPermlink.value) {
@@ -978,23 +1014,35 @@ createApp({
         if (!acc) return;
 
         if (parsePayout(acc.reward_blurt_balance) === 0 && parsePayout(acc.reward_vesting_balance) === 0) {
+          showStatus(t('claimRewards'), t('noRewardsToClaim'), 'info');
           return;
         }
+
+        const fmtAsset = (val, unit) => {
+          if (!val) return unit === 'BLURT' ? '0.000 BLURT' : '0.000000 VESTS';
+          if (val.includes(' ')) return val; // already formatted
+          const num = parseFloat(val) || 0;
+          return unit === 'BLURT' ? num.toFixed(3) + ' BLURT' : num.toFixed(6) + ' VESTS';
+        };
 
         const ops = [
           ['claim_reward_balance', {
             account: auth.user.username,
-            reward_blurt: acc.reward_blurt_balance,
-            reward_vesting: acc.reward_vesting_balance
+            reward_blurt: fmtAsset(acc.reward_blurt_balance, 'BLURT'),
+            reward_vests: fmtAsset(acc.reward_vesting_balance, 'VESTS')
           }]
         ];
         
+        // Use 'posting' key for claiming rewards
         await broadcast(ops);
+        
         auth.user.rewardBlurt = '0.000 BLURT';
         auth.user.rewardVesting = '0.000000 VESTS';
         auth.user.hasRewards = false;
+        showStatus(t('claimRewards'), t('claimSuccess'), 'success');
       } catch (err) {
         console.error('Claim rewards error:', err);
+        showStatus(t('claimRewards'), (t('claimError') || 'Error claiming rewards: ') + (err.message || err), 'error');
       }
     };
  
@@ -1005,14 +1053,17 @@ createApp({
       replyForm.success = '';
     };
 
-    const bcWait = reactive({ active: false, progress: 0, label: '' });
+    // ── Blockchain wait queue ───────────────────────────────────────────────
+    const bcWaitQueue = ref([]);
+    const bcQueueExpanded = ref(false);
+    let _bcId = 0;
 
     const waitAndReload = async (isTopic, author = null, permlink = null, pollFn = null, label = null) => {
-      bcWait.active = true;
-      bcWait.progress = 0;
-      bcWait.label = label || t('waitingForBlock');
+      const id = ++_bcId;
+      const entry = reactive({ id, label: label || t('waitingForBlock'), progress: 0 });
+      bcWaitQueue.value.push(entry);
 
-      const maxMs = 80000;
+      const maxMs = 90000;
       const pollMs = 3000;
       const start = Date.now();
       let lastContent = null;
@@ -1020,12 +1071,19 @@ createApp({
 
       const isReal = (c) => c && c.author && c.body && c.body.trim().length > 0 && c.created !== '1970-01-01T00:00:00';
 
+      // True when we're waiting for a comment that should appear in replies (not the root post itself)
+      const isWaitingForReply = author && permlink && isTopic && activeTopic.value &&
+        !(author === activeTopic.value.author && permlink === activeTopic.value.permlink);
+
       if (author && permlink) {
+        // Stage 2: syncing (Wait for it to appear in basic getContent)
+        const opt = replies.value.find(r => r._pending && r.author === author && r.permlink === permlink);
+        if (opt) opt._pending = 'syncing';
+
         while (Date.now() - start < maxMs) {
-          bcWait.progress = Math.min(((Date.now() - start) / maxMs) * 90, 90);
+          entry.progress = Math.min(((Date.now() - start) / maxMs) * 85, 85);
           await new Promise(r => setTimeout(r, pollMs));
 
-          // Check Data Node (the one we use for UI and broadcast)
           try {
             const c = await client.condenser.getContent(author, permlink);
             if (isReal(c)) {
@@ -1038,71 +1096,94 @@ createApp({
           } catch (e) { /* ignore */ }
 
           if (!found) {
-            bcWait.label = "Waiting for data node synchronization...";
+            entry.label = t('syncingWithBlockchain') || 'Waiting for data node synchronization…';
           }
         }
 
+        // Stage 3: indexing (Wait for it to appear in replies list/RPC index)
+        if (found && opt) opt._pending = 'indexing';
+        
         if (!found) {
-          // Final desperate check
-          bcWait.progress = 92;
-          bcWait.label = "Still syncing... final attempt";
+          entry.progress = 88;
+          entry.label = 'Still syncing… final attempt';
           await new Promise(r => setTimeout(r, 10000));
           try {
             const c = await client.condenser.getContent(author, permlink);
-            if (isReal(c)) {
-              lastContent = c;
-              found = true;
-            }
+            if (isReal(c)) { lastContent = c; found = true; }
           } catch (e) { /* ignore */ }
         }
       } else {
+        // No content to poll – just wait for a couple of blocks
         while (Date.now() - start < 4000) {
-          bcWait.progress = Math.min(((Date.now() - start) / 4000) * 90, 90);
+          entry.progress = Math.min(((Date.now() - start) / 4000) * 85, 85);
           await new Promise(r => setTimeout(r, 300));
         }
       }
 
-      bcWait.progress = 95;
+      entry.progress = 92;
+
       if (isTopic && activeTopic.value) {
-        // Surgical update
-        let retries = 3;
-        while (retries > 0) {
+        // For a new reply: keep retrying loadReplies until the comment actually appears
+        // in getContentReplies (RPC replication lag can be several seconds after getContent confirms it)
+        const maxReplyRetries = isWaitingForReply ? 15 : 1;
+        const retryDelayMs = 4000;
+        let retries = 0;
+
+        while (retries < maxReplyRetries) {
           await loadReplies(activeTopic.value.author, activeTopic.value.permlink, true);
-          // If we were looking for a specific new comment, check if it's in the replies list
-          if (author && permlink && author !== activeTopic.value.author) {
-            const exists = replies.value.some(r => r.author === author && r.permlink === permlink);
-            if (exists) break;
-            // If not found in replies, wait and retry loadReplies
-            await new Promise(r => setTimeout(r, 3000));
-            retries--;
+          entry.progress = 92 + Math.min((retries / maxReplyRetries) * 6, 6);
+
+          if (isWaitingForReply) {
+            // MUST check for non-pending version to confirm indexing (case-insensitive)
+            const targetId = (author + '/' + permlink).toLowerCase();
+            const existsOnServer = replies.value.some(r => !r._pending && (r.author + '/' + r.permlink).toLowerCase() === targetId);
+            
+            if (existsOnServer) break;
+            
+            if (retries < maxReplyRetries - 1) {
+              entry.label = `${t('indexing') || 'Indexing…'} (${retries + 1}/${maxReplyRetries})`;
+            }
+            retries++;
+            await new Promise(r => setTimeout(r, retryDelayMs));
           } else {
             break;
           }
         }
         
-        if (lastContent && activeTopic.value &&
-            lastContent.author === activeTopic.value.author &&
-            lastContent.permlink === activeTopic.value.permlink) {
-          const refreshed = normalizePost(lastContent);
-          activeTopic.value = { ...activeTopic.value, ...refreshed };
-          markTopicAsRead(activeTopic.value);
-        } else if (activeTopic.value) {
-          try {
-            const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
-            if (isReal(fresh)) {
-              activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
-              markTopicAsRead(activeTopic.value);
-            }
-          } catch (e) { /* ignore */ }
+        // Final fallback: if we timed out, remove the pending status so it doesn't hang forever
+        const finalCheckId = (author + '/' + permlink).toLowerCase();
+        const pendingRef = replies.value.find(r => r._pending && (r.author + '/' + r.permlink).toLowerCase() === finalCheckId);
+        if (pendingRef) {
+          // If we never found it on server after 15 retries, we still keep it but stop the 'indexing' animation
+          // or we can remove it if we suspect it failed. Better to just stop the animation.
+          delete pendingRef._pending; 
         }
-      } else {
-        await loadData();
       }
-      bcWait.progress = 100;
-      await new Promise(r => setTimeout(r, 200));
-      bcWait.active = false;
-      bcWait.progress = 0;
+
+      // Refresh the root post content (vote counts etc.)
+      if (lastContent && activeTopic.value &&
+          lastContent.author === activeTopic.value.author &&
+          lastContent.permlink === activeTopic.value.permlink) {
+        activeTopic.value = { ...activeTopic.value, ...normalizePost(lastContent) };
+        markTopicAsRead(activeTopic.value);
+      } else if (activeTopic.value) {
+        try {
+          const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
+          if (isReal(fresh)) {
+            activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
+            markTopicAsRead(activeTopic.value);
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      entry.progress = 100;
+      await new Promise(r => setTimeout(r, 800));
+      const idx = bcWaitQueue.value.findIndex(e => e.id === id);
+      if (idx >= 0) bcWaitQueue.value.splice(idx, 1);
+      // Collapse the expand state once queue empties
+      if (bcWaitQueue.value.length === 0) bcQueueExpanded.value = false;
     };
+    // ───────────────────────────────────────────────────────────────────────
  
     const submitReply = async () => {
       if (!auth.user || !replyTarget.value) return;
@@ -1168,14 +1249,15 @@ createApp({
           vote_count:     0, active_votes: [], net_rshares: 0,
           beneficiaries:  [],
           _qOpen:         false,
-          _pending:       true
+          _pending:       'sending'
         };
         replies.value = [...replies.value, optimistic];
         // ──────────────────────────────────────────────────────────────────
 
         replyForm.body = '';
         replyTarget.value = null;
-        waitAndReload(true, auth.user.username, op[1].permlink);
+        
+        await waitAndReload(true, auth.user.username, op[1].permlink);
       } catch (err) {
         console.error('Reply error:', err);
         replyForm.error = t('replyError') + ' (' + (err.message || '') + ')';
@@ -1242,41 +1324,94 @@ createApp({
 
       try {
         await broadcast([op, options]);
-        postForm.success = t('postSuccess');
         postForm.title = '';
         postForm.body = '';
         clearDraft();
         showNewPostForm.value = false;
+        showStatus(t('newPost'), t('postSuccess'), 'success');
         waitAndReload(false, auth.user.username, op[1].permlink);
       } catch (err) {
         console.error('Post error:', err);
-        postForm.error = t('postError') + ' (' + (err.message || '') + ')';
+        showStatus(t('newPost'), (t('postError') || 'Error: ') + (err.message || err), 'error');
       }
       postForm.loading = false;
     };
 
-    const submitVote = async (post) => {
-      if (!auth.user) { openLoginModal(); return; }
-      
-      // Check if post is older than 7 days
-      const created = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z').getTime();
-      const isOld = (Date.now() - created) > (7 * 24 * 60 * 60 * 1000);
+    // ── Vote weight modal ──────────────────────────────────────────────────
+    const voteModal = reactive({
+      show: false,
+      post: null,
+      weight: parseInt(localStorage.getItem('bf-vote-weight') || '100'),
+      estimatedValue: null,    // { vpCostPct, vpAfter, voteValue }
+      estimating: false
+    });
 
-      if (isOld) {
-        oldContentModal.author = post.author;
-        oldContentModal.permlink = post.permlink;
-        oldContentModal.body = 'Supporting original content by @' + post.author;
-        oldContentModal.status = '';
-        oldContentModal.loading = false;
-        oldContentModal.show = true;
-        return;
-      }
+    const estimateVote = async (weight) => {
+      if (!auth.user) return;
+      voteModal.estimating = true;
+      voteModal.estimatedValue = null;
+      try {
+        const accounts = await client.condenser.getAccounts([auth.user.username]);
+        const acc = accounts && accounts[0];
+        if (!acc) return;
 
-      let weight = 10000;
-      if (hasVoted(post)) {
-        if (!confirm(t('confirmUnvote'))) return;
-        weight = 0;
+        // Current raw VP (0-10000)
+        const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
+        const delta = (Date.now() - lastVoteTime) / 1000;
+        const rawVP = Math.min(acc.voting_power + Math.floor(10000 * delta / 432000), 10000);
+
+        // VP cost: Blurt uses same formula as Steem/Hive
+        // used_power = ceil(rawVP * weight / 10000 / 20)  (20 full votes/day)
+        const voteWeight = weight * 100; // 0-10000
+        const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 20);
+        const vpAfterRaw = rawVP - usedPower;
+        const vpCostPct = (usedPower / 100).toFixed(2);
+        const vpAfter   = (vpAfterRaw / 100).toFixed(2);
+
+        // Estimate BLURT value
+        let voteValue = null;
+        try {
+          const fund = await client.condenser.call('condenser_api', 'get_reward_fund', ['post']);
+          if (fund) {
+            const vestingShares    = parseFloat(acc.vesting_shares);
+            const receivedVesting  = parseFloat(acc.received_vesting_shares || 0);
+            const delegatedVesting = parseFloat(acc.delegated_vesting_shares || 0);
+            const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
+
+            // rshares = effective_vests * used_power / 10000
+            const rshares       = effectiveVests * usedPower / 10000;
+            const rewardBalance = parseFloat(fund.reward_balance);
+            const recentClaims  = parseFloat(fund.recent_claims);
+            if (recentClaims > 0) {
+              voteValue = (rshares / recentClaims) * rewardBalance;
+            }
+          }
+        } catch (e) { /* reward fund unavailable */ }
+
+        voteModal.estimatedValue = {
+          vpCostPct,
+          vpAfter,
+          voteValue: voteValue !== null ? voteValue.toFixed(4) : null
+        };
+      } catch (e) {
+        console.warn('Vote estimate error:', e);
       }
+      voteModal.estimating = false;
+    };
+
+    const openVoteModal = (post) => {
+      voteModal.post = post;
+      voteModal.show = true;
+      // Estimate with current weight
+      estimateVote(voteModal.weight);
+    };
+
+    const submitVoteConfirmed = async () => {
+      if (!auth.user || !voteModal.post) return;
+      const post   = voteModal.post;
+      const weight = Math.min(Math.max(Math.round(voteModal.weight), 1), 100) * 100; // 0-10000
+      localStorage.setItem('bf-vote-weight', voteModal.weight);
+      voteModal.show = false;
 
       const op = ['vote', {
         voter: auth.user.username,
@@ -1286,24 +1421,55 @@ createApp({
       }];
       try {
         await broadcast([op]);
-        const voter = auth.user.username;
-        const isUnvote = weight === 0;
+        const voter    = auth.user.username;
         waitAndReload(
           view.value === 'topic',
           post.author,
           post.permlink,
-          (c) => {
-            const votes = c.active_votes || [];
-            return isUnvote
-              ? !votes.some(v => v.voter === voter && v.percent > 0)
-              : votes.some(v => v.voter === voter && v.percent > 0);
-          },
+          (c) => (c.active_votes || []).some(v => v.voter === voter && v.percent > 0),
           t('syncingWithBlockchain')
         );
       } catch (err) {
         console.error('Vote error:', err);
       }
     };
+
+    const submitVote = async (post) => {
+      if (!auth.user) { openLoginModal(); return; }
+
+      // Check if post is older than 7 days → support modal
+      const created = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z').getTime();
+      const isOld   = (Date.now() - created) > (7 * 24 * 60 * 60 * 1000);
+      if (isOld) {
+        oldContentModal.author   = post.author;
+        oldContentModal.permlink = post.permlink;
+        oldContentModal.body     = 'Supporting original content by @' + post.author;
+        oldContentModal.status   = '';
+        oldContentModal.loading  = false;
+        oldContentModal.show     = true;
+        return;
+      }
+
+      // Unvote: quick confirm then broadcast
+      if (hasVoted(post)) {
+        if (!confirm(t('confirmUnvote'))) return;
+        const op = ['vote', { voter: auth.user.username, author: post.author, permlink: post.permlink, weight: 0 }];
+        try {
+          await broadcast([op]);
+          const voter = auth.user.username;
+          waitAndReload(
+            view.value === 'topic', post.author, post.permlink,
+            (c) => !(c.active_votes || []).some(v => v.voter === voter && v.percent > 0),
+            t('syncingWithBlockchain')
+          );
+        } catch (err) { console.error('Unvote error:', err); }
+        return;
+      }
+
+      // New vote → open weight modal
+      openVoteModal(post);
+    };
+    // ───────────────────────────────────────────────────────────────────────
 
     const submitSupportComment = async () => {
       if (!auth.user || !oldContentModal.author) return;
@@ -1430,13 +1596,11 @@ createApp({
     };
 
     const openPayoutModal = async (post) => {
-      const isPaid = post.totalPayout > 0;
       const dateObj = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z');
       dateObj.setDate(dateObj.getDate() + 7);
       
       payoutModal.post = {
         ...post,
-        isPaid,
         payoutDate: dateObj.toLocaleString()
       };
       payoutModal.beneficiaries = [];
@@ -1964,8 +2128,10 @@ createApp({
       pinModal, handlePinSubmit,
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
-      bcWait,
+      voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
+      bcWaitQueue, bcQueueExpanded,
       imgModal, openImgModal,
+      statusModal, showStatus,
       claimRewards,
       postPreview, replyPreview, saveDraft, clearDraft,
       postImgUpload, replyImgUpload, onPostImagePick, onReplyImagePick, onPostPaste, onReplyPaste,
