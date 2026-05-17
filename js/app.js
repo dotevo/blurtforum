@@ -621,10 +621,12 @@ createApp({
       }
     };
  
-    const loadReplies = async (author, permlink) => {
-      repliesLoading.value = true;
-      replies.value = [];
-      replyTarget.value = null;
+    const loadReplies = async (author, permlink, keepState = false) => {
+      if (!keepState) {
+        repliesLoading.value = true;
+        replies.value = [];
+        replyTarget.value = null;
+      }
       const flat = [];
       const recurse = async (pAuthor, pPermlink, depth) => {
         let results;
@@ -656,20 +658,20 @@ createApp({
       };
       await recurse(author, permlink, 1);
       replies.value = flat.sort((a, b) => new Date(a.created) - new Date(b.created));
-      repliesLoading.value = false;
-
-      if (targetNotifPermlink.value) {
-        nextTick(() => {
-          const el = document.getElementById('post-' + targetNotifPermlink.value);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('highlighted-post');
-            setTimeout(() => { el.classList.remove('highlighted-post'); }, 3000);
-          }
-          targetNotifPermlink.value = null;
-        });
-      }
-    };
+      if (!keepState) {
+        repliesLoading.value = false;
+        if (targetNotifPermlink.value) {
+          nextTick(() => {
+            const el = document.getElementById('post-' + targetNotifPermlink.value);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('highlighted-post');
+              setTimeout(() => { el.classList.remove('highlighted-post'); }, 3000);
+            }
+            targetNotifPermlink.value = null;
+          });
+        }
+      }    };
  
     const syncUrl = () => {
       const params = new URLSearchParams();
@@ -1046,15 +1048,15 @@ createApp({
 
       bcWait.progress = 95;
       if (isTopic && activeTopic.value) {
-        await loadReplies(activeTopic.value.author, activeTopic.value.permlink);
-        // Refresh main post too if we polled it
+        // Surgical update: Refresh replies and main post WITHOUT resetting scroll or view
+        await loadReplies(activeTopic.value.author, activeTopic.value.permlink, true);
+        
         if (lastContent && activeTopic.value &&
             lastContent.author === activeTopic.value.author &&
             lastContent.permlink === activeTopic.value.permlink) {
           const refreshed = normalizePost(lastContent);
           activeTopic.value = { ...activeTopic.value, ...refreshed };
         } else if (activeTopic.value) {
-          // Always re-fetch main post when in topic view
           try {
             const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
             if (fresh && fresh.author) activeTopic.value = { ...activeTopic.value, ...normalizePost(fresh) };
