@@ -349,7 +349,14 @@ createApp({
       return date.toLocaleDateString();
     };
 
-    const forumHasUnread = (forum) => forum.posts.slice(0, 5).some(p => p.isUnread);
+    const forumHasUnread = (forum) => {
+      const topPosts = forum.posts.slice(0, 5);
+      if (topPosts.length === 0) return false;
+      // If last post is by our user, it's read
+      if (topPosts[0].author === auth.user?.username) return false;
+      // If any of the top 5 are unread, category is unread
+      return topPosts.some(p => p.isUnread);
+    };
     const renderMD = renderMarkdown;
     const isNestedReply = (r) => {
       if (!activeTopic.value) return false;
@@ -523,20 +530,20 @@ createApp({
       const total = parsePayout(p.total_payout_value || 0);
       const bridgePayout = typeof p.payout === 'number' ? p.payout : parsePayout(p.payout || 0);
 
-      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
-      const lastReadId = readStatus[`${p.author}/${p.permlink}`] || 0;
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
+      const isRead = !!readStatus[`${p.author}/${p.permlink}`];
       
-      // Use last_activity_post_id if available, otherwise post_id, otherwise 0
-      const currentActivityId = p.last_activity_post_id || p.post_id || 0;
-      const isUnread = currentActivityId > lastReadId;
+      const isUnread = !isRead && p.author !== auth.user?.username;
+
+      // Muting logic
+      const isMuted = p.stats?.is_muted || p.stats?.hide || false;
 
       // Payout status logic: on Blurt content pays out after 7 days.
-      // A post is considered paid if cashout_time has passed or is 1970 (indicating it's already cashed out).
       const createdDate = new Date(p.created.endsWith('Z') ? p.created : p.created + 'Z');
       const now = new Date();
       const ageDays = (now - createdDate) / (1000 * 60 * 60 * 24);
       
-      let isPaid = total > 0 || ageDays > 7.5; // Use 7.5 to be safe with timezones
+      let isPaid = total > 0 || ageDays > 7.5; 
       if (p.cashout_time && p.cashout_time.startsWith('1970')) isPaid = true;
 
       return {
@@ -545,12 +552,13 @@ createApp({
         title: p.title || '(no title)',
         body: p.body,
         created: p.created,
-        url: p.url, // Keep URL for context parsing
-        category: p.category, // Community/Category
+        url: p.url, 
+        category: p.category, 
         lastActivity: p.last_activity || p.created,
         lastAuthor: p.last_activity_author,
-        lastActivityPostId: currentActivityId,
         isUnread,
+        isRead,
+        isMuted,
         isPaid,
         replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
@@ -601,6 +609,9 @@ createApp({
       slice.forEach(p => {
         const post = normalizePost(p);
         bodyCache[`${p.author}/${p.permlink}`] = p.body;
+
+        // Skip muted posts if not a moderator/admin
+        if (post.isMuted && !canMute.value) return;
 
         if (targetForum) {
            if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
@@ -757,9 +768,10 @@ createApp({
  
     const markTopicAsRead = (topic) => {
       if (!topic) return;
-      const readStatus = JSON.parse(localStorage.getItem('bf_read_status') || '{}');
-      readStatus[`${topic.author}/${topic.permlink}`] = topic.lastActivityPostId || 0;
-      localStorage.setItem('bf_read_status', JSON.stringify(readStatus));
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
+      readStatus[`${topic.author}/${topic.permlink}`] = 1;
+      localStorage.setItem('bf_read_status_v2', JSON.stringify(readStatus));
+      topic.isRead = true;
       topic.isUnread = false;
     };
 
@@ -1361,9 +1373,9 @@ createApp({
         const rawVP = Math.min(acc.voting_power + Math.floor(10000 * delta / 432000), 10000);
 
         // VP cost: Blurt uses same formula as Steem/Hive
-        // used_power = ceil(rawVP * weight / 10000 / 20)  (20 full votes/day)
+        // used_power = ceil(rawVP * weight / 10000 / 50)  (50 full votes/day regen equivalent)
         const voteWeight = weight * 100; // 0-10000
-        const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 20);
+        const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 50);
         const vpAfterRaw = rawVP - usedPower;
         const vpCostPct = (usedPower / 100).toFixed(2);
         const vpAfter   = (vpAfterRaw / 100).toFixed(2);
@@ -1533,7 +1545,7 @@ createApp({
       
       const json = JSON.stringify([
         mute ? 'mutePost' : 'unmutePost',
-        { community: config.communityAccount, author: post.author, permlink: post.permlink, notes: 'Muted via BlurtForum' }
+        { community: config.communityAccount, account: post.author, author: post.author, permlink: post.permlink, notes: 'Muted via BlurtForum' }
       ]);
       
       const op = ['custom_json', {
@@ -1960,11 +1972,14 @@ createApp({
         const allForums = [];
         forumStructure.value.forEach(cat => cat.forums.forEach(f => allForums.push(f)));
         allForums.forEach(async (f) => {
-          const p = { community: config.communityAccount, limit: 5, sort: 'activity' };
+          const p = { community: config.communityAccount, limit: 10, sort: 'activity' };
           if (f.targetTags.length > 0) p.tags_any = f.targetTags;
           try {
             const raw = await client.call('bridge', 'get_forum_posts', p);
-            if (raw && raw.length > 0) f.posts = raw.map(normalizePost);
+            if (raw && raw.length > 0) {
+              const normalized = raw.map(normalizePost);
+              f.posts = normalized.filter(post => !post.isMuted || canMute.value).slice(0, 5);
+            }
           } catch (e) { /* ignore */ }
         });
       } else if (requestedView === 'forum' && requestedForumId) {

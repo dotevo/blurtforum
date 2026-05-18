@@ -362,11 +362,13 @@
           <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
         </tr>
         <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
-            class="row-hover" @click="openTopic(post)">
+            class="row-hover" @click="openTopic(post)"
+            :style="{ opacity: post.isMuted ? 0.4 : 1, backgroundColor: post.isMuted ? 'var(--bg-r3)' : 'inherit' }">
           <td :class="i%2===0?'row1':'row2'" align="center" width="30">
             <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)"><i class="fa-solid fa-caret-up"></i></div>
           </td>
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
+            <span v-if="post.isMuted" style="margin-right:5px; color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
             <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
             <span v-else style="display:inline-block; width:8px; height:8px; background:#ccc; border-radius:50%; margin-right:8px;" title="Read"></span>
             <a href="#" @click.stop.prevent="openTopic(post)" 
@@ -421,13 +423,15 @@
         <button class="btn btn-sm btn-hdr" @click="loadTopicContext">{{ t('loadFullThread') }}</button>
       </div>
 
-      <table :id="'post-' + activeTopic.permlink" class="forumline topic-table" style="margin-bottom:5px">
+      <table :id="'post-' + activeTopic.permlink" class="forumline topic-table" style="margin-bottom:5px"
+             :style="{ opacity: activeTopic.isMuted ? 0.5 : 1 }">
         <tr>
           <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></b></td>
           <td class="row3">
             <div class="post-header">
               <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
               <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <span v-if="activeTopic.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
                 <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
                   {{ activeTopic.payout.toFixed(2) }} BLURT
                 </span>
@@ -444,7 +448,10 @@
                 </template>
                 <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)" style="font-size: 16px;"><i class="fa-solid fa-caret-up"></i></span>
                 <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
-                <button v-if="canMute && isPostInCommunity(activeTopic)" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic)">🚫 {{ t('mute') }}</button>
+                <template v-if="canMute && isPostInCommunity(activeTopic)">
+                  <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic, true)">🚫 {{ t('mute') }}</button>
+                  <button v-else class="btn btn-sm btn-hdr" @click="mutePost(activeTopic, false)">🔓 {{ t('unmute') }}</button>
+                </template>
                 </div>            </div>
           </td>
         </tr>
@@ -517,7 +524,8 @@
         </div>
         <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
  
-        <table :id="'post-' + r.permlink" class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px">
+        <table :id="'post-' + r.permlink" class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px"
+               :style="{ opacity: r.isMuted ? 0.5 : 1 }">
           <tr>
             <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
             <td class="row3">
@@ -530,6 +538,7 @@
                   <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
                 </span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                  <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
                   <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
                     {{ r.payout.toFixed(3) }} B
                   </span>
@@ -546,7 +555,10 @@
                   </template>
                   <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)"><i class="fa-solid fa-caret-up"></i></span>
                   <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
-                  <button v-if="canMute && isPostInCommunity(r)" class="btn btn-sm btn-hdr" @click="mutePost(r)">🚫 {{ t('mute') }}</button>
+                  <template v-if="canMute && isPostInCommunity(r)">
+                    <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(r, true)">🚫 {{ t('mute') }}</button>
+                    <button v-else class="btn btn-sm btn-hdr" @click="mutePost(r, false)">🔓 {{ t('unmute') }}</button>
+                  </template>
                   </div>              </div>
             </td>
           </tr>
