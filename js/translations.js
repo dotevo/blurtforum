@@ -149,6 +149,10 @@ const TR = {
     strength: "Strength",
     vote: "Vote",
     muted: "Muted",
+    vpCost: "VP cost",
+    vpAfter: "VP after",
+    estValue: "Est. value",
+    voteFee: "Vote fee",
   },
   pl: {
     home: "Strona główna",
@@ -300,6 +304,10 @@ const TR = {
     strength: "Siła",
     vote: "Głosuj",
     muted: "Ukryty",
+    vpCost: "Koszt VP",
+    vpAfter: "VP po głosie",
+    estValue: "Szac. wartość",
+    voteFee: "Opłata za głos",
   },
   eo: {
     home: "Hejmo",
@@ -450,5 +458,9 @@ const TR = {
     strength: "Forto",
     vote: "Voĉdoni",
     muted: "Kaŝita",
+    vpCost: "Kosto de VP",
+    vpAfter: "VP post voĉdono",
+    estValue: "Taksa valoro",
+    voteFee: "Kosto de voĉdono",
   },
 };

@@ -158,9 +158,9 @@
 
   <!-- REWARD NOTIFICATION -->
   <div v-if="auth.user && auth.user.hasRewards" 
-       style="background:var(--accent); color:#fff; padding:10px 15px; margin-bottom:15px; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+       style="background:var(--accent); color:var(--bg-page); padding:10px 15px; margin-bottom:15px; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
     <div style="flex:1"><i class="fa-solid fa-gift"></i> {{ t('rewardsAvailable') }}: {{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
-    <button class="btn btn-sm" @click="claimRewards" style="background:#fff; color:var(--accent); border:none">{{ t('claimRewards') }}</button>
+    <button class="btn btn-sm" @click="claimRewards" style="background:var(--bg-white); color:var(--accent); border:none">{{ t('claimRewards') }}</button>
   </div>
  
   <div v-if="loading" class="loader"><span class="spin"></span>{{ t('loading') }} {{ config.communityAccount }}…</div>
@@ -234,7 +234,7 @@
               <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
             </template>
             <div v-else-if="loading" class="spin" style="width:16px; height:16px; border-width:2px; margin:0 auto;"></div>
-            <span v-else class="gs" style="color: #999;">—</span>
+            <span v-else class="gs" style="color:var(--text-muted);">—</span>
           </td>
         </tr>
       </table>
@@ -370,7 +370,7 @@
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
             <span v-if="post.isMuted" style="margin-right:5px; color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
             <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
-            <span v-else style="display:inline-block; width:8px; height:8px; background:#ccc; border-radius:50%; margin-right:8px;" title="Read"></span>
+            <span v-else style="display:inline-block; width:8px; height:8px; background:var(--border-main); border-radius:50%; margin-right:8px;" title="Read"></span>
             <a href="#" @click.stop.prevent="openTopic(post)" 
                :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a><br>
             <span class="gs">
@@ -462,7 +462,7 @@
           </td>
           <td class="row1 post-body-cell">
             <div class="post-body" v-html="renderMD(activeTopic.body)"></div>
-            <div style="margin-top:15px;padding-top:10px;border-top:1px solid #D1D7DC; display: flex; gap: 10px;">
+            <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
               <template v-if="auth.user">
                 <button class="btn btn-sm" @click="startReply(activeTopic)">{{ t('reply') }}</button>
                 <button v-if="auth.user.username === activeTopic.author" class="btn btn-sm btn-ghost" @click="startEdit(activeTopic)">{{ t('edit') }}</button>
@@ -519,7 +519,7 @@
  
       <template v-else>
         <div v-if="replies.length>0"
-             style="background:#006699;color:#FFA34F;padding:8px 12px;font-weight:bold;font-size:11px;text-transform:uppercase;margin-bottom:5px; border-radius: 4px;">
+             style="background:var(--primary);color:var(--accent);padding:8px 12px;font-weight:bold;font-size:11px;text-transform:uppercase;margin-bottom:5px; border-radius: 4px;">
           {{ t('comments') }} ({{ replies.length }})
         </div>
         <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
@@ -579,7 +579,7 @@
  
               <div class="post-body" v-html="renderMD(r.body)"></div>
  
-              <div style="margin-top:10px;padding-top:8px;border-top:1px solid #D1D7DC; display: flex; gap: 10px;">
+              <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
                 <template v-if="auth.user">
                   <button class="btn btn-sm" @click="startReply(r)">{{ t('reply') }}</button>
                   <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="startEdit(r)">{{ t('edit') }}</button>
@@ -878,7 +878,7 @@
              <span v-if="n.id > notifModal.lastReadId" style="width:8px; height:8px; background:#ff4400; border-radius:50%; flex-shrink:0;"></span>
           </div>
         </div>
-        <div v-if="notifModal.list.length===0" style="padding: 20px; text-align: center; color: #999;">{{ t('noNotifications') }}</div>
+        <div v-if="notifModal.list.length===0" style="padding: 20px; text-align: center; color:var(--text-muted);">{{ t('noNotifications') }}</div>
       </div>
     </div>
   </div>
@@ -963,19 +963,27 @@
 </div>
 
 <!-- PIN MODAL -->
-<div v-if="pinModal.show" class="modal-overlay" @click.self="pinModal.show=false">
-  <div class="modal-box" style="width: 300px;">
+<div v-if="pinModal.show" class="modal-overlay" @click.self="!pinModal.loading && (pinModal.show=false)">
+  <div class="modal-box" style="width: 320px;">
     <div class="modal-header">
       {{ pinModal.mode === 'setup' ? t('setPin') : t('enterPin') }}
-      <button class="modal-close" @click="pinModal.show=false">✕</button>
+      <button v-if="!pinModal.loading" class="modal-close" @click="pinModal.show=false">✕</button>
     </div>
-    <div class="modal-body">
-      <p class="gs" style="margin-bottom: 10px; text-align: center;">{{ pinModal.mode === 'setup' ? t('pinSetupDesc') : t('pinEnterDesc') }}</p>
-      <input type="password" v-model="pinModal.value" :placeholder="t('pinPlaceholder')" maxlength="6"
-             @keyup.enter="handlePinSubmit"
-             style="width:100%; padding:10px; text-align:center; font-size:24px; letter-spacing:5px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);">
-      <div v-if="pinModal.error" class="alert alert-error" style="margin-top:10px; padding:5px 10px;">{{ pinModal.error }}</div>
-      <button class="btn btn-primary" style="width:100%; margin-top:15px; padding:10px;" @click="handlePinSubmit">OK</button>
+    <div class="modal-body" style="text-align: center;">
+      <p class="gs" style="margin-bottom: 10px;">{{ pinModal.mode === 'setup' ? t('pinSetupDesc') : t('pinEnterDesc') }}</p>
+      
+      <div v-if="pinModal.loading" style="padding: 20px;">
+        <span class="spin" style="width:30px; height:30px; border-width:3px;"></span>
+      </div>
+      <template v-else>
+        <input type="password" v-model="pinModal.value" :placeholder="t('pinPlaceholder')" maxlength="6"
+               @keyup.enter="handlePinSubmit"
+               style="width:100%; padding:10px; text-align:center; font-size:24px; letter-spacing:8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text);"
+               autofocus>
+        <div v-if="pinModal.error" class="alert alert-error" style="margin-top:10px; padding:5px 10px;">{{ pinModal.error }}</div>
+        <button class="btn btn-primary" style="width:100%; margin-top:15px; padding:10px;" 
+                @click="handlePinSubmit" :disabled="pinModal.value.length < 4">OK</button>
+      </template>
     </div>
   </div>
 </div>
@@ -1023,7 +1031,9 @@
 <div v-if="voteModal.show" class="modal-overlay" @click.self="voteModal.show=false">
   <div class="modal-box" style="width: 360px;">
     <div class="modal-header">
-      <i class="fa-solid fa-caret-up"></i> {{ t('voteWeight') || 'Vote Strength' }}
+      <span style="display:flex; align-items:center; gap:8px;">
+        <i class="fa-solid fa-caret-up"></i> {{ t('voteWeight') }}
+      </span>
       <button class="modal-close" @click="voteModal.show=false">×</button>
     </div>
     <div class="modal-body">
@@ -1035,7 +1045,7 @@
       <!-- Slider -->
       <div style="margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
-          <label class="form-label" style="margin:0;">{{ t('strength') || 'Strength' }}</label>
+          <label class="form-label" style="margin:0;">{{ t('strength') }}</label>
           <span style="font-size:20px; font-weight:bold; color:var(--primary);">{{ voteModal.weight }}%</span>
         </div>
         <input type="range" min="1" max="100" v-model.number="voteModal.weight"
@@ -1050,24 +1060,24 @@
       <!-- Estimated values -->
       <div class="vote-estimate-box">
         <div v-if="voteModal.estimating" style="text-align:center; padding:10px;">
-          <span class="spin"></span> calculating…
+          <span class="spin"></span> {{ t('loading') }}
         </div>
         <template v-else-if="voteModal.estimatedValue">
           <div class="vote-est-row">
-            <span>⚡ VP cost</span>
+            <span>⚡ {{ t('vpCost') }}</span>
             <strong>−{{ voteModal.estimatedValue.vpCostPct }}%</strong>
           </div>
           <div class="vote-est-row">
-            <span>🔋 VP after</span>
+            <span>🔋 {{ t('vpAfter') }}</span>
             <strong>{{ voteModal.estimatedValue.vpAfter }}%</strong>
           </div>
           <div v-if="voteModal.estimatedValue.voteValue !== null" class="vote-est-row" style="border-top:1px solid var(--border-main); margin-top:6px; padding-top:6px;">
-            <span>💰 Est. value</span>
+            <span>💰 {{ t('estValue') }}</span>
             <strong style="color:var(--primary);">~{{ voteModal.estimatedValue.voteValue }} BLURT</strong>
           </div>
-          <div v-else class="vote-est-row" style="border-top:1px solid var(--border-main); margin-top:6px; padding-top:6px;">
-            <span>💰 Est. value</span>
-            <span style="opacity:0.5; font-size:10px;">unavailable</span>
+          <div class="vote-est-row" style="opacity: 0.8; font-size: 11px;">
+            <span>💸 {{ t('voteFee') }}</span>
+            <span>~{{ voteModal.estimatedValue.fee }} BLURT</span>
           </div>
         </template>
         <div v-else style="text-align:center; font-size:11px; opacity:0.5; padding:8px;">—</div>
@@ -1092,8 +1102,8 @@
     </div>
     <div class="modal-body" style="text-align: center;">
       <div style="font-size: 40px; margin-bottom: 15px;">
-        <i v-if="statusModal.type === 'success'" class="fa-solid fa-circle-check" style="color: var(--success-border);"></i>
-        <i v-else-if="statusModal.type === 'error'" class="fa-solid fa-circle-xmark" style="color: var(--error-border);"></i>
+        <i v-if="statusModal.type === 'success'" class="fa-solid fa-circle-check" style="color: var(--success-text);"></i>
+        <i v-else-if="statusModal.type === 'error'" class="fa-solid fa-circle-xmark" style="color: var(--error-text);"></i>
         <i v-else class="fa-solid fa-circle-info" style="color: var(--primary);"></i>
       </div>
       <div style="font-size: 13px; line-height: 1.5; margin-bottom: 20px;">{{ statusModal.body }}</div>

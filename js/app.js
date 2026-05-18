@@ -930,10 +930,7 @@ createApp({
         
         // Use 'posting' key for claiming rewards
         await broadcast(ops);
-        
-        auth.user.rewardBlurt = '0.000 BLURT';
-        auth.user.rewardVesting = '0.000000 VESTS';
-        auth.user.hasRewards = false;
+        await refreshUser();
         showStatus(t('claimRewards'), t('claimSuccess'), 'success');
       } catch (err) {
         console.error('Claim rewards error:', err);
@@ -952,6 +949,28 @@ createApp({
     const bcWaitQueue = ref([]);
     const bcQueueExpanded = ref(false);
     let _bcId = 0;
+
+    const refreshUser = async () => {
+      if (!auth.user) return;
+      try {
+        const accounts = await client.condenser.getAccounts([auth.user.username]);
+        if (accounts && accounts[0]) {
+          const acc = accounts[0];
+          const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
+          const now = new Date().getTime();
+          const delta = (now - lastVoteTime) / 1000;
+          let vp = acc.voting_power + (10000 * delta / 432000);
+          vp = Math.min(vp / 100, 100).toFixed(2);
+          const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+          auth.user = { 
+            ...auth.user, 
+            vp, hasRewards, 
+            rewardBlurt: acc.reward_blurt_balance, 
+            rewardVesting: acc.reward_vesting_balance 
+          };
+        }
+      } catch (e) { console.warn('Refresh user error:', e); }
+    };
 
     const waitAndReload = async (isTopic, author = null, permlink = null, pollFn = null, label = null) => {
       const id = ++_bcId;
@@ -1072,6 +1091,7 @@ createApp({
       }
 
       entry.progress = 100;
+      await refreshUser();
       await new Promise(r => setTimeout(r, 800));
       const idx = bcWaitQueue.value.findIndex(e => e.id === id);
       if (idx >= 0) bcWaitQueue.value.splice(idx, 1);
@@ -1241,22 +1261,39 @@ createApp({
       estimating: false
     });
 
+    // Cache for vote estimation to avoid flooding RPC
+    const estCache = { acc: null, fund: null, last: 0 };
+
     const estimateVote = async (weight) => {
       if (!auth.user) return;
-      voteModal.estimating = true;
-      voteModal.estimatedValue = null;
-      try {
-        const accounts = await client.condenser.getAccounts([auth.user.username]);
-        const acc = accounts && accounts[0];
-        if (!acc) return;
+      
+      const now = Date.now();
+      // Only fetch if cache is older than 60 seconds
+      if (!estCache.acc || (now - estCache.last > 60000)) {
+        voteModal.estimating = true;
+        try {
+          const [accs, fund] = await Promise.all([
+            client.condenser.getAccounts([auth.user.username]),
+            client.call('condenser_api', 'get_reward_fund', ['post'])
+          ]);
+          if (accs && accs[0]) estCache.acc = accs[0];
+          if (fund) estCache.fund = fund;
+          estCache.last = now;
+        } catch (e) { console.warn('Vote estimate fetch error:', e); }
+        voteModal.estimating = false;
+      }
 
+      const acc = estCache.acc;
+      const fund = estCache.fund;
+      if (!acc || !fund) return;
+
+      try {
         // Current raw VP (0-10000)
         const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
         const delta = (Date.now() - lastVoteTime) / 1000;
         const rawVP = Math.min(acc.voting_power + Math.floor(10000 * delta / 432000), 10000);
 
-        // VP cost: Blurt uses same formula as Steem/Hive
-        // used_power = ceil(rawVP * weight / 10000 / 50)  (50 full votes/day regen equivalent)
+        // VP cost: used_power = ceil(rawVP * weight / 10000 / 50)
         const voteWeight = weight * 100; // 0-10000
         const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 50);
         const vpAfterRaw = rawVP - usedPower;
@@ -1264,34 +1301,31 @@ createApp({
         const vpAfter   = (vpAfterRaw / 100).toFixed(2);
 
         // Estimate BLURT value
-        let voteValue = null;
-        try {
-          const fund = await client.condenser.call('condenser_api', 'get_reward_fund', ['post']);
-          if (fund) {
-            const vestingShares    = parseFloat(acc.vesting_shares);
-            const receivedVesting  = parseFloat(acc.received_vesting_shares || 0);
-            const delegatedVesting = parseFloat(acc.delegated_vesting_shares || 0);
-            const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
+        let voteValue = 0;
+        const vestingShares    = parseFloat(acc.vesting_shares);
+        const receivedVesting  = parseFloat(acc.received_vesting_shares || 0);
+        const delegatedVesting = parseFloat(acc.delegated_vesting_shares || 0);
+        const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
 
-            // rshares = effective_vests * used_power / 10000
-            const rshares       = effectiveVests * usedPower / 10000;
-            const rewardBalance = parseFloat(fund.reward_balance);
-            const recentClaims  = parseFloat(fund.recent_claims);
-            if (recentClaims > 0) {
-              voteValue = (rshares / recentClaims) * rewardBalance;
-            }
-          }
-        } catch (e) { /* reward fund unavailable */ }
+        // Blurt rshares calculation using BigInt for precision
+        // mana_delta = (total_vests * 1e6) * (used_power / 10000)
+        const microVests = BigInt(Math.floor(effectiveVests * 1000000));
+        const rs = (microVests * BigInt(usedPower)) / 10000n;
+        const rc = BigInt(fund.recent_claims.split(' ')[0] || fund.recent_claims);
+        const rb = parseFloat(fund.reward_balance);
+        
+        if (rc > 0n) {
+          voteValue = (Number(rs) / Number(rc)) * rb;
+        }
 
         voteModal.estimatedValue = {
           vpCostPct,
           vpAfter,
-          voteValue: voteValue !== null ? voteValue.toFixed(4) : null
+          voteValue: voteValue.toFixed(4)
         };
       } catch (e) {
-        console.warn('Vote estimate error:', e);
+        console.warn('Vote estimate calculation error:', e);
       }
-      voteModal.estimating = false;
     };
 
     const openVoteModal = (post) => {
@@ -1670,55 +1704,63 @@ createApp({
       loginBusy.value = false;
     };
 
-    const handlePinSubmit = () => {
+    const handlePinSubmit = async () => {
       if (pinModal.value.length < 4) { pinModal.error = 'Min 4 digits'; return; }
+      pinModal.loading = true;
+      pinModal.error = '';
+
+      // Small delay to allow UI to show spinner before CPU-heavy PBKDF2
+      await new Promise(r => setTimeout(r, 50));
       
-      if (pinModal.mode === 'setup') {
-        const encrypted = AuthService.encryptKey(pinModal.tempUser.key, pinModal.value);
-        const session = {
-          username: pinModal.tempUser.username,
-          key: encrypted,
-          expires: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
-        };
-        localStorage.setItem('blurtforum_session', JSON.stringify(session));
-        completeLogin(pinModal.tempUser.username, pinModal.tempUser.key, pinModal.tempUser.acc);
-        pinModal.show = false;
-      } else {
-        // Unlock mode
-        const sessionStr = localStorage.getItem('blurtforum_session');
-        if (!sessionStr) return;
-        const session = JSON.parse(sessionStr);
-        
-        try {
+      try {
+        if (pinModal.mode === 'setup') {
+          const encrypted = AuthService.encryptKey(pinModal.tempUser.key, pinModal.value);
+          const session = {
+            username: pinModal.tempUser.username,
+            key: encrypted,
+            expires: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
+          };
+          localStorage.setItem('blurtforum_session', JSON.stringify(session));
+          completeLogin(pinModal.tempUser.username, pinModal.tempUser.key, pinModal.tempUser.acc);
+          pinModal.show = false;
+        } else {
+          // Unlock mode
+          const sessionStr = localStorage.getItem('blurtforum_session');
+          if (!sessionStr) return;
+          const session = JSON.parse(sessionStr);
+          
           let decrypted = null;
           if (AuthService.isEncrypted(session.key)) {
             decrypted = AuthService.decryptKey(session.key, pinModal.value);
           } else {
-            // Support legacy (plain AES without PBKDF2) migration if needed, 
-            // but here we just try legacy decrypt or treat as plain if it was saved unencrypted
+            // Support legacy (plain AES without PBKDF2) migration
             try {
               const bytes = CryptoJS.AES.decrypt(session.key, pinModal.value);
               decrypted = bytes.toString(CryptoJS.enc.Utf8);
-            } catch (e) { /* fallback to null */ }
+            } catch (e) { /* fallback */ }
           }
 
-          if (!decrypted || !decrypted.startsWith('5')) throw new Error('Invalid PIN');
+          if (!decrypted || !decrypted.startsWith('5')) {
+            throw new Error('Invalid PIN');
+          }
           
-          (async () => {
-            const accounts = await client.condenser.getAccounts([session.username]);
-            if (accounts && accounts[0]) {
-               completeLogin(session.username, decrypted, accounts[0]);
-               // Automatically migrate to new format on successful unlock
+          const accounts = await client.condenser.getAccounts([session.username]);
+          if (accounts && accounts[0]) {
+             completeLogin(session.username, decrypted, accounts[0]);
+             // Migrate to new format if needed
+             if (!AuthService.isEncrypted(session.key)) {
                const encrypted = AuthService.encryptKey(decrypted, pinModal.value);
                session.key = encrypted;
                localStorage.setItem('blurtforum_session', JSON.stringify(session));
-               pinModal.show = false;
-            }
-          })();
-        } catch (e) {
-          pinModal.error = t('invalidPin');
-          pinModal.value = '';
+             }
+             pinModal.show = false;
+          }
         }
+      } catch (e) {
+        pinModal.error = t('invalidPin');
+        pinModal.value = '';
+      } finally {
+        pinModal.loading = false;
       }
     };
 
