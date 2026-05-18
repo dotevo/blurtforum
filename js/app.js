@@ -37,7 +37,7 @@ createApp({
     // Nexus/Forum node: dagobert supports both APIs
     const rpcForumNode = ref(localStorage.getItem('bf-rpc-forum') || 'https://rpc.drakernoise.com');
     // Data/Broadcast node: dagobert supports both APIs
-    const rpcDataNode  = ref(localStorage.getItem('bf-rpc-data')  || 'https://blurtrpc.dagobert.uk');
+    const rpcDataNode  = ref(localStorage.getItem('bf-rpc-data')  || 'https://rpc.drakernoise.com');
     
     const rpcForumCustom = ref('');
     const rpcDataCustom  = ref('');
@@ -564,20 +564,8 @@ createApp({
         for (const r of results) {
           bodyCache[`${r.author}/${r.permlink}`] = r.body;
           flat.push({
-            author: r.author,
-            permlink: r.permlink,
-            parent_author: r.parent_author,
-            parent_permlink: r.parent_permlink,
-            body: r.body,
-            created: r.created,
+            ...normalizePost(r),
             depth,
-            pendingPayout: parsePayout(r.pending_payout_value),
-            totalPayout: parsePayout(r.total_payout_value),
-            payout: parsePayout(r.total_payout_value) + parsePayout(r.pending_payout_value),
-            vote_count: r.active_votes ? r.active_votes.length : (r.net_votes || 0),
-            active_votes: r.active_votes || [],
-            net_rshares: parseFloat(r.net_rshares || 0),
-            beneficiaries: r.beneficiaries || [],
             _qOpen: false
           });
           if (r.children > 0) await recurse(r.author, r.permlink, depth + 1);
@@ -1783,6 +1771,15 @@ createApp({
       editModal.error = '';
       editModal.success = '';
       
+      let meta = editModal.target.json_metadata || '';
+      if (typeof meta !== 'string') {
+        try {
+          meta = JSON.stringify(meta);
+        } catch (e) {
+          meta = '';
+        }
+      }
+
       const op = ['comment', {
         parent_author: editModal.target.parent_author || '',
         parent_permlink: editModal.target.parent_permlink || config.communityAccount,
@@ -1790,7 +1787,7 @@ createApp({
         permlink: editModal.permlink,
         title: editModal.title,
         body: editModal.body,
-        json_metadata: editModal.target.json_metadata || ''
+        json_metadata: meta
       }];
       
       try {
