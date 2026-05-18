@@ -3,123 +3,6 @@
  */
 const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
  
-function parseStructure(text) {
-  if (!text || !text.trim()) return null;
-  const lines = text.split('\n');
-  const categories = [];
-  let currentCat = null;
-  let fid = 0;
- 
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#!') || line.startsWith('//')) continue;
- 
-    if (line.startsWith('## ')) {
-      currentCat = { name: line.slice(3).trim(), forums: [] };
-      categories.push(currentCat);
-    } else if (line.startsWith('> ') && currentCat) {
-      const parts = line.slice(2).split('|').map(s => s.trim());
-      const name = parts[0] || 'Forum';
-      const tags = (parts[1] || '').split(',').map(s => s.trim()).filter(Boolean);
-      const desc = parts[2] || '';
-      currentCat.forums.push({
-        id: `f${++fid}`,
-        name,
-        targetTags: tags.length ? tags : [],
-        desc,
-        posts: [],
-        lastAuthor: '',
-        lastPermlink: '',
-        hasMore: true
-      });
-    }
-  }
-  return categories.length > 0 ? categories : null;
-}
- 
-function defaultStructure() {
-  return [
-    {
-      name: 'Daily & Life',
-      forums: [
-        { id:'f1', name:'Daily Activity',     targetTags:['actifit','mydailypost','blurtlife','life'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f2', name:'Social & Family',    targetTags:['introduceyourself','parenting','moms','love','motivation'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    },
-    {
-      name: 'Arts & Media',
-      forums: [
-        { id:'f3', name:'Art & Photography',  targetTags:['art','blurtart','photography','stockphotos'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f4', name:'Videos & Podcasts',  targetTags:['video','podcast','music','gymmusic'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f5', name:'Gaming',             targetTags:['games','game','arcadecolony'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    },
-    {
-      name: 'News & World',
-      forums: [
-        { id:'f6', name:'General News',       targetTags:['news','activistpost','centurywire','thepeoplesvoice'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f7', name:'Politics & Society', targetTags:['politics','antiwar','war','truth','reclaimthenet','naturalnews'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    },
-    {
-      name: 'Science & Tech',
-      forums: [
-        { id:'f8', name:'Development',        targetTags:['dev','computing','ai','research'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    },
-    {
-      name: 'Community & Meta',
-      forums: [
-        { id:'f9', name:'Blurt Meta',         targetTags:['blurt','blurtecho','proposals','witness-category'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f10', name:'Contests & Rewards',targetTags:['blurtcontests','rewards'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    },
-    {
-      name: 'Regional',
-      forums: [
-        { id:'f11', name:'Polska (Poland)',   targetTags:['polish','polska','kresy','strefa44'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f12', name:'International',     targetTags:['kr','cn','deutsch','germany','indonesia','japan','blurtlatam','blurthispano'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
-      ]
-    }
-  ];
-}
- 
-function genPermlink(title) {
-  const slug = (title || 'post')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .substring(0, 200);
-  return `${slug}-${Date.now().toString(36)}`;
-}
- 
-function renderMarkdown(text) {
-  if (!text) return '';
-  try {
-    // Basic mention linking: @username -> link to profile
-    // We do this before marked to avoid issues with code blocks if possible, 
-    // but better after if we want to respect code blocks.
-    // However, a simple replacement on the final HTML might be easier if we are careful.
-    let html = marked.parse(text, { breaks: true, gfm: true });
-    
-    // Simple regex for @username, avoiding things like email addresses
-    // Matches @ followed by alphanum, dots, or dashes, starting with a letter.
-    html = html.replace(/(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g, '$1<a href="#" class="mention" onclick="event.preventDefault(); if(window.app && window.app.openProfile) window.app.openProfile(\'$2\')">@$2</a>');
-
-    return DOMPurify.sanitize(html);
-  } catch (e) {
-    console.error('Markdown error:', e);
-    return text;
-  }
-}
-
-function parsePayout(val) {
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') return parseFloat(val.split(' ')[0]) || 0;
-  return 0;
-}
- 
 createApp({
   setup() {
     const langs = ['en', 'pl', 'eo'];
@@ -1545,7 +1428,7 @@ createApp({
       
       const json = JSON.stringify([
         mute ? 'mutePost' : 'unmutePost',
-        { community: config.communityAccount, account: post.author, author: post.author, permlink: post.permlink, notes: 'Muted via BlurtForum' }
+        { community: config.communityAccount, account: post.author, permlink: post.permlink, notes: 'Muted via BlurtForum' }
       ]);
       
       const op = ['custom_json', {
@@ -1770,12 +1653,13 @@ createApp({
         if (!postingPubs.includes(pubKey)) throw new Error('Key mismatch');
         
         if (loginForm.remember) {
-          // Setup PIN
+          // Setup PIN using AuthService
           pinModal.tempUser = { username, key: keyStr, acc };
           pinModal.mode = 'setup';
           pinModal.value = '';
           pinModal.error = '';
           pinModal.show = true;
+          showLoginModal.value = false;
         } else {
           completeLogin(username, keyStr, acc);
         }
@@ -1790,31 +1674,50 @@ createApp({
       if (pinModal.value.length < 4) { pinModal.error = 'Min 4 digits'; return; }
       
       if (pinModal.mode === 'setup') {
-        const encrypted = CryptoJS.AES.encrypt(pinModal.tempUser.key, pinModal.value).toString();
+        const encrypted = AuthService.encryptKey(pinModal.tempUser.key, pinModal.value);
         const session = {
           username: pinModal.tempUser.username,
           key: encrypted,
-          expires: Date.now() + (12 * 60 * 60 * 1000) // 12 hours
+          expires: Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
         };
         localStorage.setItem('blurtforum_session', JSON.stringify(session));
         completeLogin(pinModal.tempUser.username, pinModal.tempUser.key, pinModal.tempUser.acc);
         pinModal.show = false;
       } else {
         // Unlock mode
-        const session = JSON.parse(localStorage.getItem('blurtforum_session'));
+        const sessionStr = localStorage.getItem('blurtforum_session');
+        if (!sessionStr) return;
+        const session = JSON.parse(sessionStr);
+        
         try {
-          const decrypted = CryptoJS.AES.decrypt(session.key, pinModal.value).toString(CryptoJS.enc.Utf8);
-          if (!decrypted) throw new Error('Invalid PIN');
+          let decrypted = null;
+          if (AuthService.isEncrypted(session.key)) {
+            decrypted = AuthService.decryptKey(session.key, pinModal.value);
+          } else {
+            // Support legacy (plain AES without PBKDF2) migration if needed, 
+            // but here we just try legacy decrypt or treat as plain if it was saved unencrypted
+            try {
+              const bytes = CryptoJS.AES.decrypt(session.key, pinModal.value);
+              decrypted = bytes.toString(CryptoJS.enc.Utf8);
+            } catch (e) { /* fallback to null */ }
+          }
+
+          if (!decrypted || !decrypted.startsWith('5')) throw new Error('Invalid PIN');
           
           (async () => {
             const accounts = await client.condenser.getAccounts([session.username]);
             if (accounts && accounts[0]) {
                completeLogin(session.username, decrypted, accounts[0]);
+               // Automatically migrate to new format on successful unlock
+               const encrypted = AuthService.encryptKey(decrypted, pinModal.value);
+               session.key = encrypted;
+               localStorage.setItem('blurtforum_session', JSON.stringify(session));
                pinModal.show = false;
             }
           })();
         } catch (e) {
           pinModal.error = t('invalidPin');
+          pinModal.value = '';
         }
       }
     };
@@ -2053,32 +1956,31 @@ createApp({
       if (saved) {
         try {
           const session = JSON.parse(saved);
-          if (session.expires > Date.now()) {
-            if (session.type === 'whalevault') {
-              auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
-              loadUserCommunities(session.username);
-              // Refresh full data
-              client.condenser.getAccounts([session.username]).then(accounts => {
-                if (accounts && accounts[0]) {
-                  const acc = accounts[0];
-                  const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
-                  const now = new Date().getTime();
-                  const delta = (now - lastVoteTime) / 1000;
-                  let vp = acc.voting_power + (10000 * delta / 432000);
-                  vp = Math.min(vp / 100, 100).toFixed(2);
-                  const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
-                  auth.user = { 
-                    username: session.username, type: 'whalevault', key: null, vp, 
-                    hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance 
-                  };
-                }
-              });
-            } else {
-              pinModal.mode = 'unlock';
-              pinModal.show = true;
-            }
+          if (session.type === 'whalevault') {
+            auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
+            loadUserCommunities(session.username);
+            // Refresh full data
+            client.condenser.getAccounts([session.username]).then(accounts => {
+              if (accounts && accounts[0]) {
+                const acc = accounts[0];
+                const lastVoteTime = new Date(acc.last_vote_time + 'Z').getTime();
+                const now = new Date().getTime();
+                const delta = (now - lastVoteTime) / 1000;
+                let vp = acc.voting_power + (10000 * delta / 432000);
+                vp = Math.min(vp / 100, 100).toFixed(2);
+                const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+                auth.user = { 
+                  username: session.username, type: 'whalevault', key: null, vp, 
+                  hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance 
+                };
+              }
+            });
           } else {
-            localStorage.removeItem('blurtforum_session');
+            // Key based login - requires unlocking
+            pinModal.mode = 'unlock';
+            pinModal.value = '';
+            pinModal.error = '';
+            pinModal.show = true;
           }
         } catch (e) { /* ignore */ }
       } else {
@@ -2089,7 +1991,6 @@ createApp({
             const session = JSON.parse(legacy);
             if (session.username && session.type === 'whalevault') {
               localStorage.setItem('blurtforum_session', legacy);
-              // Small hack to re-run session logic after migration
               location.reload();
             }
           } catch (e) { /* ignore */ }
