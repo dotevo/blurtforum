@@ -153,6 +153,8 @@ const TR = {
     vpAfter: "VP after",
     estValue: "Est. value",
     voteFee: "Vote fee",
+    automatedSupportComment: "Automated support comment.",
+    autoSupportCommentCollapsed: "Automated support comment collapsed.",
   },
   pl: {
     home: "Strona główna",
@@ -308,6 +310,8 @@ const TR = {
     vpAfter: "VP po głosie",
     estValue: "Szac. wartość",
     voteFee: "Opłata za głos",
+    automatedSupportComment: "Automatyczny komentarz wsparcia.",
+    autoSupportCommentCollapsed: "Automatyczny komentarz wsparcia (zwinięty).",
   },
   eo: {
     home: "Hejmo",

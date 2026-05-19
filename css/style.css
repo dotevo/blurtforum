@@ -939,3 +939,38 @@ a:hover { color: var(--accent); text-decoration: underline; }
     font-size: 13px;
   }
 }
+
+/* ===== COMPACT COLLAPSED BAR ===== */
+.collapsed-support-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-r2);
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  padding: 4px 10px;
+  margin-bottom: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.collapsed-support-bar .author-tag {
+  font-weight: bold;
+  color: var(--text);
+}
+.collapsed-support-bar .expand-btn {
+  margin-left: auto;
+  cursor: pointer;
+  font-weight: bold;
+  color: var(--primary);
+  text-decoration: underline;
+}
+.collapsed-support-bar .expand-btn:hover {
+  color: var(--accent);
+}
+.collapsed-support-bar .vote-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-weight: bold;
+}

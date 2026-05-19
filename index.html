@@ -231,7 +231,7 @@
           <td class="row1" align="center">
             <template v-if="forum.posts.length>0">
               <span class="gs">{{ timeAgo(forum.posts[0].lastActivity) }}<br>
-              <a href="#" @click.stop.prevent="openProfile(forum.posts[0].author)">@{{ forum.posts[0].author }}</a></span>
+              <a href="#" @click.stop.prevent="openProfile(forum.posts[0].lastAuthor || forum.posts[0].author)">@{{ forum.posts[0].lastAuthor || forum.posts[0].author }}</a></span>
             </template>
             <div v-else-if="loading" class="spin" style="width:16px; height:16px; border-width:2px; margin:0 auto;"></div>
             <span v-else class="gs" style="color:var(--text-muted);">—</span>
@@ -524,111 +524,126 @@
         </div>
         <div v-else style="padding:20px 0;color:#666;font-size:12px; font-weight: bold; text-align: center;">{{ t('noComments') }}</div>
  
-        <table :id="'post-' + r.permlink" class="forumline topic-table" v-for="(r,i) in replies" :key="r.permlink" style="margin-bottom:5px"
-               :style="{ opacity: r.isMuted ? 0.5 : 1 }">
-          <tr>
-            <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
-            <td class="row3">
-              <div class="post-header">
-                <span class="gs">
-                  #{{ i+1 }} · {{ fmtDate(r.created) }}
-                  <span v-if="r._pending" style="display:inline-block; background:var(--accent); color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">
-                    <i class="fa-solid fa-circle-notch fa-spin"></i> {{ r._pending === 'sending' ? t('sending') : (r._pending === 'syncing' ? t('syncing') : t('indexing')) }}
+        <template v-for="(r,i) in replies" :key="r.permlink">
+          <!-- Compact Bar for Collapsed Support Comment -->
+          <div v-if="r.isCollapsed" class="collapsed-support-bar" @click="r.isCollapsed=false" style="cursor:pointer;">
+            <span class="vote-info">
+              <i class="fa-solid fa-caret-up" style="color:var(--primary)"></i>
+              {{ r.vote_count }}
+            </span>
+            <span class="gs"><i class="fa-solid fa-robot" style="font-size:10px; opacity:0.6;"></i> {{ t('automatedSupportComment') }}</span>
+            <span class="author-tag">@{{ r.author }}</span>
+            <span class="expand-btn">[{{ t('show') }}]</span>
+          </div>
+
+          <table v-else :id="'post-' + r.permlink" class="forumline topic-table" style="margin-bottom:5px"
+                 :style="{ opacity: r.isMuted ? 0.5 : 1 }">
+            <tr>
+              <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
+              <td class="row3">
+                <div class="post-header">
+                  <span class="gs">
+                    #{{ i+1 }} · {{ fmtDate(r.created) }}
+                    <span v-if="r._pending" style="display:inline-block; background:var(--accent); color:#fff; border-radius:3px; padding:1px 6px; font-size:10px; margin-left:5px;">
+                      <i class="fa-solid fa-circle-notch fa-spin"></i> {{ r._pending === 'sending' ? t('sending') : (r._pending === 'syncing' ? t('syncing') : t('indexing')) }}
+                    </span>
+                    <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
                   </span>
-                  <span v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</span>
-                </span>
-                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-                  <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                  <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
-                    {{ r.payout.toFixed(3) }} B
+                  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
+                    <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
+                      {{ r.payout.toFixed(3) }} B
+                    </span>
+                    <template v-if="r.beneficiaries && r.beneficiaries.length">
+                      <div class="beneficiaries-inline">
+                        <span class="ben-icon">👥</span>
+                        <template v-for="(b, bi) in r.beneficiaries.slice(0,3)" :key="b.account">
+                          <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
+                          <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
+                          <span v-if="bi < r.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
+                        </template>
+                        <span v-if="r.beneficiaries.length > 3" class="ben-more">+{{ r.beneficiaries.length - 3 }}</span>
+                      </div>
+                    </template>
+                    <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)"><i class="fa-solid fa-caret-up"></i></span>
+                    <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
+                    <template v-if="canMute && isPostInCommunity(r)">
+                      <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(r, true)">🚫 {{ t('mute') }}</button>
+                      <button v-else class="btn btn-sm btn-hdr" @click="mutePost(r, false)">🔓 {{ t('unmute') }}</button>
+                    </template>
+                    </div>              </div>
+              </td>
+            </tr>
+            <tr>
+              <td :class="i%2===0?'row1':'row2'" class="post-profile">
+                <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
+                <div class="gs" style="font-weight: bold;"><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></div>
+              </td>
+              <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
+                <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
+                <div v-if="isNestedReply(r)" class="quote-box">
+                  <span style="font-weight: bold;">{{ t('replyTo') }}: <a href="#" @click.prevent="openProfile(r.parent_author)">@{{ r.parent_author }}</a></span>
+                  <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
+                    [{{ r._qOpen ? t('hide') : t('show') }}]
                   </span>
-                  <template v-if="r.beneficiaries && r.beneficiaries.length">
-                    <div class="beneficiaries-inline">
-                      <span class="ben-icon">👥</span>
-                      <template v-for="(b, bi) in r.beneficiaries.slice(0,3)" :key="b.account">
-                        <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
-                        <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
-                        <span v-if="bi < r.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
-                      </template>
-                      <span v-if="r.beneficiaries.length > 3" class="ben-more">+{{ r.beneficiaries.length - 3 }}</span>
+                  <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))"></div>
+                </div>
+  
+                <div class="post-body" v-html="renderMD(r.body)"></div>
+  
+                <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
+                  <template v-if="auth.user">
+                    <button class="btn btn-sm" @click="startReply(r)">{{ t('reply') }}</button>
+                    <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="startEdit(r)">{{ t('edit') }}</button>
+                  </template>
+                </div>
+              </td>
+            </tr>
+            <!-- Inline reply form for this comment -->
+            <tr v-if="replyTarget && replyTarget.permlink===r.permlink">
+              <td colspan="2" style="padding:0">
+                <div class="write-form" style="margin:0;border:none;border-radius:0;">
+                  <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
+                    {{ t('replyTo') }}: <b>@{{ r.author }}</b>
+                  </div>
+                  <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
+                    <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
+                      <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
+                      <input type="file" accept="image/*" style="display:none" @change="onReplyImagePick">
+                    </label>
+                    <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="replyPreview=false">{{ t('write') }}</button>
+                    <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="replyPreview=true">{{ t('preview') }}</button>
+                  </div>
+                  <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="onReplyPaste"></textarea>
+                  <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
+                  
+                  <div style="margin-top:10px">
+                    <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                      <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
+                    </label>
+                  </div>
+                  <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
+                    <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
+                    <div class="ben-form-row">
+                      <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
+                      <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
+                      <span class="gs ben-pct-label">%</span>
                     </div>
-                  </template>
-                  <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)"><i class="fa-solid fa-caret-up"></i></span>
-                  <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
-                  <template v-if="canMute && isPostInCommunity(r)">
-                    <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(r, true)">🚫 {{ t('mute') }}</button>
-                    <button v-else class="btn btn-sm btn-hdr" @click="mutePost(r, false)">🔓 {{ t('unmute') }}</button>
-                  </template>
-                  </div>              </div>
-            </td>
-          </tr>
-          <tr>
-            <td :class="i%2===0?'row1':'row2'" class="post-profile">
-              <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
-              <div class="gs" style="font-weight: bold;"><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></div>
-            </td>
-            <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
-              <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
-              <div v-if="isNestedReply(r)" class="quote-box">
-                <span style="font-weight: bold;">{{ t('replyTo') }}: <a href="#" @click.prevent="openProfile(r.parent_author)">@{{ r.parent_author }}</a></span>
-                <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
-                  [{{ r._qOpen ? t('hide') : t('show') }}]
-                </span>
-                <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))"></div>
-              </div>
- 
-              <div class="post-body" v-html="renderMD(r.body)"></div>
- 
-              <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
-                <template v-if="auth.user">
-                  <button class="btn btn-sm" @click="startReply(r)">{{ t('reply') }}</button>
-                  <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="startEdit(r)">{{ t('edit') }}</button>
-                </template>
-              </div>
-            </td>
-          </tr>
-          <!-- Inline reply form for this comment -->
-          <tr v-if="replyTarget && replyTarget.permlink===r.permlink">
-            <td colspan="2" style="padding:0">
-              <div class="write-form" style="margin:0;border:none;border-radius:0;">
-                <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
-                  {{ t('replyTo') }}: <b>@{{ r.author }}</b>
-                </div>
-                <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
-                <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
-                  <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
-                  <input type="file" accept="image/*" style="display:none" @change="onReplyImagePick">
-                </label>
-                <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="replyPreview=false">{{ t('write') }}</button>
-                <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="replyPreview=true">{{ t('preview') }}</button>
-              </div>
-              <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="onReplyPaste"></textarea>
-                <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
-                <div style="margin-top:10px">
-                  <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                    <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
-                  </label>
-                </div>
-                <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
-                  <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
-                  <div class="ben-form-row">
-                    <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
-                    <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
-                    <span class="gs ben-pct-label">%</span>
+                  </div>
+                  <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
+                  <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
+
+                  <div style="margin-top:10px; display:flex; gap:10px;">
+                    <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
+                      <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
+                    </button>
+                    <button class="btn btn-sm btn-ghost" @click="replyTarget=null"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
                   </div>
                 </div>
-                <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
-                <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
-                <div style="margin-top:10px;display:flex;gap:10px">
-                  <button class="btn btn-primary btn-sm" @click="submitReply" :disabled="replyForm.loading">
-                    <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
-                  </button>
-                  <button class="btn btn-sm" @click="replyTarget=null"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
-                </div>
-              </div>
-            </td>
-          </tr>
-        </table>
+              </td>
+            </tr>
+          </table>
+        </template>
       </template>
  
     </div><!-- /topic -->
@@ -999,6 +1014,13 @@
       <div class="alert alert-info" style="margin-bottom: 15px;">{{ t('oldContentDesc') }}</div>
       <div class="gs" style="margin-bottom: 15px; padding: 8px 12px; background: var(--bg-page); border: 1px solid var(--border-main); border-radius: 4px;">
         {{ t('oldContentBeneficiary').replace('{author}', oldContentModal.author) }}
+        <div v-if="oldContentModal.beneficiaries && oldContentModal.beneficiaries.length > 0" 
+             style="margin-top: 8px; font-size: 11px; border-top: 1px solid var(--border-main); padding-top: 8px;">
+          <strong>{{ t('beneficiaries') }}:</strong>
+          <span v-for="(b, bi) in oldContentModal.beneficiaries" :key="b.account">
+            @{{ b.account }} ({{ (b.weight/100).toFixed(0) }}%)<span v-if="bi < oldContentModal.beneficiaries.length - 1">, </span>
+          </span>
+        </div>
       </div>
       <div style="margin-bottom: 15px;">
         <label class="form-label">{{ t('writeReply') }}</label>

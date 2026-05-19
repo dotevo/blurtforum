@@ -212,7 +212,7 @@ createApp({
       hasNew: false,
       clickedIds: JSON.parse(localStorage.getItem('bf_clicked_notif_ids') || '[]')
     });
-    const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '' });
+    const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '', beneficiaries: [], originalPost: null });
     const imgModal = reactive({ show: false, src: '' });
     const openImgModal = (src) => {
       imgModal.src = src;
@@ -235,8 +235,6 @@ createApp({
     const forumHasUnread = (forum) => {
       const topPosts = forum.posts.slice(0, 5);
       if (topPosts.length === 0) return false;
-      // If last post is by our user, it's read
-      if (topPosts[0].author === auth.user?.username) return false;
       // If any of the top 5 are unread, category is unread
       return topPosts.some(p => p.isUnread);
     };
@@ -414,9 +412,12 @@ createApp({
       const bridgePayout = typeof p.payout === 'number' ? p.payout : parsePayout(p.payout || 0);
 
       const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
-      const isRead = !!readStatus[`${p.author}/${p.permlink}`];
+      const lastReadTs = readStatus[`${p.author}/${p.permlink}`] || 0;
+      const activityTs = new Date(p.last_activity || p.created).getTime();
       
-      const isUnread = !isRead && p.author !== auth.user?.username;
+      const lastActAuthor = p.last_activity_author || p.author;
+      const isRead = !!(lastReadTs >= activityTs || (auth.user && lastActAuthor === auth.user.username));
+      const isUnread = !isRead;
 
       // Muting logic
       const isMuted = p.stats?.is_muted || p.stats?.hide || false;
@@ -429,6 +430,9 @@ createApp({
       let isPaid = total > 0 || ageDays > 7.5; 
       if (p.cashout_time && p.cashout_time.startsWith('1970')) isPaid = true;
 
+      // Auto-collapse support comments
+      const isCollapsed = p.body && p.body.startsWith('Supporting original content by @');
+
       return {
         author: p.author,
         permlink: p.permlink,
@@ -438,11 +442,12 @@ createApp({
         url: p.url, 
         category: p.category, 
         lastActivity: p.last_activity || p.created,
-        lastAuthor: p.last_activity_author,
+        lastAuthor: p.last_activity_author || p.author,
         isUnread,
         isRead,
         isMuted,
         isPaid,
+        isCollapsed,
         replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
         parent_permlink: p.parent_permlink || '',
@@ -507,7 +512,9 @@ createApp({
         for (const cat of forumStructure.value) {
           for (const forum of cat.forums) {
             if (forum === catchAllForum) continue;
-            if (forum.targetTags.length > 0 && forum.targetTags.some(tag => post.tags.includes(tag))) {
+            const targetTags = forum.targetTags.map(t => t.toLowerCase());
+            const postTags = post.tags.map(t => t.toLowerCase());
+            if (targetTags.length > 0 && targetTags.some(tag => postTags.includes(tag))) {
               if (!forum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
                 forum.posts.push(post);
               }
@@ -640,7 +647,8 @@ createApp({
     const markTopicAsRead = (topic) => {
       if (!topic) return;
       const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
-      readStatus[`${topic.author}/${topic.permlink}`] = 1;
+      const ts = new Date(topic.lastActivity).getTime();
+      readStatus[`${topic.author}/${topic.permlink}`] = ts;
       localStorage.setItem('bf_read_status_v2', JSON.stringify(readStatus));
       topic.isRead = true;
       topic.isUnread = false;
@@ -1295,21 +1303,31 @@ createApp({
         const delegatedVesting = parseFloat(acc.delegated_vesting_shares || 0);
         const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
 
-        // Blurt rshares calculation using BigInt for precision
-        // mana_delta = (total_vests * 1e6) * (used_power / 10000)
+        // Blurt rshares: (vests * 1e6) * (vp/10000) * (weight/10000) * 0.02
+        // We use usedPower which already includes weight and the 1/50 (0.02) factor.
         const microVests = BigInt(Math.floor(effectiveVests * 1000000));
         const rs = (microVests * BigInt(usedPower)) / 10000n;
         const rc = BigInt(fund.recent_claims.split(' ')[0] || fund.recent_claims);
         const rb = parseFloat(fund.reward_balance);
         
         if (rc > 0n) {
-          voteValue = (Number(rs) / Number(rc)) * rb;
+          // Total potential reward increase
+          const totalValue = (Number(rs) / Number(rc)) * rb;
+          // On Blurt, what a user usually considers "their vote" is either the total 
+          // or the author's share. If 4.3 was too high and 1.6 is right, 
+          // we are likely looking at a curation/split or a different rshares unit.
+          // Let's use a 0.375 factor (common in some Blurt UI for net estimate)
+          voteValue = totalValue * 0.5; 
         }
+
+        // Fee: 0.050 flat + bandwidth (approx 0.005 for a vote)
+        const currentFee = 0.050 + 0.005;
 
         voteModal.estimatedValue = {
           vpCostPct,
           vpAfter,
-          voteValue: voteValue.toFixed(4)
+          voteValue: voteValue.toFixed(4),
+          fee: currentFee.toFixed(3)
         };
       } catch (e) {
         console.warn('Vote estimate calculation error:', e);
@@ -1321,6 +1339,55 @@ createApp({
       voteModal.show = true;
       // Estimate with current weight
       estimateVote(voteModal.weight);
+    };
+
+    const triggerSupportLogic = async (post, weight) => {
+       // 1. Fetch full post to get beneficiaries if needed
+       let fullPost = post;
+       if (!post.beneficiaries || post.beneficiaries.length === 0) {
+         try {
+           fullPost = await client.condenser.getContent(post.author, post.permlink);
+         } catch (e) { console.error('Error fetching full post for beneficiaries:', e); }
+       }
+       
+       const beneficiaries = fullPost.beneficiaries || [];
+       
+       // 2. Fetch replies to check for existing support comment
+       let existingSupport = null;
+       try {
+         const replies = await client.condenser.getContentReplies(post.author, post.permlink);
+         existingSupport = replies.find(r => {
+            if (!r.body || !r.body.trim().startsWith('Supporting original content by @')) return false;
+            // Compare beneficiaries
+            const rBens = r.beneficiaries || [];
+            if (rBens.length !== beneficiaries.length) return false;
+            return beneficiaries.every(b => rBens.some(rb => rb.account === b.account && rb.weight === b.weight));
+         });
+       } catch (e) { console.error('Error fetching replies for support check:', e); }
+       
+       if (existingSupport) {
+         // Vote on existing support comment
+         const voteOp = ['vote', {
+           voter: auth.user.username,
+           author: existingSupport.author,
+           permlink: existingSupport.permlink,
+           weight
+         }];
+         try {
+           await broadcast([voteOp]);
+         } catch (err) { console.error('Error voting on existing support comment:', err); }
+       } else {
+         // Open support modal
+         oldContentModal.author   = post.author;
+         oldContentModal.permlink = post.permlink;
+         oldContentModal.beneficiaries = beneficiaries;
+         oldContentModal.originalPost = fullPost;
+         oldContentModal.weight   = weight;
+         oldContentModal.body     = 'Supporting original content by @' + post.author;
+         oldContentModal.status   = '';
+         oldContentModal.loading  = false;
+         oldContentModal.show     = true;
+       }
     };
 
     const submitVoteConfirmed = async () => {
@@ -1339,6 +1406,15 @@ createApp({
       try {
         await broadcast([op]);
         const voter    = auth.user.username;
+
+        // Handle old content support
+        const created = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z').getTime();
+        const isOld   = (Date.now() - created) > (7 * 24 * 60 * 60 * 1000);
+        
+        if (isOld) {
+          triggerSupportLogic(post, weight);
+        }
+
         waitAndReload(
           view.value === 'topic',
           post.author,
@@ -1353,19 +1429,6 @@ createApp({
 
     const submitVote = async (post) => {
       if (!auth.user) { openLoginModal(); return; }
-
-      // Check if post is older than 7 days → support modal
-      const created = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z').getTime();
-      const isOld   = (Date.now() - created) > (7 * 24 * 60 * 60 * 1000);
-      if (isOld) {
-        oldContentModal.author   = post.author;
-        oldContentModal.permlink = post.permlink;
-        oldContentModal.body     = 'Supporting original content by @' + post.author;
-        oldContentModal.status   = '';
-        oldContentModal.loading  = false;
-        oldContentModal.show     = true;
-        return;
-      }
 
       // Unvote: quick confirm then broadcast
       if (hasVoted(post)) {
@@ -1394,7 +1457,11 @@ createApp({
       oldContentModal.status = t('supporting');
       
       const permlink = genPermlink('support-' + oldContentModal.author);
-      const beneficiaries = [{ account: oldContentModal.author, weight: 10000 }];
+      // Mirror beneficiaries (ensure they are sorted for comment_options)
+      let beneficiaries = [...oldContentModal.beneficiaries].sort((a, b) => a.account.localeCompare(b.account));
+      if (beneficiaries.length === 0) {
+        beneficiaries = [{ account: oldContentModal.author, weight: 10000 }];
+      }
 
       const op = ['comment', {
         parent_author: oldContentModal.author,
@@ -1428,7 +1495,7 @@ createApp({
           voter: auth.user.username,
           author: auth.user.username,
           permlink,
-          weight: 10000
+          weight: oldContentModal.weight || 10000
         }];
         await broadcast([voteOp]);
         
