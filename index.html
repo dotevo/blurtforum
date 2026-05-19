@@ -297,7 +297,7 @@
               <button class="btn btn-sm" :class="postPreview ? 'btn-primary' : 'btn-ghost'" @click="postPreview=true; saveDraft()">{{ t('preview') }}</button>
             </div>
           </div>
-          <textarea v-if="!postPreview" v-model="postForm.body" :placeholder="t('writePost')" @input="saveDraft" @paste="onPostPaste"></textarea>
+          <textarea v-if="!postPreview" v-model="postForm.body" :placeholder="t('writePost')" @input="saveDraft(); schedulePostFeeUpdate()" @paste="onPostPaste"></textarea>
           <div v-else class="post-body" style="min-height:120px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="postForm.body ? renderMD(postForm.body) : '<span style=&quot;opacity:0.4&quot;>...' + t('writePost') + '...</span>'"></div>
         </div>
 
@@ -342,11 +342,14 @@
         </div>
         <div v-if="postForm.error" class="alert alert-error">{{ postForm.error }}</div>
         <div v-if="postForm.success" class="alert alert-success">{{ postForm.success }}</div>
-        <div style="display:flex;gap:10px">
+        <div style="display:flex;gap:10px;align-items:center">
           <button class="btn btn-primary" @click="submitPost" :disabled="postForm.loading">
             <span v-if="postForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('submit') }}
           </button>
           <button class="btn btn-ghost" @click="showNewPostForm=false; clearDraft()"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
+          <span v-if="postFeeEstimate" style="font-size:11px; color:var(--text-muted); margin-left:4px;">
+            💸 ~{{ postFeeEstimate }} BLURT
+          </span>
         </div>
       </div>
  

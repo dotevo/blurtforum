@@ -200,6 +200,10 @@ createApp({
       postPreview.value    = false;
       showNewPostForm.value = true;
       loadDraft();
+      // Fetch current fee rates (once per session) and show initial estimate
+      fetchFeeInfo().then(() => {
+        postFeeEstimate.value = estimateTxFee(2, 0); // 2 ops: comment + comment_options
+      });
     };
     const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', hasDraft: false, devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
 
@@ -939,6 +943,10 @@ createApp({
       replyForm.body = '';
       replyForm.error = '';
       replyForm.success = '';
+      // Fetch current fee rates (once per session) and show initial estimate
+      fetchFeeInfo().then(() => {
+        replyFeeEstimate.value = estimateTxFee(2, 0); // 2 ops: comment + comment_options
+      });
     };
 
     // ── Blockchain wait queue ───────────────────────────────────────────────
@@ -1258,7 +1266,70 @@ createApp({
     });
 
     // Cache for vote estimation to avoid flooding RPC
-    const estCache = { acc: null, fund: null, last: 0 };
+    const estCache = { acc: null, fund: null, props: null, last: 0 };
+
+    // Blurt transaction fee info (flat fee + bandwidth fee, set by witnesses dynamically)
+    const feeInfo = reactive({
+      flatFee: 0.050,   // BLURT per operation (fallback to known current values)
+      bwFee:   0.150,   // BLURT per kilobyte
+      loaded:  false
+    });
+
+    // Fetch current fee rates from chain properties (witness-voted, can change)
+    const fetchFeeInfo = async () => {
+      if (feeInfo.loaded) return; // fetch once per session is enough
+      try {
+        const props = await client.call('condenser_api', 'get_chain_properties', []);
+        if (props) {
+          if (props.operation_flat_fee)   feeInfo.flatFee = parseFloat(props.operation_flat_fee);
+          if (props.bandwidth_kbytes_fee) feeInfo.bwFee   = parseFloat(props.bandwidth_kbytes_fee);
+          feeInfo.loaded = true;
+        }
+      } catch (e) {
+        console.warn('Fee info fetch error (using fallback values):', e);
+        feeInfo.loaded = true; // don't retry on error, fallback values are fine
+      }
+    };
+
+    /**
+     * Estimate BLURT fee for a transaction.
+     * @param {number} numOps      - number of operations in the tx (usually 1 or 2)
+     * @param {number} payloadBytes - estimated payload size in bytes
+     * @returns {string} formatted fee string e.g. "0.088"
+     */
+    const estimateTxFee = (numOps, payloadBytes) => {
+      // Base TX overhead: ~300 bytes (headers, expiry, ref_block, signature)
+      const totalBytes = 300 + payloadBytes;
+      const fee = (feeInfo.flatFee * numOps) + (totalBytes / 1024) * feeInfo.bwFee;
+      return fee.toFixed(3);
+    };
+
+    // Per-form fee estimates, updated lazily (debounced, not per-keystroke)
+    const postFeeEstimate  = ref(null);
+    const replyFeeEstimate = ref(null);
+    let _postFeeTimer  = null;
+    let _replyFeeTimer = null;
+
+    // Call this from the post textarea @input — recalculates 2s after user stops typing
+    const schedulePostFeeUpdate = () => {
+      clearTimeout(_postFeeTimer);
+      _postFeeTimer = setTimeout(() => {
+        // comment op + comment_options op = 2 ops
+        const bodyBytes = new TextEncoder().encode(
+          (postForm.title || '') + (postForm.body || '')
+        ).length;
+        postFeeEstimate.value = estimateTxFee(2, bodyBytes);
+      }, 2000);
+    };
+
+    // Call this from the reply textarea @input
+    const scheduleReplyFeeUpdate = () => {
+      clearTimeout(_replyFeeTimer);
+      _replyFeeTimer = setTimeout(() => {
+        const bodyBytes = new TextEncoder().encode(replyForm.body || '').length;
+        replyFeeEstimate.value = estimateTxFee(2, bodyBytes);
+      }, 2000);
+    };
 
     const estimateVote = async (weight) => {
       if (!auth.user) return;
@@ -1268,12 +1339,14 @@ createApp({
       if (!estCache.acc || (now - estCache.last > 60000)) {
         voteModal.estimating = true;
         try {
-          const [accs, fund] = await Promise.all([
+          const [accs, fund, props] = await Promise.all([
             client.condenser.getAccounts([auth.user.username]),
-            client.call('condenser_api', 'get_reward_fund', ['post'])
+            client.call('condenser_api', 'get_reward_fund', ['post']),
+            client.condenser.getDynamicGlobalProperties()
           ]);
           if (accs && accs[0]) estCache.acc = accs[0];
           if (fund) estCache.fund = fund;
+          if (props) estCache.props = props;
           estCache.last = now;
         } catch (e) { console.warn('Vote estimate fetch error:', e); }
         voteModal.estimating = false;
@@ -1289,45 +1362,44 @@ createApp({
         const delta = (Date.now() - lastVoteTime) / 1000;
         const rawVP = Math.min(acc.voting_power + Math.floor(10000 * delta / 432000), 10000);
 
-        // VP cost: used_power = ceil(rawVP * weight / 10000 / 50)
-        const voteWeight = weight * 100; // 0-10000
+        // VP cost: used_power = ceil(rawVP * voteWeight / 10000 / 50)
+        // At 100% VP and 100% weight: ceil(10000 * 10000 / 10000 / 50) = 200 (~2% of VP)
+        const voteWeight = weight * 100; // scale 1-100 → 100-10000
         const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 50);
         const vpAfterRaw = rawVP - usedPower;
         const vpCostPct = (usedPower / 100).toFixed(2);
         const vpAfter   = (vpAfterRaw / 100).toFixed(2);
 
-        // Estimate BLURT value
-        let voteValue = 0;
+        // Correct Blurt rshares formula:
+        //   rshares = effective_vests_raw * usedPower / 10000
+        // where effective_vests_raw = display_VESTS * 1e6 (6 decimal places in blockchain)
         const vestingShares    = parseFloat(acc.vesting_shares);
         const receivedVesting  = parseFloat(acc.received_vesting_shares || 0);
         const delegatedVesting = parseFloat(acc.delegated_vesting_shares || 0);
         const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
 
-        // Blurt rshares: (vests * 1e6) * (vp/10000) * (weight/10000) * 0.02
-        // We use usedPower which already includes weight and the 1/50 (0.02) factor.
         const microVests = BigInt(Math.floor(effectiveVests * 1000000));
         const rs = (microVests * BigInt(usedPower)) / 10000n;
-        const rc = BigInt(fund.recent_claims.split(' ')[0] || fund.recent_claims);
-        const rb = parseFloat(fund.reward_balance);
-        
+
+        const rcStr = fund.recent_claims;
+        const rc = BigInt(typeof rcStr === 'string' ? (rcStr.split(' ')[0] || rcStr) : String(rcStr));
+        const rb = parseFloat(fund.reward_balance); // in BLURT
+
+        let voteValue = 0;
         if (rc > 0n) {
-          // Total potential reward increase
-          const totalValue = (Number(rs) / Number(rc)) * rb;
-          // On Blurt, what a user usually considers "their vote" is either the total 
-          // or the author's share. If 4.3 was too high and 1.6 is right, 
-          // we are likely looking at a curation/split or a different rshares unit.
-          // Let's use a 0.375 factor (common in some Blurt UI for net estimate)
-          voteValue = totalValue * 0.5; 
+          // Total reward contribution added to the post by this vote (BLURT)
+          // vote_value = reward_balance * rshares / recent_claims
+          voteValue = (Number(rs) / Number(rc)) * rb;
         }
 
-        // Fee: 0.050 flat + bandwidth (approx 0.005 for a vote)
-        const currentFee = 0.050 + 0.005;
+        // Vote op payload: voter + author + permlink + weight ≈ ~150 bytes
+        const voteFee = estimateTxFee(1, 150);
 
         voteModal.estimatedValue = {
           vpCostPct,
           vpAfter,
           voteValue: voteValue.toFixed(4),
-          fee: currentFee.toFixed(3)
+          fee: voteFee   // actual BLURT tx fee (flat + bandwidth)
         };
       } catch (e) {
         console.warn('Vote estimate calculation error:', e);
@@ -1337,8 +1409,8 @@ createApp({
     const openVoteModal = (post) => {
       voteModal.post = post;
       voteModal.show = true;
-      // Estimate with current weight
-      estimateVote(voteModal.weight);
+      // Fetch current fee rates (once per session) then estimate
+      fetchFeeInfo().then(() => estimateVote(voteModal.weight));
     };
 
     const triggerSupportLogic = async (post, weight) => {
@@ -2151,6 +2223,7 @@ createApp({
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
       voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
+      feeInfo, postFeeEstimate, replyFeeEstimate, schedulePostFeeUpdate, scheduleReplyFeeUpdate,
       bcWaitQueue, bcQueueExpanded,
       imgModal, openImgModal,
       statusModal, showStatus,
