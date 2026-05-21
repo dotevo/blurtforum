@@ -79,10 +79,10 @@ body.theme-deepnight {
 
 /* 4. DARK OCEAN (Dark Blue/Teal) */
 body.theme-ocean {
-  --primary:       #1abc9c;
+  --primary:       #1a7c9c;
   --primary-lt:    #48c9b0;
   --primary-dk:    #148f77;
-  --accent:        #3498db;
+  --accent:        #2448ab;
   --accent-lt:     #5dade2;
   --bg-page:       #0a192f;
   --bg-white:      #112240;
@@ -106,7 +106,7 @@ body.theme-forest {
   --primary:       #2D6A4F;
   --primary-lt:    #3A866A;
   --primary-dk:    #1E4F3A;
-  --accent:        #F4A261;
+  --accent:        #64B261;
   --accent-lt:     #F7BC8A;
   --bg-page:       #F5F1EB;
   --bg-white:      #FFFFFF;
