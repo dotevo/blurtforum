@@ -1,48 +1,10 @@
-/**
- * Utility functions for BlurtForum
- */
-
-function parseStructure(text) {
-  if (!text || !text.trim()) return null;
-  const lines = text.split('\n');
-  const categories = [];
-  let currentCat = null;
-  let fid = 0;
- 
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#!') || line.startsWith('//')) continue;
- 
-    if (line.startsWith('## ')) {
-      currentCat = { name: line.slice(3).trim(), forums: [] };
-      categories.push(currentCat);
-    } else if (line.startsWith('> ') && currentCat) {
-      const parts = line.slice(2).split('|').map(s => s.trim());
-      const name = parts[0] || 'Forum';
-      const tags = (parts[1] || '').split(',').map(s => s.trim()).filter(Boolean);
-      const desc = parts[2] || '';
-      currentCat.forums.push({
-        id: `f${++fid}`,
-        name,
-        targetTags: tags.length ? tags : [],
-        desc,
-        posts: [],
-        lastAuthor: '',
-        lastPermlink: '',
-        hasMore: true
-      });
-    }
-  }
-  return categories.length > 0 ? categories : null;
-}
- 
 function defaultStructure() {
   return [
     {
-      name: 'Daily & Life',
+      name: 'General',
       forums: [
-        { id:'f1', name:'Daily Activity',     targetTags:['actifit','mydailypost','blurtlife','life'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
-        { id:'f2', name:'Social & Family',    targetTags:['introduceyourself','parenting','moms','love','motivation'], desc:'', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
+        { id:'f1', name:'General Talk',       targetTags:['blurt-140455','blurt','blurtforum','general','talk'], desc:'General community discussions', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true },
+        { id:'f2', name:'Introductions',      targetTags:['introduceyourself','intro','hello'], desc:'Say hello to the community', posts:[], lastAuthor: '', lastPermlink: '', hasMore: true }
       ]
     },
     {
@@ -82,7 +44,7 @@ function defaultStructure() {
     }
   ];
 }
- 
+
 function genPermlink(title) {
   const slug = (title || 'post')
     .toLowerCase()
@@ -91,18 +53,6 @@ function genPermlink(title) {
     .replace(/\s+/g, '-')
     .substring(0, 200);
   return `${slug}-${Date.now().toString(36)}`;
-}
- 
-function renderMarkdown(text) {
-  if (!text) return '';
-  try {
-    let html = marked.parse(text, { breaks: true, gfm: true });
-    html = html.replace(/(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g, '$1<a href="#" class="mention" data-user="$2">@$2</a>');
-    return DOMPurify.sanitize(html);
-  } catch (e) {
-    console.error('Markdown error:', e);
-    return text;
-  }
 }
 
 function parsePayout(val) {
@@ -122,3 +72,30 @@ document.addEventListener('click', (e) => {
     }
   }
 });
+
+// Layout parser
+function parseStructure(text) {
+  if (!text) return null;
+  const categories = [];
+  let currentCat = null;
+  const lines = text.split('\n');
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('##')) {
+      currentCat = { name: trimmed.replace('##', '').trim(), forums: [] };
+      categories.push(currentCat);
+    } else if (trimmed.startsWith('>') && currentCat) {
+      const parts = trimmed.substring(1).split('|').map(s => s.trim());
+      if (parts.length >= 2) {
+        currentCat.forums.push({
+          id: 'f-' + Math.random().toString(36).substr(2, 9),
+          name: parts[0],
+          targetTags: parts[1].split(',').map(t => t.trim().toLowerCase()),
+          desc: parts[2] || '',
+          posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: []
+        });
+      }
+    }
+  });
+  return categories.length > 0 ? categories : null;
+}

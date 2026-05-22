@@ -801,6 +801,7 @@ createApp({
       // SHA-256 via CryptoJS (works on HTTP too, unlike crypto.subtle)
       const wordArray = CryptoJS.lib.WordArray.create(combined);
       const hashHex = CryptoJS.SHA256(wordArray).toString(CryptoJS.enc.Hex);
+      console.log('Upload Hash:', hashHex);
       const hashBytes = new Uint8Array(hashHex.match(/.{2}/g).map(b => parseInt(b, 16)));
 
       let sigHex;
@@ -809,12 +810,36 @@ createApp({
         const sig = privKey.sign(hashBytes);
         // Keep full 65-byte signature (130 hex) including recovery byte
         sigHex = typeof sig.toString === 'function' ? sig.toString() : Array.from(sig).map(b => b.toString(16).padStart(2,'0')).join('');
+        console.log('Private Key Sig:', sigHex);
       } else {
-        // WhaleVault: sign the hash hex with posting key
+        // WhaleVault: sign using the Buffer-JSON format convention
+        // This tells the keychain to treat the string as binary data, hash it, and sign it.
         sigHex = await new Promise((resolve, reject) => {
           if (!window.blurt_keychain) { reject(new Error('WhaleVault not available')); return; }
-          window.blurt_keychain.requestSignBuffer(auth.user.username, hashHex, 'posting', (res) => {
-            if (res && res.success) resolve(res.result || '');
+          
+          const bufferObject = {
+            type: 'Buffer',
+            data: Array.from(combined)
+          };
+          const bufJson = JSON.stringify(bufferObject);
+
+          window.blurt_keychain.requestSignBuffer(auth.user.username, bufJson, 'posting', (res) => {
+            if (res && res.success) {
+              let result = res.result;
+              if (typeof result === 'string') {
+                // Strip any suffix like :0 or :1
+                result = result.split(':')[0];
+
+                // Convert EOS-style signature (SIG_K1_...) to hex if needed
+                if (result.startsWith('SIG_K1_')) {
+                  try {
+                    result = dblurt.Signature.fromString(result).toString();
+                  } catch (e) { console.warn('Signature conversion error:', e); }
+                }
+              }
+              console.log('WhaleVault Sig (Buffer-JSON):', result);
+              resolve(result || '');
+            }
             else reject(new Error(res ? res.message : 'WV sign error'));
           });
         });

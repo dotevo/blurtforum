@@ -1,3 +1,61 @@
+/* ===== EMBEDS ===== */
+.embed-wrapper {
+  margin: 15px 0;
+}
+.embed-container {
+  position: relative;
+  padding-bottom: 56.25%; /* 16:9 ratio */
+  height: 0;
+  overflow: hidden;
+  max-width: 100%;
+  background: #000;
+  border-radius: 4px;
+}
+.embed-container iframe,
+.embed-container object,
+.embed-container embed {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+.embed-suno {
+  height: 150px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.embed-suno iframe {
+  width: 100%;
+  height: 100%;
+}
+.embed-vertical {
+  position: relative;
+  padding-bottom: 177.77%; /* 9:16 ratio */
+  height: 0;
+  overflow: hidden;
+  max-width: 400px;
+  margin: 0 auto;
+  background: #000;
+  border-radius: 4px;
+}
+.embed-vertical iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+.embed-source {
+  margin-top: 5px;
+  font-size: 11px;
+  opacity: 0.7;
+  word-break: break-all;
+}
+.post-body .embed-wrapper {
+  margin-bottom: 15px;
+}
+
 /* ===== THEMES ===== */
 
 /* 1. SUBSILVER (Default Light) */
