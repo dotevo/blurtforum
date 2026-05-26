@@ -87,10 +87,15 @@ function parseStructure(text) {
     } else if (trimmed.startsWith('>') && currentCat) {
       const parts = trimmed.substring(1).split('|').map(s => s.trim());
       if (parts.length >= 2) {
+        const name = parts[0];
+        const tags = parts[1].split(',').map(t => t.trim().toLowerCase());
+        // Stable ID based on tags or name slug
+        const stableId = tags.length > 0 ? tags[0] : name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+        
         currentCat.forums.push({
-          id: 'f-' + Math.random().toString(36).substr(2, 9),
-          name: parts[0],
-          targetTags: parts[1].split(',').map(t => t.trim().toLowerCase()),
+          id: stableId,
+          name,
+          targetTags: tags,
           desc: parts[2] || '',
           posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: []
         });

@@ -632,6 +632,61 @@ a:hover { color: var(--accent); text-decoration: underline; }
   border-top: 1px solid var(--border-main);
 }
  
+/* ===== ACTIVITY FEED RESPONSIVE ===== */
+.activity-item-inner {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.activity-item-main {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.activity-item-title {
+  opacity: 0.8;
+  font-style: italic;
+  font-size: 12px;
+}
+.activity-item-time {
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+@media (max-width: 650px) {
+  .activity-item-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .activity-item-sub {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .activity-item-main {
+    width: 100%;
+  }
+  .activity-item-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 10px;
+  }
+}
+
 /* ===== WHALEVAULT BUTTON ===== */
 .wv-btn {
   width: 100%;

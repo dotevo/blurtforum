@@ -9,7 +9,11 @@ createApp({
     const browserLang = navigator.language.slice(0, 2).toLowerCase();
     const lang = ref(langs.includes(browserLang) ? browserLang : 'en');
     const setLang = (l) => { lang.value = l; document.documentElement.lang = l; };
-    const t = (k) => (TR[lang.value] || TR.en)[k] || k;
+    const t = (k) => {
+      const val = (TR[lang.value] || TR.en)[k];
+      if (!val) console.warn(`Translation missing for key: "${k}" in lang: "${lang.value}"`);
+      return val || k;
+    };
 
     const themes = [
       { id: 'subsilver', label: '🏛 Classic' },
@@ -64,6 +68,7 @@ createApp({
     const loading      = ref(true);
     const repliesLoading = ref(false);
     const targetNotifPermlink = ref(null);
+    const targetNotifMatch = ref(null); // { author, ts }
     const globalProps  = ref({});
     const forumStructure = ref([]);
     const activeForum  = ref(null);
@@ -131,6 +136,19 @@ createApp({
     const editModal = reactive({ show: false, loading: false, isPost: false, author: '', permlink: '', title: '', body: '', error: '', success: '', target: null });
 
     const auth = reactive({ user: null });
+    const resumeAction = ref(null);
+
+    const checkLock = (fn) => {
+      if (auth.user && auth.user.type === 'key' && auth.user.locked) {
+        resumeAction.value = fn;
+        pinModal.mode = 'unlock';
+        pinModal.value = '';
+        pinModal.error = '';
+        pinModal.show = true;
+        return true;
+      }
+      return false;
+    };
     
     // Generic status modal (success/error/info)
     const statusModal = reactive({
@@ -216,6 +234,144 @@ createApp({
       hasNew: false,
       clickedIds: JSON.parse(localStorage.getItem('bf_clicked_notif_ids') || '[]')
     });
+
+    const globalActivity = ref([]);
+    const activityExpanded = ref(true);
+    const activityFullList = ref(false);
+    const mobileActivityExpanded = ref(false);
+
+    /**
+     * updateGlobalActivity: Fetches recent activity from all subscribed communities.
+     * Logic:
+     * 1. Fetches up to 5 posts from each community, sorted by 'activity'.
+     * 2. 'isRead' status is determined by comparing the post's 'last_activity' timestamp 
+     *    against the value stored in localStorage (bf_read_status_v2).
+     * 3. A post is considered READ if stored timestamp >= API last_activity timestamp.
+     */
+    const updateGlobalActivity = async () => {
+      if (!auth.user || !userSubscriptions.value.length) return;
+      
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
+      const allActivity = [];
+      const currentUsername = auth.user.username;
+
+      const subsToCheck = userSubscriptions.value.slice(0, 25);
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      
+      for (const sub of subsToCheck) {
+        try {
+          const posts = await client.call('bridge', 'get_forum_posts', {
+            community: sub.account,
+            limit: 5,
+            sort: 'activity'
+          });
+          
+          if (posts && Array.isArray(posts)) {
+            posts.forEach(p => {
+              const activityTs = new Date(p.last_activity || p.created).getTime();
+              
+              // Skip items older than 7 days
+              if (activityTs < sevenDaysAgo) return;
+
+              const key = `${p.author}/${p.permlink}`;
+              const lastReadTs = readStatus[key] || 0;
+              const lastActAuthor = p.last_activity_author || p.author;
+              
+              // CRITICAL LOGIC: A post is read if our stored timestamp is exactly equal 
+              // or greater than the API's reported last_activity timestamp.
+              const isRead = !!(lastReadTs >= activityTs || (currentUsername && lastActAuthor === currentUsername));
+
+              allActivity.push({
+                id: p.post_id,
+                author: lastActAuthor,
+                title: p.title,
+                created: p.last_activity || p.created,
+                community: sub.account,
+                community_title: sub.title,
+                permlink: p.permlink,
+                root_author: p.author,
+                root_permlink: p.permlink,
+                is_post: p.author === lastActAuthor && p.created === p.last_activity,
+                isRead,
+                lastActivityTs: activityTs // Store for use in markTopicAsRead
+              });
+            });
+          }
+        } catch (e) { /* silent fail */ }
+      }
+      
+      allActivity.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+      
+      const seen = new Set();
+      globalActivity.value = allActivity.filter(a => {
+        if (seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      }).slice(0, 30);
+    };
+
+    /**
+     * markTopicAsRead: Updates the last read timestamp for a specific topic.
+     * We store the 'last_activity' timestamp from the API to know exactly 
+     * which state of the thread we have seen.
+     */
+    const markTopicAsRead = (topic) => {
+      if (!topic) return;
+      const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
+      
+      const key = `${topic.author}/${topic.permlink}`;
+      
+      // CRITICAL: We take the maximum of current stored time, the topic's last activity,
+      // or the specific lastActivityTs from the feed. This ensures we never "go back" 
+      // in time and mark something as unread if we've already seen a newer state.
+      const currentStored = readStatus[key] || 0;
+      const incomingTs = topic.lastActivityTs || (topic.lastActivity ? new Date(topic.lastActivity).getTime() : Date.now());
+      
+      const finalTs = Math.max(currentStored, incomingTs, Date.now());
+      
+      readStatus[key] = finalTs;
+      localStorage.setItem('bf_read_status_v2', JSON.stringify(readStatus));
+      
+      if (activeTopic.value && activeTopic.value.author === topic.author && activeTopic.value.permlink === topic.permlink) {
+        activeTopic.value.isRead = true;
+        activeTopic.value.isUnread = false;
+      }
+      
+      // UI feedback: immediately update the global feed items without a new API call
+      globalActivity.value.forEach(act => {
+        if (act.root_author === topic.author && act.root_permlink === topic.permlink) {
+          act.isRead = true;
+        }
+      });
+    };
+
+    const openActivity = (act) => {
+      // Switch community context if different
+      if (act.community !== config.communityAccount) {
+        config.communityAccount = act.community;
+        selectedCommunity.value = act.community;
+        forumClient = new dblurt.Client([getForumUrl()]);
+        client      = new dblurt.Client([getDataUrl()]);
+        loadData();
+      }
+      
+      // Mark as read using the exact timestamp from the activity item
+      markTopicAsRead({ 
+        author: act.root_author, 
+        permlink: act.root_permlink,
+        lastActivityTs: act.lastActivityTs 
+      });
+
+      // Set the target metadata for finding the specific comment in loadReplies
+      if (!act.is_post) {
+        targetNotifMatch.value = { author: act.author, ts: act.lastActivityTs };
+      } else {
+        targetNotifPermlink.value = act.permlink;
+      }
+
+      // Open the topic (root)
+      openTopic({ author: act.root_author, permlink: act.root_permlink });
+    };
     const oldContentModal = reactive({ show: false, loading: false, author: '', permlink: '', body: '', status: '', beneficiaries: [], originalPost: null });
     const imgModal = reactive({ show: false, src: '' });
     const openImgModal = (src) => {
@@ -223,17 +379,26 @@ createApp({
       imgModal.show = true;
     };
  
-    const fmtDate = (s) => new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
+    const fmtDate = (s) => {
+      if (!s) return '';
+      try {
+        return new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
+      } catch (e) { return s || ''; }
+    };
 
     const timeAgo = (s) => {
       if (!s) return '';
-      const date = new Date(s.endsWith('Z') ? s : s + 'Z');
-      const diff = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (diff < 60)     return `${diff}s ago`;
-      if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
-      if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
-      if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-      return date.toLocaleDateString();
+      try {
+        const date = new Date(s.endsWith('Z') ? s : s + 'Z');
+        const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+        
+        // Correct unit lookup: ensure we use the translated unit and then append the 'ago' suffix
+        if (diff < 60)     return `${diff}${t('secAgo') || 's'} ${t('ago') || 'ago'}`;
+        if (diff < 3600)   return `${Math.floor(diff / 60)}${t('minAgo') || 'm'} ${t('ago') || 'ago'}`;
+        if (diff < 86400)  return `${Math.floor(diff / 3600)}${t('hourAgo') || 'h'} ${t('ago') || 'ago'}`;
+        if (diff < 604800) return `${Math.floor(diff / 86400)}${t('dayAgo') || 'd'} ${t('ago') || 'ago'}`;
+        return date.toLocaleDateString();
+      } catch (e) { return ''; }
     };
 
     const forumHasUnread = (forum) => {
@@ -253,6 +418,9 @@ createApp({
     const loadData = async (direction = 'current', targetForum = null) => {
       loading.value = true;
       structureNote.value = false;
+      
+      // Always try to refresh user rewards/VP when loading main data
+      refreshUser();
  
       try {
         if (direction === 'current' && !targetForum) {
@@ -417,10 +585,16 @@ createApp({
 
       const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
       const lastReadTs = readStatus[`${p.author}/${p.permlink}`] || 0;
+      
+      // Use last_activity for comparison, falling back to created
       const activityTs = new Date(p.last_activity || p.created).getTime();
       
+      // Post is read if our recorded timestamp is >= last activity
+      // OR if we are the author of the last activity
       const lastActAuthor = p.last_activity_author || p.author;
-      const isRead = !!(lastReadTs >= activityTs || (auth.user && lastActAuthor === auth.user.username));
+      const currentUsername = auth.user ? auth.user.username : null;
+      
+      const isRead = !!(lastReadTs >= activityTs || (currentUsername && lastActAuthor === currentUsername));
       const isUnread = !isRead;
 
       // Muting logic
@@ -591,6 +765,15 @@ createApp({
       
       replies.value = [...flat, ...stillPending].sort((a, b) => new Date(a.created) - new Date(b.created));
       
+      // If we are looking for a specific comment by author/timestamp (from Activity Feed)
+      if (targetNotifMatch.value) {
+        const match = flat.find(r => r.author === targetNotifMatch.value.author && new Date(r.created).getTime() === targetNotifMatch.value.ts);
+        if (match) {
+          targetNotifPermlink.value = match.permlink;
+        }
+        targetNotifMatch.value = null;
+      }
+
       if (!keepState) {
         repliesLoading.value = false;
         if (targetNotifPermlink.value) {
@@ -640,6 +823,11 @@ createApp({
       forum.pageHistory = [];
       forum.hasMore = true;
 
+      if (forum) {
+        localStorage.setItem('bf_last_forum_id', forum.id);
+        localStorage.setItem('bf_last_community', config.communityAccount);
+      }
+
       activeForum.value = forum;
       view.value = "forum";
       activeTopic.value = null;
@@ -648,17 +836,19 @@ createApp({
       loadData("current", forum);
     };
  
-    const markTopicAsRead = (topic) => {
-      if (!topic) return;
-      const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
-      const ts = new Date(topic.lastActivity).getTime();
-      readStatus[`${topic.author}/${topic.permlink}`] = ts;
-      localStorage.setItem('bf_read_status_v2', JSON.stringify(readStatus));
-      topic.isRead = true;
-      topic.isUnread = false;
-    };
+    const openTopic = async (topic) => {
+      // If topic is just a stub (from activity feed), fetch full content first
+      if (!topic.payout && !topic.body) {
+        loading.value = true;
+        try {
+          const full = await client.condenser.getContent(topic.author, topic.permlink);
+          if (full && full.author) {
+            topic = normalizePost(full);
+          }
+        } catch (e) { console.error('Error fetching full topic:', e); }
+        loading.value = false;
+      }
 
-    const openTopic = (topic) => {
       activeTopic.value = { ...topic, beneficiaries: topic.beneficiaries || [] };
       bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
       view.value = 'topic';
@@ -667,7 +857,7 @@ createApp({
 
       markTopicAsRead(activeTopic.value);
 
-      // Fetch full content in background to get beneficiaries
+      // Fetch full content in background to get beneficiaries if still missing
       if (!topic.beneficiaries || !topic.beneficiaries.length) {
         client.condenser.getContent(topic.author, topic.permlink).then(full => {
           if (full && full.beneficiaries && full.beneficiaries.length && activeTopic.value && activeTopic.value.permlink === topic.permlink) {
@@ -867,6 +1057,7 @@ createApp({
     };
 
     const handleImageUpload = async (file, target) => {
+      if (checkLock(() => handleImageUpload(file, target))) return;
       if (!file || !file.type.startsWith('image/')) return;
       const key = target === 'post' ? 'postImgUploading' : 'replyImgUploading';
       try {
@@ -927,6 +1118,7 @@ createApp({
     // ──────────────────────────────────────────────────────────────────────
 
     const claimRewards = async () => {
+      if (checkLock(claimRewards)) return;
       if (!auth.user) return;
       try {
         const accounts = await client.condenser.getAccounts([auth.user.username]);
@@ -1130,6 +1322,7 @@ createApp({
     // ───────────────────────────────────────────────────────────────────────
  
     const submitReply = async () => {
+      if (checkLock(submitReply)) return;
       if (!auth.user || !replyTarget.value) return;
       const body = replyForm.body.trim();
       if (!body) { replyForm.error = 'Reply cannot be empty.'; return; }
@@ -1210,6 +1403,7 @@ createApp({
     };
  
     const submitPost = async () => {
+      if (checkLock(submitPost)) return;
       if (!auth.user || !activeForum.value) return;
       const title = postForm.title.trim();
       const body  = postForm.body.trim();
@@ -1488,6 +1682,7 @@ createApp({
     };
 
     const submitVoteConfirmed = async () => {
+      if (checkLock(submitVoteConfirmed)) return;
       if (!auth.user || !voteModal.post) return;
       const post   = voteModal.post;
       const weight = Math.min(Math.max(Math.round(voteModal.weight), 1), 100) * 100; // 0-10000
@@ -1549,6 +1744,7 @@ createApp({
     // ───────────────────────────────────────────────────────────────────────
 
     const submitSupportComment = async () => {
+      if (checkLock(submitSupportComment)) return;
       if (!auth.user || !oldContentModal.author) return;
       oldContentModal.loading = true;
       oldContentModal.status = t('supporting');
@@ -1609,6 +1805,7 @@ createApp({
     };
 
     const mutePost = async (post, mute = true) => {
+      if (checkLock(() => mutePost(post, mute))) return;
       if (!auth.user || !canMute.value) return;
       if (mute && !confirm(t('confirmMute'))) return;
       
@@ -1639,6 +1836,7 @@ createApp({
     };
 
     const saveStructure = async () => {
+      if (checkLock(saveStructure)) return;
       if (!auth.user || !canEditStructure.value) return;
       
       if (structureForm.text.length > 1000) {
@@ -1680,8 +1878,14 @@ createApp({
       const dateObj = new Date(post.created.endsWith('Z') ? post.created : post.created + 'Z');
       dateObj.setDate(dateObj.getDate() + 7);
       
+      // Sort votes by value (rshares) descending
+      const sortedVotes = [...(post.active_votes || [])].sort((a, b) => {
+        return parseFloat(b.rshares || 0) - parseFloat(a.rshares || 0);
+      });
+
       payoutModal.post = {
         ...post,
+        active_votes: sortedVotes,
         payoutDate: dateObj.toLocaleString()
       };
       payoutModal.beneficiaries = [];
@@ -1905,7 +2109,14 @@ createApp({
                session.key = encrypted;
                localStorage.setItem('blurtforum_session', JSON.stringify(session));
              }
+             if (auth.user) auth.user.locked = false;
              pinModal.show = false;
+             
+             if (resumeAction.value) {
+               const fn = resumeAction.value;
+               resumeAction.value = null;
+               fn();
+             }
           }
         }
       } catch (e) {
@@ -1930,6 +2141,7 @@ createApp({
     };
 
     const submitEdit = async () => {
+      if (checkLock(submitEdit)) return;
       if (!auth.user || !editModal.target) return;
       editModal.loading = true;
       editModal.error = '';
@@ -1983,7 +2195,8 @@ createApp({
         username, type: 'key', key, vp,
         rewardBlurt: acc.reward_blurt_balance,
         rewardVesting: acc.reward_vesting_balance,
-        hasRewards
+        hasRewards,
+        locked: false
       };
       showLoginModal.value = false;
       loginForm.key = '';
@@ -2179,11 +2392,10 @@ createApp({
               }
             });
           } else {
-            // Key based login - requires unlocking
-            pinModal.mode = 'unlock';
-            pinModal.value = '';
-            pinModal.error = '';
-            pinModal.show = true;
+            // Key based login - just restore session without prompt
+            auth.user = { username: session.username, type: 'key', key: session.key, vp: '…', locked: true };
+            loadUserCommunities(session.username);
+            refreshUser();
           }
         } catch (e) { /* ignore */ }
       } else {
@@ -2213,10 +2425,40 @@ createApp({
           selectedCommunity.value = 'custom';
           customTag.value = comm;
         }
+      } else {
+        // Restore last community and forum if no specific URL
+        const lastComm = localStorage.getItem('bf_last_community');
+        if (lastComm) {
+          config.communityAccount = lastComm;
+          const found = allCommunities.value.find(c => c.account === lastComm);
+          if (found) selectedCommunity.value = lastComm;
+          else {
+            selectedCommunity.value = 'custom';
+            customTag.value = lastComm;
+          }
+        }
       }
 
       loadData().then(() => {
+        // If view is index and we have a saved forum, open it
+        const p = new URLSearchParams(window.location.search);
+        if (!p.get('view') || p.get('view') === 'index') {
+          const lastForumId = localStorage.getItem('bf_last_forum_id');
+          if (lastForumId) {
+            for (const cat of forumStructure.value) {
+              const f = cat.forums.find(forum => forum.id === lastForumId);
+              if (f) {
+                openForum(f);
+                break;
+              }
+            }
+          }
+        }
         handleUrlChange();
+        
+        // Start global activity check after initial load
+        setTimeout(updateGlobalActivity, 2000);
+        setInterval(updateGlobalActivity, 300000); // Every 5 minutes
       });
 
       // Periodic refresh of VP
@@ -2245,6 +2487,7 @@ createApp({
       structureForm, showStructureDocs,
       forumPagination, loadMorePosts,
       pinModal, handlePinSubmit,
+      globalActivity, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
       voteModal, openVoteModal, submitVoteConfirmed, estimateVote,

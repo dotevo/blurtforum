@@ -133,6 +133,53 @@
   </template>
   <span class="gs" style="margin-left:auto; font-weight: bold;">{{ t('currentCommunity') }}: {{ config.communityAccount }}</span>
 </div>
+
+<!-- GLOBAL ACTIVITY FEED -->
+<div v-if="auth.user && globalActivity.length > 0" style="margin: 0 15px 15px;">
+  <table class="forumline">
+    <tr>
+      <td class="catHead" style="height: 34px; padding: 0 12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+          <span><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
+          <button class="btn btn-sm btn-ghost" @click="activityExpanded = !activityExpanded" style="padding: 2px 8px; font-size: 10px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
+            {{ activityExpanded ? t('hide') : t('show') + ' (' + globalActivity.length + ')' }}
+          </button>
+        </div>
+      </td>
+    </tr>
+    <template v-if="activityExpanded">
+      <tr v-for="act in globalActivity.slice(0, activityFullList ? 20 : 3)" :key="act.id">
+        <td class="row1" style="padding: 10px 15px; border-bottom: 1px solid var(--bg-white);">
+          <a href="#" @click.prevent="openActivity(act)" 
+             style="text-decoration: none; display: block;"
+             :style="{ fontWeight: act.isRead ? 'normal' : 'bold', color: act.isRead ? 'var(--text-muted)' : 'var(--text)' }">
+            <div class="activity-item-inner">
+              <div class="activity-item-main">
+                <span v-if="!act.isRead" style="display:inline-block; width:6px; height:6px; background:var(--accent); border-radius:50%; margin-right:6px; vertical-align:middle;"></span>
+                {{ act.is_post ? t('newPostIn') : t('newCommentIn') }}
+                <span style="display:inline-block; background: var(--primary); color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin: 0 4px; text-transform: uppercase; font-weight: bold; vertical-align: middle; opacity: 0.9;">{{ act.community_title }}</span>
+                {{ t('by') }} <b :style="{ color: act.isRead ? 'inherit' : 'var(--primary)' }">@{{ act.author }}</b>
+              </div>
+              <div class="activity-item-sub">
+                <span v-if="act.title" class="activity-item-title">
+                  — "{{ act.title.length > 50 ? act.title.substring(0, 50) + '...' : act.title }}"
+                </span>
+                <span class="activity-item-time gs">{{ timeAgo(act.created) }}</span>
+              </div>
+            </div>
+          </a>
+        </td>
+      </tr>
+      <tr v-if="globalActivity.length > 3">
+        <td class="row2" align="center" style="padding: 8px;">
+           <a href="#" @click.prevent="activityFullList = !activityFullList" class="gs" style="font-size: 11px; font-weight: bold; text-decoration: underline;">
+             {{ activityFullList ? t('showLess') : t('showMore') + ' (' + (globalActivity.length - 3) + ')' }}
+           </a>
+        </td>
+      </tr>
+    </template>
+  </table>
+</div>
  
 <!-- NAV BAR -->
 <div class="nav-bar">
@@ -386,7 +433,7 @@
           </td>
           <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
             <span class="badge payout-link" :class="post.isPaid?'badge-green':'badge-blue'" @click.stop="openPayoutModal(post)">
-              {{ post.payout.toFixed(2) }} B
+              {{ (post.payout || 0).toFixed(2) }} B
             </span>
           </td>
           <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
@@ -436,14 +483,14 @@
               <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                 <span v-if="activeTopic.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
                 <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
-                  {{ activeTopic.payout.toFixed(2) }} BLURT
+                  {{ (activeTopic.payout || 0).toFixed(2) }} BLURT
                 </span>
                 <template v-if="activeTopic.beneficiaries && activeTopic.beneficiaries.length">
                   <div class="beneficiaries-inline">
                     <span class="ben-icon">👥</span>
                     <template v-for="(b, bi) in activeTopic.beneficiaries.slice(0,3)" :key="b.account">
                       <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
-                      <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
+                      <span class="ben-pct">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
                       <span v-if="bi < activeTopic.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
                     </template>
                     <span v-if="activeTopic.beneficiaries.length > 3" class="ben-more">+{{ activeTopic.beneficiaries.length - 3 }}</span>
@@ -555,14 +602,14 @@
                   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                     <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
                     <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
-                      {{ r.payout.toFixed(3) }} B
+                      {{ (r.payout || 0).toFixed(3) }} B
                     </span>
                     <template v-if="r.beneficiaries && r.beneficiaries.length">
                       <div class="beneficiaries-inline">
                         <span class="ben-icon">👥</span>
                         <template v-for="(b, bi) in r.beneficiaries.slice(0,3)" :key="b.account">
                           <a href="#" @click.prevent="openProfile(b.account)" class="ben-link">@{{ b.account }}</a>
-                          <span class="ben-pct">{{ (b.weight/100).toFixed(0) }}%</span>
+                          <span class="ben-pct">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
                           <span v-if="bi < r.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
                         </template>
                         <span v-if="r.beneficiaries.length > 3" class="ben-more">+{{ r.beneficiaries.length - 3 }}</span>
@@ -719,7 +766,7 @@
             <a href="#" @click.stop.prevent="openTopic(post)">{{ post.title }}</a>
           </td>
           <td class="row2" align="center">
-            <span class="badge" :class="post.totalPayout>0?'badge-green':'badge-blue'">{{ post.payout.toFixed(2) }} B</span>
+            <span class="badge" :class="(post.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (post.payout || 0).toFixed(2) }} B</span>
           </td>
           <td class="row1" align="center">
             <span class="gs">{{ fmtDate(post.created) }}</span>
@@ -742,7 +789,7 @@
             {{ c.body.substring(0, 100) }}...
           </td>
           <td class="row2" align="center">
-            <span class="badge" :class="c.totalPayout>0?'badge-green':'badge-blue'">{{ c.payout.toFixed(2) }} B</span>
+            <span class="badge" :class="(c.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (c.payout || 0).toFixed(2) }} B</span>
           </td>
           <td class="row1" align="center">
             <span class="gs">{{ fmtDate(c.created) }}</span>
@@ -839,19 +886,19 @@
           <div v-for="b in payoutModal.beneficiaries" :key="b.account"
                style="padding: 6px 10px; border-bottom: 1px solid var(--border-main); display: flex; justify-content: space-between; align-items: center;">
             <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(b.account); payoutModal.show=false">@{{ b.account }}</a></span>
-            <span class="gs">{{ (b.weight / 100).toFixed(0) }}%</span>
+            <span class="gs">{{ ((b.weight || 0) / 100).toFixed(0) }}%</span>
           </div>
         </div>
       </div>
       <div style="font-weight: bold; color: var(--primary); margin-bottom: 8px;">{{ t('voters') }} ({{ (payoutModal.post.active_votes || []).length }})</div>
-      <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-main); background: var(--bg-r1); border-radius: 4px; overflow: hidden;">
+      <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-main); background: var(--bg-r1); border-radius: 4px;">
         <div v-for="v in payoutModal.post.active_votes" :key="v.voter"
              style="padding: 5px 10px; border-bottom: 1px solid var(--border-main); display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: bold;"><a href="#" @click.prevent="openProfile(v.voter); payoutModal.show=false">@{{ v.voter }}</a></span>
           <span class="gs">
             {{ (v.percent / 100).toFixed(0) }}%
             <template v-if="payoutModal.post.net_rshares > 0">
-              ({{ (v.rshares / payoutModal.post.net_rshares * payoutModal.post.payout).toFixed(3) }} B)
+              ({{ (v.rshares / payoutModal.post.net_rshares * (payoutModal.post.payout || 0)).toFixed(3) }} B)
             </template>
           </span>
         </div>
