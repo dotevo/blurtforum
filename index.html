@@ -825,11 +825,6 @@
       <div class="tabs" style="margin-top: 20px;">
         <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="profileTab='posts'">{{ t('posts') }}</button>
         <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="profileTab='comments'">{{ t('comments') }}</button>
-        <div style="margin-left: auto;">
-          <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-            <input type="checkbox" v-model="profileUser.filterCommunity"> {{ t('communityPosts') }}
-          </label>
-        </div>
       </div>
 
       <table class="forumline profile-list-table" v-if="profileTab==='posts'">
@@ -839,7 +834,6 @@
           <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
         </tr>
         <tr v-for="post in profileUser.posts" :key="post.permlink" 
-            v-show="!profileUser.filterCommunity || post.category === config.communityAccount || (post.tags && post.tags.includes(config.communityAccount))"
             class="row-hover" @click="openTopic(post)">
           <td class="row1">
             <a href="#" @click.stop.prevent="openTopic(post)">{{ post.title }}</a>
@@ -861,7 +855,6 @@
           <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
         </tr>
         <tr v-for="c in profileUser.comments" :key="c.permlink" 
-            v-show="!profileUser.filterCommunity || c.category === config.communityAccount || (c.tags && c.tags.includes(config.communityAccount))"
             class="row-hover" @click="openTopic(c)">
           <td class="row1">
             <span class="gs">RE: @{{ c.parent_author }}</span><br>

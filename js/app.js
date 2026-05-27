@@ -136,8 +136,7 @@ createApp({
       data: null,
       posts: [],
       comments: [],
-      loading: false,
-      filterCommunity: true
+      loading: false
     });
     const profileTab = ref('posts');
 
@@ -982,27 +981,11 @@ createApp({
         }
 
         const history = await client.condenser.getDiscussions('blog', { tag: username, limit: 20 });
-        profileUser.posts = history.filter(p => p.author === username).map(p => {
-          let tags = [];
-          try { tags = JSON.parse(p.json_metadata || '{}').tags || []; } catch (e) { /* ignore */ }
-          return {
-            ...p,
-            tags,
-            payout: parsePayout(p.total_payout_value) + parsePayout(p.pending_payout_value)
-          };
-        });
+        profileUser.posts = history.filter(p => p.author === username).map(normalizePost);
         
-        const comments = await client.condenser.call('bridge', 'get_account_posts', [{ account: username, sort: 'comments', limit: 20 }]);
+        const comments = await client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 });
         if (comments) {
-          profileUser.comments = comments.map(c => {
-            let tags = [];
-            try { tags = JSON.parse(c.json_metadata || '{}').tags || []; } catch (e) { /* ignore */ }
-            return {
-              ...c,
-              tags,
-              payout: parsePayout(c.total_payout_value) + parsePayout(c.pending_payout_value)
-            };
-          });
+          profileUser.comments = comments.map(normalizePost);
         }
       } catch (err) {
         console.error('Profile error:', err);
