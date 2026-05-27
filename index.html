@@ -306,11 +306,13 @@
       <!-- EXPLORATION SECTION -->
       <table class="forumline index-table" style="margin-top: 20px;">
         <tr>
-          <td colspan="4" class="catHead" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>{{ t('exploration') }}</span>
-            <button class="btn btn-sm btn-ghost" @click="toggleExploration" style="padding: 2px 6px; font-size: 9px; color: var(--primary); border-color: var(--primary);">
-              {{ explorationExpanded ? t('hide') : t('show') }}
-            </button>
+          <td colspan="3" class="catHead">
+            <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+              <span>{{ t('exploration') }}</span>
+              <button class="btn btn-sm btn-ghost" @click="toggleExploration" style="padding: 2px 6px; font-size: 9px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
+                {{ explorationExpanded ? t('hide') : t('show') }}
+              </button>
+            </div>
           </td>
         </tr>
         <template v-if="explorationExpanded">
@@ -325,7 +327,7 @@
               <span style="font-size:18px; opacity:0.7;"><i class="fa-solid fa-earth-americas"></i></span>
             </td>
             <td class="row1">
-              <a href="#" @click.stop.prevent="openForum(vf)" style="font-weight: bold;">{{ vf.name }}</a>
+              <a href="#" @click.stop.prevent="openForum(vf)" style="font-weight: bold;">{{ t(vf.nameKey) }}</a>
             </td>
             <td class="row1" align="center">
               <template v-if="vf.posts && vf.posts.length > 0">
@@ -551,7 +553,7 @@
           <td class="row1 post-profile">
             <div class="avatar" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/128x128)'}"></div>
             <div v-if="auth.user && auth.user.username !== activeTopic.author" style="margin-top:8px;">
-              <button class="btn btn-sm" :class="followingSet.has(activeTopic.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(activeTopic.author)" style="padding: 2px 6px; font-size: 10px; width: 100%;">
+              <button class="btn btn-sm btn-follow" :class="followingSet.has(activeTopic.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(activeTopic.author)">
                 <i class="fa-solid" :class="followingSet.has(activeTopic.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                 {{ followingSet.has(activeTopic.author) ? t('followed') : t('follow') }}
               </button>
@@ -676,8 +678,9 @@
               <td :class="i%2===0?'row1':'row2'" class="post-profile">
                 <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
                 <div v-if="auth.user && auth.user.username !== r.author" style="margin-top:6px; margin-bottom:6px;">
-                  <button class="btn btn-sm" :class="followingSet.has(r.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(r.author)" style="padding: 1px 4px; font-size: 8px; width: 100%;">
+                  <button class="btn btn-sm btn-follow" :class="followingSet.has(r.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(r.author)">
                     <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
+                    {{ followingSet.has(r.author) ? t('followed') : t('follow') }}
                   </button>
                 </div>
               </td>
@@ -761,13 +764,12 @@
                 <h2 style="color: var(--primary); margin: 0 0 5px;">{{ profileUser.data ? profileUser.data.displayName : '@' + profileUser.username }}</h2>
                 <div class="gs" style="margin-bottom: 10px; font-weight: bold;">@{{ profileUser.username }}</div>
               </div>
-              <button v-if="auth.user && auth.user.username !== profileUser.username" 
-                      class="btn" :class="followingSet.has(profileUser.username) ? 'btn-ghost' : 'btn-accent'" 
+              <button v-if="auth.user && auth.user.username !== profileUser.username"
+                      class="btn btn-follow" :class="followingSet.has(profileUser.username) ? 'btn-ghost' : 'btn-accent'"
                       @click="toggleFollow(profileUser.username)">
                 <i class="fa-solid" :class="followingSet.has(profileUser.username) ? 'fa-user-check' : 'fa-user-plus'"></i>
                 {{ followingSet.has(profileUser.username) ? t('unfollow') : t('follow') }}
-              </button>
-            </div>
+              </button>            </div>
             
             <div v-if="profileUser.data" style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
               <div v-if="profileUser.data.about" style="font-size: 12px; margin-bottom: 10px; padding: 10px; background: var(--bg-r2); border-left: 3px solid var(--primary);">
@@ -827,7 +829,15 @@
         <tr v-for="post in profileUser.posts" :key="post.permlink" 
             class="row-hover" @click="openTopic(post)">
           <td class="row1">
-            <a href="#" @click.stop.prevent="openTopic(post)">{{ post.title }}</a>
+            <a href="#" @click.stop.prevent="openTopic(post)">{{ post.title }}</a><br>
+            <div v-if="post.beneficiaries && post.beneficiaries.length" class="beneficiaries-inline" style="margin-top:4px;">
+              <span class="ben-icon">👥</span>
+              <template v-for="(b, bi) in post.beneficiaries.slice(0,2)" :key="b.account">
+                <span class="ben-link" style="font-size: 10px;">@{{ b.account }}</span>
+                <span v-if="bi < post.beneficiaries.slice(0,2).length-1" class="ben-sep">,</span>
+              </template>
+              <span v-if="post.beneficiaries.length > 2" class="ben-more" style="font-size: 10px;">+{{ post.beneficiaries.length - 2 }}</span>
+            </div>
           </td>
           <td class="row2" align="center">
             <span class="badge" :class="(post.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (post.payout || 0).toFixed(2) }} B</span>
@@ -1229,6 +1239,21 @@
 </div>
 
 <!-- NOTIFICATION POPUP -->
+<!-- FOLLOW CONFIRMATION MODAL -->
+<div v-if="followModal.show" class="modal-overlay" @click.self="followModal.show=false">
+  <div class="modal-content" style="max-width: 400px; text-align: center;">
+    <h3>{{ followModal.isFollowing ? t('unfollow') : t('follow') }}</h3>
+    <button class="modal-close" @click="followModal.show=false">✕</button>
+    <div style="margin: 20px 0; font-size: 14px;">
+      {{ followModal.isFollowing ? t('confirmUnfollow').replace('{user}', followModal.user) : t('confirmFollow').replace('{user}', followModal.user) }}
+    </div>
+    <div style="display: flex; gap: 10px; justify-content: center;">
+      <button class="btn btn-accent" @click="confirmToggleFollow" style="min-width: 100px;">OK</button>
+      <button class="btn btn-ghost" @click="followModal.show=false" style="min-width: 100px;">{{ t('cancel') }}</button>
+    </div>
+  </div>
+</div>
+
 <div v-if="statusModal.show" class="modal-overlay" @click.self="statusModal.show=false" style="z-index: 5000;">
   <div class="modal-box" style="width: 350px;">
     <div class="modal-header" :style="{ background: statusModal.type === 'error' ? 'var(--error-border)' : (statusModal.type === 'success' ? 'var(--success-border)' : 'var(--primary)') }">

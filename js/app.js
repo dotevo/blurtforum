@@ -108,10 +108,10 @@ createApp({
 
     // Definitions for exploration sections
     const VIRTUAL_FORUMS = [
-      { id: 'user-feed', name: t('myFeed'), targetTags: [], type: 'feed', auth: true },
-      { id: 'global-trending', name: t('trending'), targetTags: [], type: 'trending' },
-      { id: 'global-new', name: t('newPosts'), targetTags: [], type: 'new' },
-      { id: 'global-activity', name: t('globalActivity'), targetTags: [], type: 'activity' }
+      { id: 'user-feed', nameKey: 'myFeed', targetTags: [], type: 'feed', auth: true },
+      { id: 'global-trending', nameKey: 'trending', targetTags: [], type: 'trending' },
+      { id: 'global-new', nameKey: 'newPosts', targetTags: [], type: 'new' },
+      { id: 'global-activity', nameKey: 'globalActivity', targetTags: [], type: 'activity' }
     ];
 
     const allCommunities = computed(() => {
@@ -234,6 +234,7 @@ createApp({
     const postForm = reactive({ title: '', body: '', loading: false, error: '', success: '', hasDraft: false, devTip: localStorage.getItem('blurtforum_devtip') !== 'false', beneficiary: { account: '', weight: '' }, selectedTag: '', customTags: '' });
 
     const payoutModal = reactive({ show: false, post: {}, beneficiaries: [] });
+    const followModal = reactive({ show: false, user: '', isFollowing: false });
     const notifModal = reactive({ 
       show: false, 
       loading: false, 
@@ -673,32 +674,36 @@ createApp({
     };
 
     const explorationForm = reactive({ forums: [...VIRTUAL_FORUMS], loading: false });
-    const explorationExpanded = ref(localStorage.getItem('bf_exploration_expanded') === 'true');
+    const explorationExpanded = ref(false); // Default to hidden on every load
     
+    const loadExplorationData = async () => {
+      // Load some preview data for virtual forums
+      explorationForm.loading = true;
+      for (const vf of explorationForm.forums) {
+        if (vf.auth && !auth.user) continue;
+        try {
+          const apiParams = { limit: 1 };
+          let raw = [];
+          if (vf.id === 'user-feed') raw = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' });
+          else if (vf.id === 'global-trending') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' });
+          else if (vf.id === 'global-new') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' });
+          else if (vf.id === 'global-activity') raw = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' });
+          
+          if (raw && raw.length > 0) {
+            vf.posts = [normalizePost(raw[0])];
+          } else {
+            vf.posts = [];
+          }
+        } catch (e) { vf.posts = []; }
+      }
+      explorationForm.loading = false;
+    };
+
     const toggleExploration = async () => {
       explorationExpanded.value = !explorationExpanded.value;
       localStorage.setItem('bf_exploration_expanded', explorationExpanded.value);
       if (explorationExpanded.value) {
-        // Load some preview data for virtual forums
-        explorationForm.loading = true;
-        for (const vf of explorationForm.forums) {
-          if (vf.auth && !auth.user) continue;
-          try {
-            const apiParams = { limit: 1 };
-            let raw = [];
-            if (vf.id === 'user-feed') raw = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' });
-            else if (vf.id === 'global-trending') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' });
-            else if (vf.id === 'global-new') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' });
-            else if (vf.id === 'global-activity') raw = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' });
-            
-            if (raw && raw.length > 0) {
-              vf.posts = [normalizePost(raw[0])];
-            } else {
-              vf.posts = [];
-            }
-          } catch (e) { vf.posts = []; }
-        }
-        explorationForm.loading = false;
+        await loadExplorationData();
       }
     };
 
@@ -1045,9 +1050,18 @@ createApp({
       } catch (e) { console.warn('Error loading following list:', e); }
     };
 
-    const toggleFollow = async (targetAuthor) => {
+    const toggleFollow = (targetAuthor) => {
       if (!auth.user) { openLoginModal(); return; }
-      if (checkLock(() => toggleFollow(targetAuthor))) return;
+      followModal.user = targetAuthor;
+      followModal.isFollowing = followingSet.value.has(targetAuthor);
+      followModal.show = true;
+    };
+
+    const confirmToggleFollow = async () => {
+      const targetAuthor = followModal.user;
+      followModal.show = false;
+      
+      if (checkLock(() => confirmToggleFollow())) return;
 
       const isFollowing = followingSet.value.has(targetAuthor);
       const op = ['custom_json', {
@@ -1072,7 +1086,7 @@ createApp({
         followingSet.value = newSet;
       } catch (err) {
         console.error('Follow error:', err);
-        showStatus('Social', 'Error updating follow status: ' + err.message, 'error');
+        showStatus('Social', 'Error updating follow status: ' + (err.message || err), 'error');
       }
     };
 
@@ -1422,6 +1436,50 @@ createApp({
     };
     // ───────────────────────────────────────────────────────────────────────
  
+    /**
+     * prepareBeneficiaries: Standardizes the creation of beneficiaries for posts and replies.
+     * Ensures:
+     * 1. Author is never a beneficiary (blockchain rule).
+     * 2. Accounts are trimmed and lowercase.
+     * 3. No duplicate accounts.
+     * 4. Community fee (3%) is only added if a valid community account (blurt-*) is provided.
+     * 5. Beneficiaries are sorted by account name (blockchain rule).
+     */
+    const prepareBeneficiaries = (customBeneficiary, communityAcc = null) => {
+      const beneficiaries = [];
+      const author = auth.user?.username;
+      if (!author) return [];
+
+      // 1. Community Fee (3%) - Only if it's a community account (blurt-*) and not the author
+      if (communityAcc && 
+          communityAcc.startsWith('blurt-') && 
+          communityAcc !== author) {
+        beneficiaries.push({ account: communityAcc, weight: 300 });
+      }
+
+      // 2. Developer Support (1%) - Only if not the author
+      if (postForm.devTip && author !== 'dotevo') {
+        beneficiaries.push({ account: 'dotevo', weight: 100 });
+      }
+
+      // 3. Optional Custom Beneficiary
+      if (customBeneficiary && customBeneficiary.account.trim()) {
+        const acc = customBeneficiary.account.trim().toLowerCase();
+        const weight = Math.min(Math.max(Math.round(parseFloat(customBeneficiary.weight) * 100) || 0, 1), 10000);
+        
+        if (weight > 0 && acc !== author) {
+          const existing = beneficiaries.find(b => b.account === acc);
+          if (existing) {
+            existing.weight = Math.min(10000, existing.weight + weight);
+          } else {
+            beneficiaries.push({ account: acc, weight: weight });
+          }
+        }
+      }
+
+      return beneficiaries.sort((a, b) => a.account.localeCompare(b.account));
+    };
+
     const submitReply = async () => {
       if (checkLock(submitReply)) return;
       if (!auth.user || !replyTarget.value) return;
@@ -1431,13 +1489,9 @@ createApp({
       replyForm.error = '';
       replyForm.success = '';
 
-      const beneficiaries = [{ account: config.communityAccount, weight: 300 }];
-      if (postForm.devTip) beneficiaries.push({ account: 'dotevo', weight: 100 });
-      if (replyForm.beneficiary.account.trim()) {
-        const w = Math.min(Math.max(Math.round(parseFloat(replyForm.beneficiary.weight) * 100) || 0, 1), 10000);
-        if (w > 0) beneficiaries.push({ account: replyForm.beneficiary.account.trim(), weight: w });
-      }
-      beneficiaries.sort((a, b) => a.account.localeCompare(b.account));
+      // Inherit community from the post being replied to (if it's a community post)
+      const communityAcc = activeTopic.value?.category || replyTarget.value.category;
+      const beneficiaries = prepareBeneficiaries(replyForm.beneficiary, communityAcc);
 
       const op = ['comment', {
         parent_author: replyTarget.value.author,
@@ -1448,12 +1502,10 @@ createApp({
         body,
         json_metadata: JSON.stringify({
           app: 'blurtforum/1.0',
-          tags: [config.communityAccount],
+          tags: [communityAcc || config.communityAccount],
           format: 'markdown'
         })
       }];
-
-      const beneficiaryExt = [[0, { beneficiaries }]];
 
       const options = ['comment_options', {
         author: auth.user.username,
@@ -1462,7 +1514,7 @@ createApp({
         percent_steem_dollars: 10000,
         allow_votes: true,
         allow_curation_rewards: true,
-        extensions: beneficiaryExt
+        extensions: beneficiaries.length > 0 ? [[0, { beneficiaries }]] : []
       }];
 
       try {
@@ -1470,8 +1522,6 @@ createApp({
         replyForm.success = t('replySuccess');
 
         // ── Optimistic UI ──────────────────────────────────────────────────
-        // Show the comment immediately while the blockchain confirms it.
-        // waitAndReload will later replace this with the real on-chain data.
         const parentPermlink = op[1].parent_permlink;
         const parentReply    = replies.value.find(r => r.permlink === parentPermlink);
         const optimisticDepth = parentReply ? parentReply.depth + 1 : 1;
@@ -1485,12 +1535,11 @@ createApp({
           depth:          optimisticDepth,
           pendingPayout:  0, totalPayout: 0, payout: 0,
           vote_count:     0, active_votes: [], net_rshares: 0,
-          beneficiaries:  [],
+          beneficiaries:  beneficiaries,
           _qOpen:         false,
           _pending:       'sending'
         };
         replies.value = [...replies.value, optimistic];
-        // ──────────────────────────────────────────────────────────────────
 
         replyForm.body = '';
         replyTarget.value = null;
@@ -1513,30 +1562,28 @@ createApp({
       postForm.error = '';
       postForm.success = '';
 
-      // Build tags: community account is always first, then the one selected forum tag,
-      // then any custom tags the user typed — max 5 total.
       const customTagsList = postForm.customTags
         .split(',')
         .map(s => s.trim().toLowerCase().replace(/[^a-z0-9-]/g, ''))
         .filter(Boolean);
-      const tags = [config.communityAccount];
+      
+      // If we are in a community, use its account as the primary tag (category).
+      // Otherwise, use the selected forum tag or the first custom tag.
+      const targetCommunity = config.communityAccount.startsWith('blurt-') ? config.communityAccount : null;
+      const primaryTag = targetCommunity || postForm.selectedTag || customTagsList[0] || 'blurt';
+
+      const tags = [primaryTag];
       if (postForm.selectedTag && !tags.includes(postForm.selectedTag)) tags.push(postForm.selectedTag);
       for (const ct of customTagsList) {
         if (tags.length >= 5) break;
         if (!tags.includes(ct)) tags.push(ct);
       }
 
-      const beneficiaries = [{ account: config.communityAccount, weight: 300 }];
-      if (postForm.devTip) beneficiaries.push({ account: 'dotevo', weight: 100 });
-      if (postForm.beneficiary.account.trim()) {
-        const w = Math.min(Math.max(Math.round(parseFloat(postForm.beneficiary.weight) * 100) || 0, 1), 10000);
-        if (w > 0) beneficiaries.push({ account: postForm.beneficiary.account.trim(), weight: w });
-      }
-      beneficiaries.sort((a, b) => a.account.localeCompare(b.account));
+      const beneficiaries = prepareBeneficiaries(postForm.beneficiary, targetCommunity);
 
       const op = ['comment', {
         parent_author: '',
-        parent_permlink: config.communityAccount,
+        parent_permlink: primaryTag,
         author: auth.user.username,
         permlink: genPermlink(title),
         title,
@@ -1545,11 +1592,9 @@ createApp({
           app: 'blurtforum/1.0',
           tags,
           format: 'markdown',
-          community: config.communityAccount
+          community: targetCommunity || undefined
         })
       }];
-
-      const beneficiaryExtPost = [[0, { beneficiaries }]];
 
       const options = ['comment_options', {
         author: auth.user.username,
@@ -1558,7 +1603,7 @@ createApp({
         percent_steem_dollars: 10000,
         allow_votes: true,
         allow_curation_rewards: true,
-        extensions: beneficiaryExtPost
+        extensions: beneficiaries.length > 0 ? [[0, { beneficiaries }]] : []
       }];
 
       try {
@@ -2521,6 +2566,9 @@ createApp({
 
       const params = new URLSearchParams(window.location.search);
       const comm = params.get('community');
+      const viewParam = params.get('view');
+      const forumParam = params.get('forum');
+
       if (comm) {
         config.communityAccount = comm;
         config.lockedCommunity = true;
@@ -2547,9 +2595,9 @@ createApp({
       }
 
       loadData().then(() => {
-        // If view is index and we have a saved forum, open it
-        const p = new URLSearchParams(window.location.search);
-        if (!p.get('view') || p.get('view') === 'index') {
+        // ONLY restore last forum if we are NOT in a specific community link 
+        // AND not in a specific view link
+        if (!comm && (!viewParam || viewParam === 'index') && !forumParam) {
           const lastForumId = localStorage.getItem('bf_last_forum_id');
           if (lastForumId) {
             for (const cat of forumStructure.value) {
@@ -2589,6 +2637,7 @@ createApp({
       doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
       nextPage, prevPage,
       submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+      followModal, confirmToggleFollow,
       openProfile, profileUser, profileTab, openNotification,
       userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
       structureForm, showStructureDocs,
