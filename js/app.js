@@ -945,10 +945,18 @@ createApp({
       syncUrl();
 
       try {
-        const accounts = await client.condenser.getAccounts([username]);
+        const [accounts, followCount] = await Promise.all([
+          client.condenser.getAccounts([username]),
+          client.call('condenser_api', 'get_follow_count', [username])
+        ]);
+
         if (accounts && accounts[0]) {
           const acc = accounts[0];
           profileUser.data = acc;
+          if (followCount) {
+            profileUser.data.followerCount = followCount.follower_count;
+            profileUser.data.followingCount = followCount.following_count;
+          }
 
           const ratio = (parseFloat(globalProps.value.total_vesting_fund_blurt || 0) / 
                          parseFloat(globalProps.value.total_vesting_shares || 1));

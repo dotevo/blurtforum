@@ -174,6 +174,8 @@ const TR = {
     follow: "Follow",
     unfollow: "Unfollow",
     followed: "Followed",
+    followers: "Followers",
+    following: "Following",
   },
   pl: {
     home: "Strona główna",
@@ -350,6 +352,8 @@ const TR = {
     follow: "Obserwuj",
     unfollow: "Przestań obserwować",
     followed: "Obserwowany",
+    followers: "Obserwujący",
+    following: "Obserwowani",
   },
   eo: {
     home: "Hejmo",
@@ -512,5 +516,7 @@ const TR = {
     follow: "Sekvi",
     unfollow: "Malsekvi",
     followed: "Sekvata",
+    followers: "Sekvantoj",
+    following: "Sekvataj",
   },
 };
