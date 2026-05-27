@@ -1682,12 +1682,15 @@ createApp({
     };
 
     const submitVoteConfirmed = async () => {
+      // Hide vote modal immediately so PIN modal isn't covered
+      voteModal.show = false;
+
       if (checkLock(submitVoteConfirmed)) return;
       if (!auth.user || !voteModal.post) return;
+      
       const post   = voteModal.post;
       const weight = Math.min(Math.max(Math.round(voteModal.weight), 1), 100) * 100; // 0-10000
       localStorage.setItem('bf-vote-weight', voteModal.weight);
-      voteModal.show = false;
 
       const op = ['vote', {
         voter: auth.user.username,
