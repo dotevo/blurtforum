@@ -518,15 +518,7 @@
       <table :id="'post-' + activeTopic.permlink" class="forumline topic-table" style="margin-bottom:5px"
              :style="{ opacity: activeTopic.isMuted ? 0.5 : 1 }">
         <tr>
-          <td class="row3 post-profile">
-            <b><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></b>
-            <div v-if="auth.user && auth.user.username !== activeTopic.author" style="margin-top:5px;">
-              <button class="btn btn-sm" :class="activeTopic.isFollowing ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(activeTopic.author)" style="padding: 2px 6px; font-size: 10px;">
-                <i class="fa-solid" :class="activeTopic.isFollowing ? 'fa-user-check' : 'fa-user-plus'"></i>
-                {{ activeTopic.isFollowing ? t('unfollow') : t('follow') }}
-              </button>
-            </div>
-          </td>
+          <td class="row3 post-profile"></td>
           <td class="row3">
             <div class="post-header">
               <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
@@ -688,7 +680,6 @@
                     <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                   </button>
                 </div>
-                <div class="gs" style="font-weight: bold;"><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></div>
               </td>
               <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
                 <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
