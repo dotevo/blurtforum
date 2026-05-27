@@ -104,6 +104,9 @@
       <div class="user-bar" v-if="!auth.user">
         <span>{{ t('notLoggedIn') }}</span>
         <button class="btn-hdr" @click="openLoginModal">{{ t('login') }}</button>
+        <a href="https://blurt.pl" target="_blank" class="btn btn-sm btn-hdr" style="text-decoration:none; margin-left:5px; background:var(--bg-r3); color:var(--text);">
+          <i class="fa-solid fa-user-plus"></i> {{ t('register') }}
+        </a>
       </div>
       <div class="user-bar" v-else>
         <button class="btn-hdr" @click="openNotifModal" style="margin-right: 5px; position:relative;">
