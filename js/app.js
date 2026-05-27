@@ -104,6 +104,15 @@ createApp({
     const selectedCommunity = ref('blurt-140455');
     const customTag = ref('');
     const userSubscriptions = ref([]);
+    const followingSet = ref(new Set());
+
+    // Definitions for exploration sections
+    const VIRTUAL_FORUMS = [
+      { id: 'user-feed', name: t('myFeed'), targetTags: [], type: 'feed', auth: true },
+      { id: 'global-trending', name: t('trending'), targetTags: [], type: 'trending' },
+      { id: 'global-new', name: t('newPosts'), targetTags: [], type: 'new' },
+      { id: 'global-activity', name: t('globalActivity'), targetTags: [], type: 'activity' }
+    ];
 
     const allCommunities = computed(() => {
       const defaults = [
@@ -528,7 +537,29 @@ createApp({
 
         if (targetForum && targetForum.targetTags.length > 0) params.tags_any = targetForum.targetTags;
 
-        const rawPosts = await forumClient.call('bridge', 'get_forum_posts', params);
+        let rawPosts = [];
+        const vf = targetForum ? VIRTUAL_FORUMS.find(v => v.id === targetForum.id) : null;
+        
+        if (vf) {
+          const apiParams = {
+            limit: 21,
+            start_author: params.start_author,
+            start_permlink: params.start_permlink
+          };
+          
+          if (vf.id === 'user-feed' && auth.user) {
+            rawPosts = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' });
+          } else if (vf.id === 'global-trending') {
+            rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' });
+          } else if (vf.id === 'global-new') {
+            rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' });
+          } else if (vf.id === 'global-activity') {
+            rawPosts = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' });
+          }
+        } else {
+          rawPosts = await forumClient.call('bridge', 'get_forum_posts', params);
+        }
+
         if (!rawPosts || rawPosts.length === 0) {
           pag.hasMore = false;
           if (targetForum) targetForum.posts = [];
@@ -596,6 +627,7 @@ createApp({
       
       const isRead = !!(lastReadTs >= activityTs || (currentUsername && lastActAuthor === currentUsername));
       const isUnread = !isRead;
+      const isFollowing = currentUsername && followingSet.value.has(p.author);
 
       // Muting logic
       const isMuted = p.stats?.is_muted || p.stats?.hide || false;
@@ -623,8 +655,8 @@ createApp({
         lastAuthor: p.last_activity_author || p.author,
         isUnread,
         isRead,
-        isMuted,
-        isPaid,
+        isFollowing,
+        isMuted,        isPaid,
         isCollapsed,
         replyCount: p.reply_count || 0,
         parent_author: p.parent_author || '',
@@ -639,6 +671,36 @@ createApp({
         json_metadata: p.json_metadata,
         tags
       };
+    };
+
+    const explorationForm = reactive({ forums: [...VIRTUAL_FORUMS], loading: false });
+    const explorationExpanded = ref(localStorage.getItem('bf_exploration_expanded') === 'true');
+    
+    const toggleExploration = async () => {
+      explorationExpanded.value = !explorationExpanded.value;
+      localStorage.setItem('bf_exploration_expanded', explorationExpanded.value);
+      if (explorationExpanded.value) {
+        // Load some preview data for virtual forums
+        explorationForm.loading = true;
+        for (const vf of explorationForm.forums) {
+          if (vf.auth && !auth.user) continue;
+          try {
+            const apiParams = { limit: 1 };
+            let raw = [];
+            if (vf.id === 'user-feed') raw = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' });
+            else if (vf.id === 'global-trending') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' });
+            else if (vf.id === 'global-new') raw = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' });
+            else if (vf.id === 'global-activity') raw = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' });
+            
+            if (raw && raw.length > 0) {
+              vf.posts = [normalizePost(raw[0])];
+            } else {
+              vf.posts = [];
+            }
+          } catch (e) { vf.posts = []; }
+        }
+        explorationForm.loading = false;
+      }
     };
 
     const isPostInCommunity = (post) => {
@@ -823,9 +885,15 @@ createApp({
       forum.pageHistory = [];
       forum.hasMore = true;
 
-      if (forum) {
+      // Handle Virtual Forums (Global Sections)
+      const isVirtual = VIRTUAL_FORUMS.find(vf => vf.id === forum.id);
+      
+      if (!isVirtual) {
         localStorage.setItem('bf_last_forum_id', forum.id);
         localStorage.setItem('bf_last_community', config.communityAccount);
+      } else {
+        // Clear community context for global views if desired, or keep it?
+        // Let's keep it for now but maybe show a breadcrumb for global.
       }
 
       activeForum.value = forum;
@@ -974,6 +1042,48 @@ createApp({
     };
 
     const broadcast = (ops) => auth.user.type === 'key' ? broadcastKey(ops) : broadcastWV(ops);
+
+    const loadFollowingList = async (username) => {
+      if (!username) return;
+      try {
+        // Fetch up to 1000 following (should be enough for most users)
+        const following = await client.call('condenser_api', 'get_following', [username, '', 'blog', 1000]);
+        if (following && Array.isArray(following)) {
+          followingSet.value = new Set(following.map(f => f.following));
+        }
+      } catch (e) { console.warn('Error loading following list:', e); }
+    };
+
+    const toggleFollow = async (targetAuthor) => {
+      if (!auth.user) { openLoginModal(); return; }
+      if (checkLock(() => toggleFollow(targetAuthor))) return;
+
+      const isFollowing = followingSet.value.has(targetAuthor);
+      const op = ['custom_json', {
+        required_auths: [],
+        required_posting_auths: [auth.user.username],
+        id: 'follow',
+        json: JSON.stringify(['follow', {
+          follower: auth.user.username,
+          following: targetAuthor,
+          what: isFollowing ? [] : ['blog']
+        }])
+      }];
+
+      try {
+        await broadcast([op]);
+        const newSet = new Set(followingSet.value);
+        if (isFollowing) {
+          newSet.delete(targetAuthor);
+        } else {
+          newSet.add(targetAuthor);
+        }
+        followingSet.value = newSet;
+      } catch (err) {
+        console.error('Follow error:', err);
+        showStatus('Social', 'Error updating follow status: ' + err.message, 'error');
+      }
+    };
 
     // ── Image upload to img-upload.blurt.blog ──────────────────────────────
     // Protocol: POST https://img-upload.blurt.blog/{username}/{sig}
@@ -2204,8 +2314,8 @@ createApp({
       showLoginModal.value = false;
       loginForm.key = '';
       loadUserCommunities(username);
-    };
- 
+      loadFollowingList(username);
+      }; 
     const doWVLogin = async () => {
       const username = loginForm.username.trim().toLowerCase();
       if (!username) { loginErr.value = 'Username is required.'; return; }
@@ -2244,6 +2354,7 @@ createApp({
         localStorage.setItem('blurtforum_session', JSON.stringify({ username, type: 'whalevault', expires: Date.now() + (24 * 60 * 60 * 1000) }));
         showLoginModal.value = false;
         loadUserCommunities(username);
+        loadFollowingList(username);
       } catch (err) {
         console.error('WhaleVault login error:', err);
         loginErr.value = t('loginError') + ' ' + (err.message || err);
@@ -2378,6 +2489,7 @@ createApp({
           if (session.type === 'whalevault') {
             auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
             loadUserCommunities(session.username);
+            loadFollowingList(session.username);
             // Refresh full data
             client.condenser.getAccounts([session.username]).then(accounts => {
               if (accounts && accounts[0]) {
@@ -2398,6 +2510,7 @@ createApp({
             // Key based login - just restore session without prompt
             auth.user = { username: session.username, type: 'key', key: session.key, vp: '…', locked: true };
             loadUserCommunities(session.username);
+            loadFollowingList(session.username);
             refreshUser();
           }
         } catch (e) { /* ignore */ }
@@ -2505,7 +2618,12 @@ createApp({
       checkNewNotifications,
       getNotifIcon,
       loadTopicContext,
-      isPostInCommunity
+      isPostInCommunity,
+      toggleFollow,
+      explorationExpanded,
+      explorationForm,
+      toggleExploration,
+      followingSet
     };
   }
 }).mount('#app');
