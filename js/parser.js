@@ -122,17 +122,19 @@ const Parser = {
   /**
    * Generates the final HTML for experimental player placeholder
    */
-  getExperimentalPlaceholder(type, id, host) {
+  getExperimentalPlaceholder(type, id, host, context = null) {
     const thumb = type === 'youtube' ? `https://img.youtube.com/vi/${id}/0.jpg` : '';
     const sourceLabel = host || type;
+    const title = (context?.title || 'Media Content').replace(/'/g, "&apos;");
+    const author = context?.author || 'post';
 
     return `<div class="media-placeholder" style="${thumb ? 'background-image:url('+thumb+')' : ''}">
 <div class="media-placeholder-overlay">
 <div class="media-placeholder-actions">
-<button class="btn btn-primary bf-placeholder-play" data-type="${type}" data-id="${id}" data-host="${host}" data-title="Media Content">
+<button class="btn btn-primary bf-placeholder-play" data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}">
 <i class="fa-solid fa-play"></i> Play
 </button>
-<button class="btn btn-ghost bf-placeholder-queue" data-type="${type}" data-id="${id}" data-host="${host}" data-title="Media Content">
+<button class="btn btn-ghost bf-placeholder-queue" data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}">
 <i class="fa-solid fa-plus"></i> Queue
 </button>
 </div>

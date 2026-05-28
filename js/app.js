@@ -416,7 +416,12 @@ createApp({
       // If any of the top 5 are unread, category is unread
       return topPosts.some(p => p.isUnread);
     };
-    const renderMD = renderMarkdown;
+    const renderMD = (text, context = null) => {
+      if (typeof window.renderMarkdown === 'function') {
+        return window.renderMarkdown(text, context);
+      }
+      return text;
+    };
     const isNestedReply = (r) => {
       if (!activeTopic.value) return false;
       return !(r.parent_author === activeTopic.value.author &&
@@ -2552,7 +2557,7 @@ createApp({
             id: target.dataset.id,
             host: target.dataset.host,
             title: target.dataset.title,
-            author: 'post'
+            author: target.dataset.author || 'post'
           };
           if (playBtn) BFPlayer.playTrack(track);
           else BFPlayer.addToQueue(track);

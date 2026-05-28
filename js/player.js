@@ -25,6 +25,7 @@ window.BFPlayer = (function() {
   // --- PRIVATE VARS ---
   let audioObj = null;
   let ytPlayer = null;
+  let ptPlayer = null;
   let progressTimer = null;
 
   // --- INTERNAL METHODS ---
@@ -48,9 +49,11 @@ window.BFPlayer = (function() {
       playNext();
     });
     audioObj.addEventListener('error', (e) => {
-      console.error('Audio error:', e);
+      console.error('BFPlayer Audio error:', e);
       state.loading = false;
-      setTimeout(playNext, 2000);
+      if (state.currentTrack?.type === 'suno' && audioObj.src && !audioObj.src.endsWith('/')) {
+        setTimeout(playNext, 2000);
+      }
     });
   };
 
@@ -109,6 +112,42 @@ window.BFPlayer = (function() {
     });
   };
 
+  const initPT = () => {
+    const iframe = document.getElementById('bf-pt-player-iframe');
+    if (!iframe || !window.PeerTubePlayer) return;
+
+    console.log('BFPlayer: Initializing PeerTube API instance...');
+    
+    // Create new player instance
+    ptPlayer = new window.PeerTubePlayer(iframe);
+    
+    ptPlayer.ready.then(() => {
+      console.log('BFPlayer: PeerTube API Ready');
+      ptPlayer.setVolume(state.volume);
+      // Auto-play via API too, just in case ?autoplay=1 was blocked
+      ptPlayer.play();
+      
+      ptPlayer.addEventListener('playbackStatusUpdate', (stats) => {
+        if (state.currentTrack?.type !== 'peertube') return;
+        if (stats && typeof stats.position !== 'undefined') {
+          state.progress = (stats.position / stats.duration) * 100;
+          state.duration = stats.duration;
+          if (stats.playbackState === 'ended') {
+            console.log('BFPlayer: PeerTube ended, moving to next');
+            playNext();
+          }
+        }
+      });
+
+      ptPlayer.addEventListener('playbackStatusChange', (playbackState) => {
+        if (state.currentTrack?.type !== 'peertube') return;
+        state.playing = (playbackState === 'playing');
+      });
+    }).catch(err => {
+      console.warn('BFPlayer: PeerTube ready error:', err);
+    });
+  };
+
   const startYTProgress = () => {
     stopYTProgress();
     progressTimer = setInterval(() => {
@@ -135,37 +174,13 @@ window.BFPlayer = (function() {
     if (ytPlayer && ytPlayer.stopVideo) {
       ytPlayer.stopVideo();
     }
+    if (ptPlayer && ptPlayer.pause) {
+      // Don't kill instance yet, just stop playback
+      try { ptPlayer.pause(); } catch(e) {}
+    }
     state.playing = false;
     state.progress = 0;
   };
-
-  // --- PEERTUBE API HANDLER ---
-  window.addEventListener('message', (event) => {
-    try {
-      let data = event.data;
-      if (typeof data === 'string') data = JSON.parse(data);
-      
-      if (state.currentTrack?.type === 'peertube') {
-        const eventName = data.event || data.type;
-        const eventData = data.data || data.value;
-
-        if (eventName === 'ended' || eventName === 'onEnded') {
-          playNext();
-        } else if (eventName === 'playbackStatusUpdate' || eventName === 'timeupdate') {
-          const pos = eventData?.position || eventData?.currentTime || (typeof eventData === 'number' ? eventData : 0);
-          const dur = eventData?.duration || state.duration || 1;
-          if (dur > 0) {
-            state.progress = (pos / dur) * 100;
-            state.duration = dur;
-          }
-        } else if (eventName === 'play' || eventName === 'onPlay') {
-          state.playing = true;
-        } else if (eventName === 'pause' || eventName === 'onPause') {
-          state.playing = false;
-        }
-      }
-    } catch (e) {}
-  });
 
   // --- PUBLIC METHODS ---
 
@@ -192,15 +207,12 @@ window.BFPlayer = (function() {
     } else if (track.type === 'peertube') {
       state.playing = true;
       state.loading = false;
-      // Multi-stage subscription
-      const sub = () => {
-        const iframe = document.getElementById('bf-pt-player-iframe');
-        if (iframe && iframe.contentWindow) {
-          iframe.contentWindow.postMessage(JSON.stringify({ command: 'subscribe', data: ['playbackStatusUpdate', 'ended'] }), '*');
-        }
-      };
-      setTimeout(sub, 1000);
-      setTimeout(sub, 3000);
+      // Wait for Vue to recreate the iframe with new :key
+      Vue.nextTick(() => {
+        setTimeout(() => {
+          initPT();
+        }, 1000); // Give it time to load src
+      });
     }
   };
 
@@ -233,17 +245,11 @@ window.BFPlayer = (function() {
     if (state.playing) {
       if (state.currentTrack.type === 'suno' && audioObj) audioObj.pause();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
-      if (state.currentTrack.type === 'peertube') {
-        const iframe = document.getElementById('bf-pt-player-iframe');
-        iframe?.contentWindow.postMessage(JSON.stringify({ command: 'pause' }), '*');
-      }
+      if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.pause();
     } else {
       if (state.currentTrack.type === 'suno' && audioObj) audioObj.play();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
-      if (state.currentTrack.type === 'peertube') {
-        const iframe = document.getElementById('bf-pt-player-iframe');
-        iframe?.contentWindow.postMessage(JSON.stringify({ command: 'play' }), '*');
-      }
+      if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.play();
     }
   };
 
@@ -251,10 +257,7 @@ window.BFPlayer = (function() {
     const time = (pct / 100) * state.duration;
     if (state.currentTrack?.type === 'suno' && audioObj) audioObj.currentTime = time;
     else if (state.currentTrack?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time, true);
-    else if (state.currentTrack?.type === 'peertube') {
-      const iframe = document.getElementById('bf-pt-player-iframe');
-      iframe?.contentWindow.postMessage(JSON.stringify({ command: 'seek', line: time }), '*');
-    }
+    else if (state.currentTrack?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
   };
 
   const addToQueue = (track) => {
@@ -278,10 +281,7 @@ window.BFPlayer = (function() {
   watch(() => state.volume, (newVol) => {
     if (audioObj) audioObj.volume = newVol;
     if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(newVol * 100);
-    if (state.currentTrack?.type === 'peertube') {
-      const iframe = document.getElementById('bf-pt-player-iframe');
-      iframe?.contentWindow.postMessage(JSON.stringify({ command: 'setVolume', value: newVol }), '*');
-    }
+    if (ptPlayer && ptPlayer.setVolume) ptPlayer.setVolume(newVol);
     localStorage.setItem('bf-player-volume', newVol);
   });
 
