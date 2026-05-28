@@ -658,7 +658,7 @@ createApp({
         isFollowing,
         isMuted,        isPaid,
         isCollapsed,
-        replyCount: p.reply_count || 0,
+        replyCount: p.children || p.reply_count || 0,
         parent_author: p.parent_author || '',
         parent_permlink: p.parent_permlink || '',
         pendingPayout: pending,
@@ -2452,23 +2452,31 @@ createApp({
           } catch (e) { /* ignore */ }
         });
       } else if (requestedView === 'forum' && requestedForumId) {
-        for (const cat of forumStructure.value) {
-          const f = cat.forums.find(f => f.id === requestedForumId);
-          if (f) {
-            // Check if we are already viewing this forum to avoid double loading
-            if (view.value === 'forum' && activeForum.value && activeForum.value.id === f.id && f.posts.length > 0) {
-              return;
-            }
-            f.lastAuthor = "";
-            f.lastPermlink = "";
-            f.pageHistory = [];
-            f.hasMore = true;
-            activeForum.value = f;
-            view.value = "forum";
-            activeTopic.value = null;
-            loadData("current", f);
-            break;
+        // 1. Check virtual forums
+        let f = VIRTUAL_FORUMS.find(vf => vf.id === requestedForumId);
+        
+        // 2. Check community structure
+        if (!f) {
+          for (const cat of forumStructure.value) {
+            f = cat.forums.find(forum => forum.id === requestedForumId);
+            if (f) break;
           }
+        }
+
+        if (f) {
+          // Check if we are already viewing this forum to avoid double loading
+          if (view.value === 'forum' && activeForum.value && activeForum.value.id === f.id && f.posts && f.posts.length > 0) {
+            return;
+          }
+          if (!f.posts) f.posts = []; // ensure posts array exists for virtuals
+          f.lastAuthor = "";
+          f.lastPermlink = "";
+          f.pageHistory = [];
+          f.hasMore = true;
+          activeForum.value = f;
+          view.value = "forum";
+          activeTopic.value = null;
+          loadData("current", f);
         }
       } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
         // If we are already on this topic, don't reload

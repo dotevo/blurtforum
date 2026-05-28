@@ -369,6 +369,20 @@ a:hover { color: var(--accent); text-decoration: underline; }
   border-radius: 6px;
   overflow: hidden;
 }
+
+.post-list-table {
+  table-layout: auto;
+  width: 100%;
+}
+.col-topic {
+  width: auto;
+}
+.col-author { width: 120px; }
+.col-payout { width: 100px; }
+.col-lastpost { width: 180px; }
+.col-author, .col-payout, .col-lastpost {
+  white-space: nowrap;
+}
 .topic-table, .profile-list-table { table-layout: fixed; }
 .catHead {
   background: var(--bg-r3);
@@ -529,7 +543,11 @@ a:hover { color: var(--accent); text-decoration: underline; }
 .btn-ghost:hover { background: var(--primary); color: #fff; }
 .btn-sm { padding: 4px 10px; font-size: 11px; }
 .btn:disabled { opacity: .5; cursor: default; }
- 
+
+/* Mobile Utilities */
+.show-mobile { display: none !important; }
+.btn-xs { padding: 2px 6px; font-size: 10px; min-width: auto; }
+
 /* ===== MODAL ===== */
 .btn-follow {
   padding: 4px 10px !important;
@@ -987,12 +1005,13 @@ a:hover { color: var(--accent); text-decoration: underline; }
   }
   
   .post-list-table td {
-    display: inline;
+    display: inline-block;
     padding: 0 !important;
     border: none !important;
     background: transparent !important;
     width: auto !important;
     text-align: left !important;
+    vertical-align: middle;
   }
 
   .post-list-table td[colspan] {
@@ -1014,27 +1033,61 @@ a:hover { color: var(--accent); text-decoration: underline; }
   .col-topic {
     display: block !important;
     margin-bottom: 4px;
+    width: 100% !important;
   }
   
   .col-topic a {
-    font-size: 16px !important;
+    font-size: 15px !important;
     font-weight: bold;
+    display: block;
+    line-height: 1.2;
   }
   
-  /* .col-topic .gs { display: none; } */ 
-  .col-topic .gs { display: block; font-size: 12px; opacity: 0.8; margin-top: 2px; }
+  .col-topic .gs { display: block; font-size: 11px; opacity: 0.7; margin-top: 2px; }
   
   .col-author, .col-payout, .col-lastpost {
-    font-size: 13px;
-    color: var(--gs);
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-right: 8px;
   }
   
-  .col-author a { color: var(--gs); }
+  .col-author a { color: var(--text-muted); font-weight: bold; }
   
   .col-author::before { content: "by "; }
   .col-payout::before { content: " • "; }
   .col-lastpost::before { content: " • "; }
   
+  /* Hide date in lastpost on mobile to save space, just show author/replies */
+  .col-lastpost .gs:first-child { display: none; }
+  .col-lastpost br { display: none; }
+  .col-lastpost { display: inline-block !important; }
+  
+  /* Activity Feed Polishing */
+  .activity-item-inner {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    overflow: hidden;
+  }
+  .activity-item-sub {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+  }
+  .activity-item-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+  .activity-item-time {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
   .badge { padding: 2px 6px; font-size: 11px; }
 
   /* Topic View Responsive */
@@ -1044,22 +1097,30 @@ a:hover { color: var(--accent); text-decoration: underline; }
     box-sizing: border-box;
   }
   
-  .topic-table tr:first-child .post-profile { display: none; } /* Hide redundant author cell */
+  .topic-table tr:first-child .post-profile { display: none !important; } /* Hide redundant author cell on mobile */
   
-  .topic-table .post-profile {
+  /* Mobile Comment Header Refinement */
+  .comment-mobile-header {
     display: flex !important;
-    flex-direction: row;
     align-items: center;
     gap: 10px;
     padding: 8px 10px;
-    border-right: none !important;
+    background: var(--bg-r2);
     border-bottom: 1px solid var(--border-main);
-    text-align: left !important;
+    margin: -12px -10px 10px -10px;
+  }
+  .comment-mobile-header .avatar-xs {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
   }
   
-  .topic-table .post-profile .avatar { margin: 0; width: 32px; height: 32px; }
-  .topic-table .post-profile .avatar-sm { width: 24px; height: 24px; }
-  .topic-table .post-profile .gs { margin: 0; }
+  .show-mobile { display: flex !important; }
+  .hide-mobile { display: none !important; }
+
+  .topic-table .post-profile {
+    display: none !important; /* Hide old profile cell in mobile view since we have header */
+  }
   
   .topic-table .post-body-cell {
     padding: 12px 10px;

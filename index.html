@@ -164,8 +164,8 @@
                 {{ t('by') }} <b :style="{ color: act.isRead ? 'inherit' : 'var(--primary)' }">@{{ act.author }}</b>
               </div>
               <div class="activity-item-sub">
-                <span v-if="act.title" class="activity-item-title">
-                  — "{{ act.title.length > 50 ? act.title.substring(0, 50) + '...' : act.title }}"
+                <span v-if="act.title" class="activity-item-title" :title="act.title">
+                  — "{{ act.title }}"
                 </span>
                 <span class="activity-item-time gs">{{ timeAgo(act.created) }}</span>
               </div>
@@ -444,7 +444,7 @@
       <table class="forumline post-list-table">
         <tr>
           <td class="thHead" width="30"></td>
-          <td class="thHead" style="text-align:left;padding-left:10px"><i class="fa-solid fa-comments"></i> {{ t('topic') }}</td>
+          <td class="thHead col-topic" style="text-align:left;padding-left:10px"><i class="fa-solid fa-comments"></i> {{ t('topic') }}</td>
           <td class="thHead col-author" width="120" align="center"><i class="fa-solid fa-user"></i> {{ t('author') }}</td>
           <td class="thHead col-payout" width="100" align="center"><i class="fa-solid fa-coins"></i> {{ t('payout') }}</td>
           <td class="thHead col-lastpost" width="180" align="center"><i class="fa-solid fa-clock"></i> {{ t('lastPost') }}</td>
@@ -519,7 +519,7 @@
 
       <table :id="'post-' + activeTopic.permlink" class="forumline topic-table" style="margin-bottom:5px"
              :style="{ opacity: activeTopic.isMuted ? 0.5 : 1 }">
-        <tr>
+        <tr class="hide-mobile">
           <td class="row3 post-profile"></td>
           <td class="row3">
             <div class="post-header">
@@ -550,7 +550,7 @@
           </td>
         </tr>
         <tr>
-          <td class="row1 post-profile">
+          <td class="row1 post-profile hide-mobile">
             <div class="avatar" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/128x128)'}"></div>
             <div v-if="auth.user && auth.user.username !== activeTopic.author" style="margin-top:8px;">
               <button class="btn btn-sm btn-follow" :class="followingSet.has(activeTopic.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(activeTopic.author)">
@@ -561,6 +561,47 @@
             <div class="gs" style="margin-top:8px; font-weight: bold;"><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a><br>{{ t('blurtUser') }}</div>
           </td>
           <td class="row1 post-body-cell">
+            <!-- Mobile Header (OP) -->
+            <div class="comment-mobile-header show-mobile">
+              <div class="avatar avatar-xs" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/64x64)'}"></div>
+              <div style="flex:1">
+                <div style="font-weight:bold; font-size:14px;"><a href="#" @click.prevent="openProfile(activeTopic.author)">@{{ activeTopic.author }}</a></div>
+                <div class="gs" style="font-size:10px;">{{ fmtDate(activeTopic.created) }}</div>
+              </div>
+              <button v-if="auth.user && auth.user.username !== activeTopic.author" 
+                      class="btn btn-xs btn-follow" :class="followingSet.has(activeTopic.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(activeTopic.author)"
+                      style="width:auto; margin:0; padding:2px 6px !important;">
+                <i class="fa-solid" :class="followingSet.has(activeTopic.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
+              </button>
+              <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="submitVote(activeTopic)"><i class="fa-solid fa-caret-up"></i></span>
+              <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
+            </div>
+
+            <!-- Mobile Header Stats (OP) -->
+            <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="openPayoutModal(activeTopic)">
+                  {{ (activeTopic.payout || 0).toFixed(2) }} B
+                </span>
+                
+                
+                <template v-if="activeTopic.beneficiaries && activeTopic.beneficiaries.length">
+                  <div class="beneficiaries-inline" style="margin:0">
+                    <span class="ben-icon">👥</span>
+                    <template v-for="(b, bi) in activeTopic.beneficiaries.slice(0,2)" :key="b.account">
+                      <span class="ben-link" style="font-size:11px">@{{ b.account }}</span>
+                      <span class="ben-pct" style="font-size:10px">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
+                    </template>
+                  </div>
+                </template>
+                
+                <template v-if="canMute && isPostInCommunity(activeTopic)">
+                  <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(activeTopic, true)">🚫 {{ t('mute') }}</button>
+                  <button v-else class="btn btn-sm btn-hdr" @click="mutePost(activeTopic, false)">🔓 {{ t('unmute') }}</button>
+                </template>
+              </div>
+            </div>
+
             <div class="post-body" v-html="renderMD(activeTopic.body)"></div>
             <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
               <template v-if="auth.user">
@@ -638,7 +679,7 @@
 
           <table v-else :id="'post-' + r.permlink" class="forumline topic-table" style="margin-bottom:5px"
                  :style="{ opacity: r.isMuted ? 0.5 : 1 }">
-            <tr>
+            <tr class="hide-mobile">
               <td class="row3 post-profile"><b><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></b></td>
               <td class="row3">
                 <div class="post-header">
@@ -675,7 +716,7 @@
               </td>
             </tr>
             <tr>
-              <td :class="i%2===0?'row1':'row2'" class="post-profile">
+              <td :class="i%2===0?'row1':'row2'" class="post-profile hide-mobile">
                 <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
                 <div v-if="auth.user && auth.user.username !== r.author" style="margin-top:6px; margin-bottom:6px;">
                   <button class="btn btn-sm btn-follow" :class="followingSet.has(r.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(r.author)">
@@ -685,7 +726,51 @@
                 </div>
               </td>
               <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
+                <!-- Mobile Header -->
+                <div class="comment-mobile-header show-mobile">
+                  <div class="avatar avatar-xs" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/64x64)'}"></div>
+                  <div style="flex:1">
+                    <div style="font-weight:bold; font-size:13px;"><a href="#" @click.prevent="openProfile(r.author)">@{{ r.author }}</a></div>
+                    <div class="gs" style="font-size:10px;">#{{ i+1 }} · {{ fmtDate(r.created) }}</div>
+                  </div>
+                  
+                  <button v-if="auth.user && auth.user.username !== r.author" 
+                          class="btn btn-xs btn-follow" :class="followingSet.has(r.author) ? 'btn-ghost' : 'btn-accent'" @click="toggleFollow(r.author)"
+                          style="width:auto; margin:0; padding:2px 6px !important;">
+                    <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
+                  </button>
+                  <span class="vote-btn" :class="{active: hasVoted(r)}" @click="submitVote(r)"><i class="fa-solid fa-caret-up"></i></span>
+                  <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
+                </div>
+
+                <!-- Mobile Header Stats (payout/votes) -->
+                <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="openPayoutModal(r)">
+                      {{ (r.payout || 0).toFixed(3) }} B
+                    </span>
+                    
+
+                    <template v-if="r.beneficiaries && r.beneficiaries.length">
+                      <div class="beneficiaries-inline" style="margin:0">
+                        <span class="ben-icon">👥</span>
+                        <template v-for="(b, bi) in r.beneficiaries.slice(0,2)" :key="b.account">
+                          <span class="ben-link" style="font-size:11px">@{{ b.account }}</span>
+                          <span class="ben-pct" style="font-size:10px">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
+                        </template>
+                      </div>
+                    </template>
+                    
+                    <template v-if="canMute && isPostInCommunity(r)">
+                      <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="mutePost(r, true)">🚫 {{ t('mute') }}</button>
+                      <button v-else class="btn btn-sm btn-hdr" @click="mutePost(r, false)">🔓 {{ t('unmute') }}</button>
+                    </template>
+                  </div>
+                  <div v-if="r.depth>1" class="depth-badge">↳ {{ t('nested') }}</div>
+                </div>
+
                 <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
+
                 <div v-if="isNestedReply(r)" class="quote-box">
                   <span style="font-weight: bold;">{{ t('replyTo') }}: <a href="#" @click.prevent="openProfile(r.parent_author)">@{{ r.parent_author }}</a></span>
                   <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
