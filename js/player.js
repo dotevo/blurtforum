@@ -17,6 +17,7 @@ window.BFPlayer = (function() {
     volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
     progress: 0,
     duration: 0,
+    enabled: true,
     minimized: false,
     expanded: false,
     expandedTab: 'video', // 'video' or 'queue' for mobile
