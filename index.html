@@ -24,7 +24,7 @@
 <div id="app" :class="{ 
   'has-player-active': player.state.active && !player.state.minimized,
   'has-player-expanded': player.state.active && player.state.expanded && !player.state.minimized
-}">
+}" :style="{ paddingBottom: (player.state.active && !player.state.minimized) ? (player.state.expanded ? (player.state.expandedHeight + 20) + 'px' : '120px') : '' }">
  
 <!-- LANGUAGE BAR -->
 <div class="lang-bar">

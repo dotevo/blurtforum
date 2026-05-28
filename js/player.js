@@ -318,5 +318,5 @@ window.BFPlayer = (function() {
     localStorage.setItem('bf-player-volume', newVol);
   });
 
-  return { state, playTrack, playNext, playPrev, togglePlay, seek, addToQueue, setAutoQueue, toggleExperimental };
+  return { state, initResize, playTrack, playNext, playPrev, togglePlay, seek, addToQueue, setAutoQueue, toggleExperimental };
 })();
