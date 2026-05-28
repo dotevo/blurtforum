@@ -360,6 +360,9 @@ const TR = {
     confirmFollow: "Czy na pewno chcesz obserwować @{user}?",
     confirmUnfollow: "Czy na pewno chcesz przestać obserwować @{user}?",
     joined: "Dołączył(a)",
+    experimentalMode: "Tryb Eksperymentalny",
+    playNow: "Odtwórz teraz",
+    addToQueue: "Dodaj do kolejki",
   },
   eo: {
     home: "Hejmo",

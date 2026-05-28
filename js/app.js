@@ -643,9 +643,29 @@ createApp({
       // Auto-collapse support comments
       const isCollapsed = p.body && p.body.startsWith('Supporting original content by @');
 
+      // Media detection (Suno, YouTube)
+      let media = null;
+      if (p.body) {
+        const ytMatch = p.body.match(/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+        if (ytMatch) {
+          media = { type: 'youtube', id: ytMatch[1] };
+        } else {
+          const sunoMatch = p.body.match(/https?:\/\/(?:www\.)?suno\.com\/(?:song|s)\/([a-zA-Z0-9_-]+)/);
+          if (sunoMatch) {
+            media = { type: 'suno', id: sunoMatch[1] };
+          } else {
+            const ptMatch = p.body.match(/https?:\/\/(?:www\.)?blurt\.media\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
+            if (ptMatch) {
+              media = { type: 'peertube', id: ptMatch[1], host: 'blurt.media' };
+            }
+          }
+        }
+      }
+
       return {
         author: p.author,
         permlink: p.permlink,
+        media,
         title: p.title || '(no title)',
         body: p.body,
         created: p.created,
@@ -748,6 +768,13 @@ createApp({
         if (targetForum) {
            if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) {
              targetForum.posts.push(post);
+           }
+           // Update autoQueue for player if this is the active forum
+           if (activeForum.value && activeForum.value.id === targetForum.id) {
+             const mediaTracks = targetForum.posts
+               .filter(p => p.media)
+               .map(p => ({ ...p.media, title: p.title, author: p.author, permlink: p.permlink }));
+             BFPlayer.setAutoQueue(mediaTracks);
            }
            return;
         }
@@ -2513,6 +2540,25 @@ createApp({
     onMounted(() => {
       setTheme(theme.value);
 
+      // Handle clicks on media placeholders
+      document.body.addEventListener('click', (e) => {
+        const playBtn = e.target.closest('.bf-placeholder-play');
+        const queueBtn = e.target.closest('.bf-placeholder-queue');
+        if (playBtn || queueBtn) {
+          e.preventDefault();
+          const target = playBtn || queueBtn;
+          const track = {
+            type: target.dataset.type,
+            id: target.dataset.id,
+            host: target.dataset.host,
+            title: target.dataset.title,
+            author: 'post'
+          };
+          if (playBtn) BFPlayer.playTrack(track);
+          else BFPlayer.addToQueue(track);
+        }
+      });
+
       window.addEventListener('popstate', handleUrlChange);
 
       // Periodic check for notifications
@@ -2634,6 +2680,12 @@ createApp({
       }, 30000);
     });
 
+      const handlePlayerSeek = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const pct = ((e.clientX - rect.left) / rect.width) * 100;
+        BFPlayer.seek(pct);
+      };
+
       window.app = { openProfile };
 
       return {      lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -2671,7 +2723,9 @@ createApp({
       explorationExpanded,
       explorationForm,
       toggleExploration,
-      followingSet
+      followingSet,
+      player: BFPlayer,
+      handlePlayerSeek
     };
   }
 }).mount('#app');
