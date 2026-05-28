@@ -21,7 +21,10 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div id="app" :class="{ 'has-player-active': player.state.active && !player.state.minimized }">
+<div id="app" :class="{ 
+  'has-player-active': player.state.active && !player.state.minimized,
+  'has-player-expanded': player.state.active && player.state.expanded && !player.state.minimized
+}">
  
 <!-- LANGUAGE BAR -->
 <div class="lang-bar">
@@ -988,17 +991,37 @@
 <!-- MEDIA PLAYER PiP -->
 <div v-if="player.state.enabled && player.state.active" 
      class="media-player-pip" 
-     :class="{ minimized: player.state.minimized, expanded: player.state.expanded }">
+     :class="{ minimized: player.state.minimized, expanded: player.state.expanded }"
+     :style="{ height: (player.state.expanded && !player.state.minimized) ? player.state.expandedHeight + 'px' : '' }">
   
+  <!-- Resize Handle -->
+  <div v-if="player.state.expanded && !player.state.minimized" 
+       class="player-resizer" 
+       @mousedown="player.initResize"
+       @touchstart="player.initResize">
+    <div class="resizer-bar"></div>
+  </div>
+
   <!-- Restore Button (visible only when minimized) -->
   <button v-if="player.state.minimized" class="player-restore-btn" @click="player.state.minimized = false">
     <i class="fa-solid fa-play"></i> {{ player.state.currentTrack?.title }}
   </button>
 
   <div class="player-content" v-show="!player.state.minimized">
+    
+    <!-- Mobile Tabs -->
+    <div v-if="player.state.expanded" class="player-mobile-tabs show-mobile">
+      <button class="player-tab-btn" :class="{ active: player.state.expandedTab === 'video' }" @click="player.state.expandedTab = 'video'">
+        <i class="fa-solid fa-video"></i> {{ t('video') }}
+      </button>
+      <button class="player-tab-btn" :class="{ active: player.state.expandedTab === 'queue' }" @click="player.state.expandedTab = 'queue'">
+        <i class="fa-solid fa-list-ul"></i> {{ t('queue') }}
+      </button>
+    </div>
+
     <!-- Expanded View (Video & Queue) -->
-    <div class="player-expanded-body" v-show="player.state.expanded">
-      <div class="player-expanded-main">
+    <div v-if="player.state.expanded" class="player-expanded-body" v-show="player.state.expanded">
+      <div class="player-expanded-main" v-show="vw > 800 || player.state.expandedTab === 'video'">
         <!-- Video Container YouTube -->
         <div class="player-video-frame" v-show="player.state.currentTrack?.type === 'youtube'">
           <div id="bf-yt-player-target"></div>
@@ -1019,8 +1042,8 @@
       </div>
       
       <!-- Queue Sidebar -->
-      <div class="player-queue-panel">
-        <div class="queue-header">{{ t('queue') || 'Queue' }} ({{ player.state.queue.length + player.state.autoQueue.length }})</div>
+      <div class="player-queue-panel" v-show="vw > 800 || player.state.expandedTab === 'queue'">
+        <div class="queue-header hide-mobile">{{ t('queue') }} ({{ player.state.queue.length + player.state.autoQueue.length }})</div>
         <div class="queue-list">
           <!-- Manual Queue -->
           <div v-for="(track, idx) in player.state.queue" :key="'q-'+idx" class="queue-item manual">
@@ -1480,6 +1503,11 @@
       <button class="btn btn-primary" style="width: 100%; padding: 10px;" @click="statusModal.show=false">OK</button>
     </div>
   </div>
+</div>
+
+<!-- PLAYER SPACER (prevents content being hidden under player) -->
+<div class="player-spacer" 
+     :style="{ height: (player.state.active && !player.state.minimized) ? (player.state.expanded ? player.state.expandedHeight + 'px' : '100px') : '0px' }">
 </div>
 
 </div><!-- /#app -->

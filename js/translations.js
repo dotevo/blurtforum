@@ -363,6 +363,8 @@ const TR = {
     experimentalMode: "Tryb Eksperymentalny",
     playNow: "Odtwórz teraz",
     addToQueue: "Dodaj do kolejki",
+    video: "Wideo",
+    queue: "Kolejka",
   },
   eo: {
     home: "Hejmo",

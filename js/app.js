@@ -2532,6 +2532,9 @@ createApp({
       }
     };
 
+    const vw = ref(window.innerWidth);
+    window.addEventListener('resize', () => vw.value = window.innerWidth);
+
     const checkNewNotifications = async () => {
       if (!auth.user || notifModal.show) return;
       try {
@@ -2730,7 +2733,8 @@ createApp({
       toggleExploration,
       followingSet,
       player: BFPlayer,
-      handlePlayerSeek
+      handlePlayerSeek,
+      vw
     };
   }
 }).mount('#app');

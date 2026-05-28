@@ -667,9 +667,6 @@ a:hover { color: var(--accent); text-decoration: underline; }
   font-size: 12px;
   border-top: 1px solid var(--border-main);
 }
-.has-player-active .site-footer {
-  padding-bottom: 120px;
-}
  
 /* ===== ACTIVITY FEED RESPONSIVE ===== */
 .activity-item-inner {
@@ -1381,14 +1378,22 @@ a:hover { color: var(--accent); text-decoration: underline; }
 @media (max-width: 800px) {
   .media-player-pip.expanded { height: 90vh; max-height: none; }
   .player-expanded-body { flex-direction: column; }
-  .player-expanded-main { flex: 1; min-height: 200px; }
-  .player-queue-panel { flex: 1; min-width: 0; }
+  .player-expanded-main { flex: 1; min-height: 200px; display: flex !important; }
+  .player-queue-panel { flex: 1; min-width: 0; display: flex !important; border-left: none; }
   .player-main-row { gap: 10px; padding: 8px; }
   .player-title { font-size: 12px; }
   .player-controls { gap: 8px; }
   .player-btn { font-size: 16px; }
   .player-btn.btn-main { width: 34px; height: 34px; font-size: 16px; }
 }
+/* Re-override for tabbed logic */
+@media (max-width: 800px) {
+  .player-expanded-main[style*="display: none"],
+  .player-queue-panel[style*="display: none"] {
+    display: none !important;
+  }
+}
+
 
 .player-info {
   flex: 1;
@@ -1467,3 +1472,59 @@ a:hover { color: var(--accent); text-decoration: underline; }
   .player-btn { font-size: 16px; }
   .player-btn.btn-main { width: 34px; height: 34px; font-size: 16px; }
 }
+
+/* Player Resizer & Mobile Tabs */
+.player-resizer {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: row-resize;
+  z-index: 9005;
+  display: flex;
+  justify-content: center;
+}
+.resizer-bar {
+  width: 40px;
+  height: 4px;
+  background: var(--primary);
+  border-radius: 2px;
+  margin-top: 3px;
+  opacity: 0.5;
+}
+.player-mobile-tabs {
+  display: flex;
+  background: var(--bg-r1);
+  border-bottom: 2px solid var(--primary);
+  padding: 0 10px;
+  gap: 2px;
+}
+.player-tab-btn {
+  padding: 8px 16px;
+  background: var(--bg-r3);
+  border: 1px solid var(--border-main);
+  border-bottom: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  transition: all 0.2s ease;
+  margin-top: 5px;
+}
+.player-tab-btn.active {
+  color: var(--primary);
+  background: var(--bg-white);
+  border-color: var(--primary);
+  border-bottom: 2px solid var(--bg-white);
+  margin-bottom: -2px;
+  position: relative;
+  z-index: 2;
+}
+

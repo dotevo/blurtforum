@@ -19,6 +19,8 @@ window.BFPlayer = (function() {
     duration: 0,
     minimized: false,
     expanded: false,
+    expandedTab: 'video', // 'video' or 'queue' for mobile
+    expandedHeight: parseInt(localStorage.getItem('bf-player-height') || '600'),
     repeat: false
   });
 
@@ -27,9 +29,40 @@ window.BFPlayer = (function() {
   let ytPlayer = null;
   let ptPlayer = null;
   let progressTimer = null;
+  let isResizing = false;
 
   // --- INTERNAL METHODS ---
   
+  const initResize = (e) => {
+    isResizing = true;
+    document.addEventListener('mousemove', handleResize);
+    document.addEventListener('mouseup', stopResize);
+    document.addEventListener('touchmove', handleResize);
+    document.addEventListener('touchend', stopResize);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+  };
+
+  const handleResize = (e) => {
+    if (!isResizing) return;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const height = window.innerHeight - clientY;
+    // Constrain height
+    if (height > 250 && height < window.innerHeight * 0.9) {
+      state.expandedHeight = height;
+    }
+  };
+
+  const stopResize = () => {
+    isResizing = false;
+    document.removeEventListener('mousemove', handleResize);
+    document.removeEventListener('mouseup', stopResize);
+    document.removeEventListener('touchmove', handleResize);
+    document.removeEventListener('touchend', stopResize);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    localStorage.setItem('bf-player-height', state.expandedHeight);
+  };
   const initAudio = () => {
     if (audioObj) return;
     audioObj = new Audio();
