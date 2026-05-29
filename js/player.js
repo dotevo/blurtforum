@@ -269,7 +269,7 @@ window.BFPlayer = (function() {
 
   // --- PUBLIC METHODS ---
 
-  const playTrack = async (track) => {
+  const playTrack = async (track, isManual = false, manualIdx = -1) => {
     if (!state.enabled) return;
     
     stopAll();
@@ -277,6 +277,11 @@ window.BFPlayer = (function() {
     state.active = true;
     state.loading = true;
     state.minimized = false; 
+
+    // Remove from manual queue if playing from it
+    if (isManual && manualIdx !== -1) {
+      state.queue.splice(manualIdx, 1);
+    }
 
     if (track.type === 'suno') {
       initAudio();

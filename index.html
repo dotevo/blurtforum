@@ -142,20 +142,33 @@
 </div>
 
 <!-- GLOBAL ACTIVITY FEED -->
-<div v-if="auth.user && globalActivity.length > 0" style="margin: 0 15px 15px;">
+    <div v-if="auth.user && globalActivity.length > 0" style="margin: 0 15px 15px;">
   <table class="forumline">
     <tr>
       <td class="catHead" style="height: 34px; padding: 0 12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
           <span><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
-          <button class="btn btn-sm btn-ghost" @click="activityExpanded = !activityExpanded" style="padding: 2px 8px; font-size: 10px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
-            {{ activityExpanded ? t('hide') : t('show') + ' (' + globalActivity.length + ')' }}
-          </button>
+          
+          <div style="display:flex; gap:10px; align-items:center;">
+            <!-- Activity Tabs -->
+            <div style="display:flex; gap:2px; background:rgba(0,0,0,0.05); padding:2px; border-radius:4px; margin-right:5px;">
+              <button class="activity-tab-btn" :class="{ active: activityTab === 'comments' }" @click="activityTab = 'comments'">
+                {{ t('comments') }} {{ globalActivity.filter(a => !a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => !a.is_post && !a.isRead).length + ')' : '' }}
+              </button>
+              <button class="activity-tab-btn" :class="{ active: activityTab === 'posts' }" @click="activityTab = 'posts'">
+                {{ t('posts') }} {{ globalActivity.filter(a => a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => a.is_post && !a.isRead).length + ')' : '' }}
+              </button>
+            </div>
+            
+            <button class="btn btn-sm btn-ghost" @click="activityExpanded = !activityExpanded" style="padding: 2px 8px; font-size: 10px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
+              {{ activityExpanded ? t('hide') : t('show') + ' (' + globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).length + ')' }}
+            </button>
+          </div>
         </div>
       </td>
     </tr>
     <template v-if="activityExpanded">
-      <tr v-for="act in globalActivity.slice(0, activityFullList ? 20 : 3)" :key="act.id">
+      <tr v-for="act in globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).slice(0, activityFullList ? 20 : 3)" :key="act.id">
         <td class="row1" style="padding: 10px 15px; border-bottom: 1px solid var(--bg-white);">
           <a href="#" @click.prevent="openActivity(act)" 
              style="text-decoration: none; display: block;"
@@ -177,10 +190,10 @@
           </a>
         </td>
       </tr>
-      <tr v-if="globalActivity.length > 3">
+      <tr v-if="globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).length > 3">
         <td class="row2" align="center" style="padding: 8px;">
            <a href="#" @click.prevent="activityFullList = !activityFullList" class="gs" style="font-size: 11px; font-weight: bold; text-decoration: underline;">
-             {{ activityFullList ? t('showLess') : t('showMore') + ' (' + (globalActivity.length - 3) + ')' }}
+             {{ activityFullList ? t('showLess') : t('showMore') + ' (' + (globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).length - 3) + ')' }}
            </a>
         </td>
       </tr>
@@ -459,16 +472,18 @@
         <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
             class="row-hover" @click="openTopic(post)"
             :style="{ opacity: post.isMuted ? 0.4 : 1, backgroundColor: post.isMuted ? 'var(--bg-r3)' : 'inherit' }">
-          <td :class="i%2===0?'row1':'row2'" align="center" width="30">
-            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)"><i class="fa-solid fa-caret-up"></i></div>
+          <td :class="i%2===0?'row1':'row2'" align="center" width="40">
+            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="submitVote(post)">
+              <i class="fa-solid fa-caret-up"></i>
+              <div style="font-size: 10px; font-weight: bold; margin-top: -2px;">{{ post.vote_count }}</div>
+            </div>
           </td>
           <td :class="i%2===0?'row1':'row2'" class="col-topic">
             <span v-if="post.isMuted" style="margin-right:5px; color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
             <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
             <span v-else style="display:inline-block; width:8px; height:8px; background:var(--border-main); border-radius:50%; margin-right:8px;" title="Read"></span>
-            <a href="#" @click.stop.prevent="openTopic(post)" 
-               :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
-            <!-- Media icons -->
+            
+            <!-- Media icons (Moved before title) -->
             <template v-if="player.state.enabled && post.media">
               <span class="media-icon" @click.stop="player.playTrack({...post.media, title: post.title, author: post.author, permlink: post.permlink})" :title="t('playNow') || 'Play Now'">
                 <i :class="post.media.type === 'suno' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
@@ -477,6 +492,9 @@
                 <i class="fa-solid fa-plus"></i>
               </span>
             </template>
+
+            <a href="#" @click.stop.prevent="openTopic(post)" 
+               :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
             <br>
             <span class="gs">
               {{ fmtDate(post.created) }}
@@ -1051,7 +1069,7 @@
           <!-- Manual Queue -->
           <div v-for="(track, idx) in player.state.queue" :key="'q-'+idx" class="queue-item manual">
             <span class="queue-idx">P</span>
-            <div class="queue-info">
+            <div class="queue-info" @click="player.playTrack(track, true, idx)">
               <div class="queue-title">{{ track.title }}</div>
               <div class="queue-author">@{{ track.author }}</div>
             </div>

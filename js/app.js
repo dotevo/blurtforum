@@ -245,6 +245,7 @@ createApp({
     });
 
     const globalActivity = ref([]);
+    const activityTab = ref('comments');
     const activityExpanded = ref(true);
     const activityFullList = ref(false);
     const mobileActivityExpanded = ref(false);
@@ -2765,7 +2766,7 @@ createApp({
       structureForm, showStructureDocs,
       forumPagination, loadMorePosts,
       pinModal, handlePinSubmit,
-      globalActivity, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
+      globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
       editModal, startEdit, submitEdit,
       oldContentModal, submitSupportComment,
       voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
