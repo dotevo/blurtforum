@@ -179,6 +179,7 @@ const TR = {
     confirmFollow: "Are you sure you want to follow @{user}?",
     confirmUnfollow: "Are you sure you want to unfollow @{user}?",
     joined: "Joined",
+    queue: "Queue",
   },
   pl: {
     home: "Strona główna",
@@ -548,5 +549,10 @@ const TR = {
     following: "Sekvataj",
     confirmFollow: "Ĉu vi certas, ke vi volas sekvi @{user}?",
     confirmUnfollow: "Ĉu vi certas, ke vi volas malsekvi @{user}?",
+    queue: "Vico",
+    video: "Video",
+    playNow: "Ludi nun",
+    addToQueue: "Aldoni al vico",
     }
 };
+

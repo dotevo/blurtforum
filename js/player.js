@@ -7,7 +7,7 @@ window.BFPlayer = (function() {
 
   // --- STATE ---
   const state = reactive({
-    enabled: localStorage.getItem('bf-experimental-mode') === 'true',
+    enabled: true,
     active: false,      // is player visible?
     playing: false,     // is currently playing?
     loading: false,     // is buffering?
