@@ -1249,6 +1249,25 @@ a:hover { color: var(--accent); text-decoration: underline; }
   text-align: center;
   color: var(--primary);
   font-size: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.player-cover-art {
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+@media (max-width: 800px) {
+  .player-cover-art {
+    width: 120px;
+    height: 120px;
+    margin-bottom: 10px;
+  }
 }
 .player-queue-panel {
   flex: 1;
@@ -1476,9 +1495,12 @@ a:hover { color: var(--accent); text-decoration: underline; }
   opacity: 0.9;
   transition: opacity 0.3s;
 }
-.media-placeholder:hover .media-placeholder-overlay {
-  opacity: 1;
-  background: rgba(0,0,0,0.4);
+.media-placeholder.is-resolving {
+  filter: grayscale(0.5);
+  cursor: wait;
+}
+.media-placeholder.is-resolving .bf-placeholder-play {
+  opacity: 0.7;
 }
 .media-placeholder-actions {
   display: flex;

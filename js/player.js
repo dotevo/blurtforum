@@ -8,23 +8,22 @@ window.BFPlayer = (function() {
   // --- STATE ---
   const state = reactive({
     enabled: true,
-    active: false,      // is player visible?
-    playing: false,     // is currently playing?
-    loading: false,     // is buffering?
-    currentTrack: null, // { title, author, type, id, url, postId, permlink, host }
-    queue: [],          // manual queue
-    autoQueue: [],      // automatic queue from current view
-    volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
-    progress: 0,
-    duration: 0,
+    active: false,
+    playing: false,
+    loading: false,
     minimized: false,
     expanded: false,
-    expandedTab: 'video', // 'video' or 'queue' for mobile
-    expandedHeight: parseInt(localStorage.getItem('bf-player-height') || '600'),
-    repeat: false
+    expandedHeight: 400,
+    expandedTab: 'video', // 'video' or 'queue'
+    currentTrack: null, // { type: 'youtube'|'peertube'|'audio', id, src?, cover?, title, author, permlink, host? }
+    queue: [],
+    autoQueue: [],
+    progress: 0,
+    duration: 0,
+    volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
+    experimental: localStorage.getItem('bf-player-experimental') === 'true'
   });
 
-  // --- PRIVATE VARS ---
   let audioObj = null;
   let ytPlayer = null;
   let ptPlayer = null;
@@ -37,16 +36,7 @@ window.BFPlayer = (function() {
   const loadSavedQueue = () => {
     try {
       const saved = localStorage.getItem('bf-player-queue');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          state.queue = parsed;
-          if (state.queue.length > 0) {
-            state.active = true;
-            state.minimized = true;
-          }
-        }
-      }
+      if (saved) state.queue = JSON.parse(saved);
     } catch (e) { console.warn('Failed to load queue:', e); }
   };
   loadSavedQueue();
@@ -55,7 +45,6 @@ window.BFPlayer = (function() {
     if (!state.currentTrack) return;
     const trackWithError = state.currentTrack;
 
-    // If the track is actually playing, ignore the error (might be a transient network issue)
     if (state.playing && !state.loading && audioObj && !audioObj.paused && audioObj.currentTime > 0) {
       console.warn('BFPlayer: Ignored transient error because media is playing:', msg);
       return;
@@ -71,11 +60,9 @@ window.BFPlayer = (function() {
     
     if (errorTimer) clearTimeout(errorTimer);
     errorTimer = setTimeout(() => {
-      // Restore title ONLY if it still has the error message
       if (trackWithError.title && trackWithError.title.startsWith('⚠️ ERROR:')) {
          trackWithError.title = oldTitle;
       }
-      // Skip ONLY if we are still on the same track that failed
       if (state.currentTrack === trackWithError) {
          playNext();
       }
@@ -85,33 +72,25 @@ window.BFPlayer = (function() {
   
   const initResize = (e) => {
     isResizing = true;
-    document.addEventListener('mousemove', handleResize);
-    document.addEventListener('mouseup', stopResize);
-    document.addEventListener('touchmove', handleResize);
-    document.addEventListener('touchend', stopResize);
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'row-resize';
-  };
-
-  const handleResize = (e) => {
-    if (!isResizing) return;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const height = window.innerHeight - clientY;
-    // Constrain height
-    if (height > 250 && height < window.innerHeight * 0.9) {
-      state.expandedHeight = height;
-    }
-  };
-
-  const stopResize = () => {
-    isResizing = false;
-    document.removeEventListener('mousemove', handleResize);
-    document.removeEventListener('mouseup', stopResize);
-    document.removeEventListener('touchmove', handleResize);
-    document.removeEventListener('touchend', stopResize);
-    document.body.style.userSelect = '';
-    document.body.style.cursor = '';
-    localStorage.setItem('bf-player-height', state.expandedHeight);
+    const startY = e.touches ? e.touches[0].clientY : e.clientY;
+    const startH = state.expandedHeight;
+    const onMove = (ee) => {
+      if (!isResizing) return;
+      const currentY = ee.touches ? ee.touches[0].clientY : ee.clientY;
+      const delta = startY - currentY;
+      state.expandedHeight = Math.max(200, Math.min(window.innerHeight * 0.8, startH + delta));
+    };
+    const onUp = () => {
+      isResizing = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove);
+    document.addEventListener('touchend', onUp);
   };
 
   const initAudio = () => {
@@ -119,7 +98,7 @@ window.BFPlayer = (function() {
     audioObj = new Audio();
     audioObj.volume = state.volume;
     
-    const isAudioTrack = () => state.currentTrack?.type === 'suno' || state.currentTrack?.type === 'audio';
+    const isAudioTrack = () => state.currentTrack?.type === 'audio';
 
     audioObj.addEventListener('play', () => { 
       if (isAudioTrack()) { state.playing = true; state.loading = false; }
@@ -145,7 +124,7 @@ window.BFPlayer = (function() {
     audioObj.addEventListener('error', (e) => {
       if (isAudioTrack()) {
         console.error('BFPlayer Audio error:', e);
-        handleError('Audio/Video file error or broken link');
+        handleError('Audio file error or broken link');
       }
     });
   };
@@ -162,57 +141,31 @@ window.BFPlayer = (function() {
   };
 
   const initYT = async () => {
-    console.log('BFPlayer: Initializing YouTube API...');
     await loadYTAPI();
-    if (ytPlayer) {
-      console.log('BFPlayer: YouTube player already exists, reusing.');
-      return;
-    }
-    
-    let container = document.getElementById('bf-yt-player-target');
-    if (!container) {
-      console.warn('BFPlayer: bf-yt-player-target not found in DOM!');
-      container = document.createElement('div');
-      container.id = 'bf-yt-player-container-hidden';
-      container.style.position = 'fixed';
-      container.style.bottom = '-1000px';
-      document.body.appendChild(container);
-    }
-    const targetId = container.id;
-    console.log('BFPlayer: Creating YT.Player on target:', targetId);
-
-    ytPlayer = new YT.Player(targetId, {
-      height: '360',
-      width: '640',
-      playerVars: { 'autoplay': 1, 'controls': 1, 'disablekb': 0, 'fs': 1, 'modestbranding': 1, 'origin': window.location.origin },
+    ytPlayer = new YT.Player('bf-yt-player-target', {
+      height: '100%', width: '100%',
+      playerVars: { 'autoplay': 1, 'controls': 1, 'modestbranding': 1, 'rel': 0 },
       events: {
-        'onReady': () => {
-          console.log('BFPlayer: YT Player Ready');
-          if (state.currentTrack?.type === 'youtube') {
-            console.log('BFPlayer: Loading video:', state.currentTrack.id);
-            ytPlayer.loadVideoById(state.currentTrack.id);
-            ytPlayer.playVideo();
-          }
-        },
-        'onError': (e) => {
-          console.error('YT Player Error:', e.data);
-          handleError('YouTube video unavailable or broken link');
+        'onReady': (event) => {
+          event.target.setVolume(state.volume * 100);
+          if (state.currentTrack?.type === 'youtube') event.target.loadVideoById(state.currentTrack.id);
         },
         'onStateChange': (event) => {
-          console.log('BFPlayer: YT State Change:', event.data);
           if (event.data === YT.PlayerState.PLAYING) {
-            state.playing = true;
-            state.loading = false;
+            state.playing = true; state.loading = false;
+            state.duration = ytPlayer.getDuration();
             startYTProgress();
           } else if (event.data === YT.PlayerState.PAUSED) {
-            state.playing = false;
-            stopYTProgress();
+            state.playing = false; stopYTProgress();
           } else if (event.data === YT.PlayerState.BUFFERING) {
             state.loading = true;
           } else if (event.data === YT.PlayerState.ENDED) {
-            stopYTProgress();
-            playNext();
+            state.playing = false; stopYTProgress(); playNext();
           }
+        },
+        'onError': (e) => {
+          console.error('BFPlayer YT error:', e);
+          handleError('YouTube video unavailable or blocked');
         }
       }
     });
@@ -220,43 +173,20 @@ window.BFPlayer = (function() {
 
   const initPT = () => {
     const iframe = document.getElementById('bf-pt-player-iframe');
-    if (!iframe || !window.PeerTubePlayer) return;
-
-    console.log('BFPlayer: Initializing PeerTube API instance...');
-    
-    // Create new player instance
-    ptPlayer = new window.PeerTubePlayer(iframe);
-    
+    if (!iframe) return;
+    ptPlayer = new PeerTubePlayer(iframe);
     ptPlayer.ready.then(() => {
-      console.log('BFPlayer: PeerTube API Ready');
-      ptPlayer.setVolume(state.volume);
-      // Auto-play via API too, just in case ?autoplay=1 was blocked
-      console.log('BFPlayer: Triggering PeerTube play()');
-      ptPlayer.play();
-      
-      ptPlayer.addEventListener('playbackStatusUpdate', (stats) => {
-        if (state.currentTrack?.type !== 'peertube') return;
-        if (stats && typeof stats.position !== 'undefined') {
-          state.progress = (stats.position / stats.duration) * 100;
-          state.duration = stats.duration;
-          if (stats.playbackState === 'ended') {
-            console.log('BFPlayer: PeerTube ended, moving to next');
-            playNext();
-          }
-        }
-      });
-
-      ptPlayer.addEventListener('playbackStatusChange', (playbackState) => {
-        if (state.currentTrack?.type !== 'peertube') return;
-        state.playing = (playbackState === 'playing');
-      });
-
-      ptPlayer.addEventListener('error', (err) => {
-        console.warn('PeerTube error:', err);
-        handleError('blurt.media (PeerTube) playback error');
-      });
-    }).catch(err => {
-      console.warn('BFPlayer: PeerTube ready error:', err);
+       ptPlayer.setVolume(state.volume);
+       ptPlayer.addEventListener('playbackStatusUpdate', (status) => {
+          if (status === 'playing') state.playing = true;
+          else if (status === 'paused') state.playing = false;
+       });
+       ptPlayer.addEventListener('timeupdate', (time) => {
+          ptPlayer.getDuration().then(dur => {
+             state.duration = dur;
+             state.progress = (time / dur) * 100;
+          });
+       });
     });
   };
 
@@ -264,38 +194,19 @@ window.BFPlayer = (function() {
     stopYTProgress();
     progressTimer = setInterval(() => {
       if (ytPlayer && ytPlayer.getCurrentTime) {
-        const cur = ytPlayer.getCurrentTime();
-        const dur = ytPlayer.getDuration();
-        if (dur > 0) {
-          state.progress = (cur / dur) * 100;
-          state.duration = dur;
-        }
+        state.progress = (ytPlayer.getCurrentTime() / ytPlayer.getDuration()) * 100;
       }
     }, 500);
   };
 
-  const stopYTProgress = () => {
-    if (progressTimer) clearInterval(progressTimer);
-  };
+  const stopYTProgress = () => { if (progressTimer) clearInterval(progressTimer); };
 
   const stopAll = () => {
-    if (errorTimer) {
-      clearTimeout(errorTimer);
-      errorTimer = null;
-    }
-    if (audioObj) {
-      audioObj.pause();
-      audioObj.src = '';
-    }
-    if (ytPlayer && ytPlayer.stopVideo) {
-      try { ytPlayer.stopVideo(); } catch(e) {}
-    }
-    if (ptPlayer && ptPlayer.pause) {
-      // Don't kill instance yet, just stop playback
-      try { ptPlayer.pause(); } catch(e) {}
-    }
-    state.playing = false;
-    state.progress = 0;
+    if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+    if (audioObj) { audioObj.pause(); audioObj.src = ''; }
+    if (ytPlayer && ytPlayer.stopVideo) { try { ytPlayer.stopVideo(); } catch(e) {} }
+    if (ptPlayer && ptPlayer.pause) { try { ptPlayer.pause(); } catch(e) {} }
+    state.playing = false; state.progress = 0;
   };
 
   // --- PUBLIC METHODS ---
@@ -303,64 +214,52 @@ window.BFPlayer = (function() {
   const playTrack = async (track, isManual = false, manualIdx = -1) => {
     if (!state.enabled) return;
     
+    // Safety check: if track is missing src (e.g. from auto-queue shortlink), resolve it now
+    if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
+      const resolved = await Parser.resolveMedia(track);
+      if (resolved && resolved.src) {
+        track = resolved;
+      } else {
+        handleError('Could not resolve audio source');
+        return;
+      }
+    }
+
     stopAll();
     state.currentTrack = track;
     state.active = true;
     state.loading = true;
     state.minimized = false; 
 
-    // Remove from manual queue if playing from it
-    if (isManual && manualIdx !== -1) {
-      state.queue.splice(manualIdx, 1);
-    }
+    if (isManual && manualIdx !== -1) state.queue.splice(manualIdx, 1);
 
-    if (track.type === 'suno') {
-      initAudio();
-      audioObj.src = `https://cdn1.suno.ai/${track.id}.mp3`;
-      audioObj.play().catch(e => console.warn('Play error:', e));
-    } else if (track.type === 'audio') {
+    if (track.type === 'audio') {
       initAudio();
       try {
-        // ID is base64 encoded URL
-        audioObj.src = atob(track.id);
+        if (!track.src && track.id) {
+           // Fallback for legacy base64 IDs
+           try { track.src = atob(track.id); } catch(e) { track.src = track.id; }
+        }
+        audioObj.src = track.src;
         audioObj.play().catch(e => console.warn('Play error:', e));
       } catch(e) {
-        console.error('Failed to decode audio URL:', e);
+        console.error('Failed to load audio:', e);
         handleError('Invalid audio link');
       }
     } else if (track.type === 'youtube') {
-      if (!ytPlayer) {
-        await initYT();
-      } else {
-        ytPlayer.loadVideoById(track.id);
-        ytPlayer.playVideo();
-      }
+      if (!ytPlayer) await initYT();
+      else { ytPlayer.loadVideoById(track.id); ytPlayer.playVideo(); }
     } else if (track.type === 'peertube') {
-      state.playing = true;
-      state.loading = false;
-      // Wait for Vue to recreate the iframe with new :key
-      Vue.nextTick(() => {
-        setTimeout(() => {
-          initPT();
-        }, 1000); // Give it time to load src
-      });
+      state.playing = true; state.loading = false;
+      Vue.nextTick(() => { setTimeout(() => initPT(), 1000); });
     }
   };
 
   const playNext = () => {
-    if (state.queue.length > 0) {
-      playTrack(state.queue.shift());
-    } else if (state.autoQueue.length > 0) {
+    if (state.queue.length > 0) playTrack(state.queue.shift());
+    else if (state.autoQueue.length > 0) {
       const idx = state.autoQueue.findIndex(t => t.id === state.currentTrack?.id);
-      if (idx !== -1 && idx < state.autoQueue.length - 1) {
-        playTrack(state.autoQueue[idx + 1]);
-      } else if (state.repeat) {
-        playTrack(state.autoQueue[0]);
-      } else {
-        state.playing = false;
-      }
-    } else {
-      state.playing = false;
+      if (idx !== -1 && idx < state.autoQueue.length - 1) playTrack(state.autoQueue[idx + 1]);
     }
   };
 
@@ -373,20 +272,14 @@ window.BFPlayer = (function() {
 
   const togglePlay = () => {
     if (!state.currentTrack) return;
-    
-    // Force status sync for YouTube
     if (state.currentTrack.type === 'youtube' && ytPlayer && ytPlayer.getPlayerState) {
-      const ytState = ytPlayer.getPlayerState();
-      state.playing = (ytState === YT.PlayerState.PLAYING);
+      state.playing = (ytPlayer.getPlayerState() === YT.PlayerState.PLAYING);
     }
-
     if (state.playing) {
-      if (state.currentTrack.type === 'suno' && audioObj) audioObj.pause();
       if (state.currentTrack.type === 'audio' && audioObj) audioObj.pause();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
       if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.pause();
     } else {
-      if (state.currentTrack.type === 'suno' && audioObj) audioObj.play();
       if (state.currentTrack.type === 'audio' && audioObj) audioObj.play();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
       if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.play();
@@ -395,39 +288,22 @@ window.BFPlayer = (function() {
 
   const seek = (pct) => {
     const time = (pct / 100) * state.duration;
-    if (state.currentTrack?.type === 'suno' && audioObj) audioObj.currentTime = time;
-    else if (state.currentTrack?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time, true);
+    if (state.currentTrack?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time);
+    else if (state.currentTrack?.type === 'audio' && audioObj) audioObj.currentTime = time;
     else if (state.currentTrack?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
   };
 
-  const addToQueue = (track) => {
-    if (!state.enabled || state.queue.find(t => t.id === track.id)) return;
-    state.queue.push(track);
-    state.active = true;
-  };
-
+  const addToQueue = (track) => { state.queue.push(track); };
   const setAutoQueue = (tracks) => { state.autoQueue = tracks; };
-
-  const toggleExperimental = () => {
-    state.enabled = !state.enabled;
-    localStorage.setItem('bf-experimental-mode', state.enabled);
-    if (!state.enabled) { stopAll(); state.active = false; }
-  };
-
-  watch(() => state.minimized, (isMin) => {
-    if (isMin) state.expanded = false;
-  });
+  const toggleExperimental = (val) => { state.experimental = val; localStorage.setItem('bf-player-experimental', val); };
 
   watch(() => state.volume, (newVol) => {
     if (audioObj) audioObj.volume = newVol;
-    if (ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(newVol * 100);
-    if (ptPlayer && ptPlayer.setVolume) ptPlayer.setVolume(newVol);
+    if (ytPlayer) ytPlayer.setVolume(newVol * 100);
+    if (ptPlayer) ptPlayer.setVolume(newVol);
     localStorage.setItem('bf-player-volume', newVol);
   });
-
-  watch(() => [...state.queue], (newQueue) => {
-    localStorage.setItem('bf-player-queue', JSON.stringify(newQueue));
-  }, { deep: true });
+  watch(() => state.queue, (newQueue) => { localStorage.setItem('bf-player-queue', JSON.stringify(newQueue)); }, { deep: true });
 
   return { state, initResize, playTrack, playNext, playPrev, togglePlay, seek, addToQueue, setAutoQueue, toggleExperimental };
 })();

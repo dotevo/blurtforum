@@ -485,10 +485,10 @@
             
             <!-- Media icons (Moved before title) -->
             <template v-if="player.state.enabled && post.media">
-              <span class="media-icon" @click.stop="player.playTrack({...post.media, title: post.title, author: post.author, permlink: post.permlink})" :title="t('playNow') || 'Play Now'">
-                <i :class="post.media.type === 'suno' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
+              <span class="media-icon" @click.stop="handleMediaAction(post.media.type, post.media.id, post.media.host, 'play', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('playNow') || 'Play Now'">
+                <i :class="post.media.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
               </span>
-              <span class="media-icon" @click.stop="player.addToQueue({...post.media, title: post.title, author: post.author, permlink: post.permlink})" :title="t('addToQueue') || 'Add to Queue'">
+              <span class="media-icon" @click.stop="handleMediaAction(post.media.type, post.media.id, post.media.host, 'queue', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('addToQueue') || 'Add to Queue'">
                 <i class="fa-solid fa-plus"></i>
               </span>
             </template>
@@ -1052,10 +1052,14 @@
                   frameborder="0" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
                   allow="autoplay"></iframe>
         </div>
-        <!-- Suno Cover/Visualizer placeholder -->
-        <div class="player-audio-visual" v-show="player.state.currentTrack?.type === 'suno'">
-          <i class="fa-solid fa-music"></i>
-          <div class="gs" style="margin-top:10px">Playing from Suno.ai</div>
+        <!-- Audio Cover/Visualizer -->
+        <div class="player-audio-visual" v-show="player.state.currentTrack?.type === 'audio'">
+          <img v-if="player.state.currentTrack?.cover" 
+               :src="player.state.currentTrack.cover" 
+               class="player-cover-art"
+               @error="$event.target.style.display='none'">
+          <i v-else class="fa-solid fa-music"></i>
+          <div class="gs" style="margin-top:10px">{{ t('playing') || 'Playing' }}</div>
         </div>
       </div>
       

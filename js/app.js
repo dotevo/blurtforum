@@ -400,9 +400,73 @@ createApp({
     };
     const renderMD = (text, context = null) => {
       if (typeof window.renderMarkdown === 'function') {
-        return window.renderMarkdown(text, context);
+        const html = window.renderMarkdown(text, context);
+        // Trigger auto-resolution for complex media (like shortlinks) after rendering
+        if (html.includes('is-resolving')) {
+          setTimeout(() => {
+            const pending = document.querySelectorAll('.media-placeholder.is-resolving');
+            pending.forEach(async (el) => {
+              const id = el.getAttribute('data-id');
+              const type = el.getAttribute('data-type');
+              const resolved = await Parser.resolveMedia({ type, id });
+              if (resolved && resolved.src) {
+                el.classList.remove('is-resolving');
+                if (resolved.cover) el.style.backgroundImage = `url(${resolved.cover})`;
+                el.setAttribute('data-id', resolved.id);
+                el.setAttribute('data-type', resolved.type);
+                el.setAttribute('data-src', resolved.src);
+                el.setAttribute('data-cover', resolved.cover || '');
+                const label = el.querySelector('.gs');
+                if (label) label.innerText = resolved.type;
+                
+                el.querySelectorAll('button').forEach(btn => {
+                  btn.setAttribute('data-id', resolved.id);
+                  btn.setAttribute('data-type', resolved.type);
+                  btn.setAttribute('data-src', resolved.src);
+                  btn.setAttribute('data-cover', resolved.cover || '');
+                });
+              }
+            });
+          }, 100);
+        }
+        return DOMPurify.sanitize(html, {
+          ADD_TAGS: ['iframe', 'blockquote', 'audio'],
+          ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'sandbox', 'src', 'controls', 'data-user', 'data-type', 'data-id', 'data-host', 'data-title', 'data-author', 'data-src', 'data-cover']
+        });
       }
       return text;
+    };
+
+    /**
+     * Generic media action handler. Decoupled from specific services.
+     */
+    const handleMediaAction = async (type, id, host, action, trackData = null) => {
+      let media = { type, id, host, ...trackData };
+      
+      // If it's a pending/shortlink track (no src provided), resolve it now
+      if (!media.src && type === 'audio' && id && id.length < 30) {
+        media = await Parser.resolveMedia(media);
+        if (!media.src) {
+          showStatus('Error', 'Could not resolve media link', 'error');
+          return;
+        }
+      }
+
+      if (action === 'play') {
+        BFPlayer.playTrack(media);
+      } else if (action === 'queue') {
+        BFPlayer.addToQueue(media);
+        showStatus(t('addedToQueue'), media.title, 'success');
+      } else if (action === 'embed') {
+        const placeholders = document.querySelectorAll(`.media-placeholder[data-id="${id}"]`);
+        placeholders.forEach(p => {
+          const url = media.type === 'youtube' ? `https://youtube.com/watch?v=${media.id}` : (media.src || '');
+          if (url) {
+            const embedHtml = Parser.getEmbedCode(url);
+            if (embedHtml) p.outerHTML = embedHtml;
+          }
+        });
+      }
     };
     const isNestedReply = (r) => {
       if (!activeTopic.value) return false;
@@ -647,8 +711,15 @@ createApp({
       // Auto-collapse support comments
       const isCollapsed = p.body && p.body.startsWith('Supporting original content by @');
 
-      // Media detection (Suno, YouTube, Audio, etc.)
-      const media = Parser.detectMedia(p.body);
+      // Media detection (Generic: audio, youtube, etc.)
+      let media = Parser.detectMedia(p.body);
+      
+      // Auto-resolve fixed patterns (like suno song links) to have src/cover immediately
+      // Share links (s/) will still be pending until played or auto-resolved in DOM
+      if (media && media.type === 'audio' && !media.src && media.id.length >= 36) {
+         media.src = `https://cdn1.suno.ai/${media.id}.mp3`;
+         media.cover = `https://cdn2.suno.ai/image_large_${media.id}.jpeg`;
+      }
 
       return {
         author: p.author,
@@ -2546,56 +2617,39 @@ createApp({
     onMounted(() => {
       setTheme(theme.value);
 
-      // Handle clicks on media placeholders
-      document.body.addEventListener('click', (e) => {
-        const playBtn = e.target.closest('.bf-placeholder-play');
-        const queueBtn = e.target.closest('.bf-placeholder-queue');
-        const embedBtn = e.target.closest('.bf-placeholder-embed');
-
-        if (playBtn || queueBtn || embedBtn) {
-          e.preventDefault();
-          const target = playBtn || queueBtn || embedBtn;
-
-          if (embedBtn) {
-            const type = target.dataset.type;
-            const id = target.dataset.id;
-            const host = target.dataset.host;
-            const placeholder = target.closest('.media-placeholder');
-            if (placeholder) {
-              let html = '';
-              if (type === 'youtube') {
-                html = `<div class="embed-container"><iframe src="https://www.youtube.com/embed/${id}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
-              } else if (type === 'suno') {
-                html = `<div class="embed-suno"><iframe src="https://suno.com/embed/${id}" frameborder="0" allowfullscreen></iframe></div>`;
-              } else if (type === 'peertube') {
-                html = `<div class="embed-container"><iframe src="https://${host}/videos/embed/${id}" frameborder="0" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe></div>`;
-              }
-              if (html) placeholder.outerHTML = html;
-            }
-            return;
-          }
-
-          const track = {
-            type: target.dataset.type,
-            id: target.dataset.id,
-            host: target.dataset.host,
-            title: target.dataset.title,
-            author: target.dataset.author || 'post'
-          };
-          if (playBtn) BFPlayer.playTrack(track);
-          else BFPlayer.addToQueue(track);
-        }
-      });
-
       window.addEventListener('popstate', handleUrlChange);
 
       // Periodic check for notifications
       setInterval(checkNewNotifications, 60000); // every minute
 
-      // Image lightbox click handler
+      // --- GLOBAL CLICK HANDLER ---
       document.addEventListener('click', (e) => {
+        // 1. Image lightbox
         if (e.target.tagName === 'IMG' && e.target.closest('.post-body')) {
           openImgModal(e.target.src);
+          return;
+        }
+
+        // 2. Media Placeholders (Play/Queue/Embed)
+        const mediaBtn = e.target.closest('.bf-placeholder-play, .bf-placeholder-queue, .bf-placeholder-embed');
+        if (mediaBtn) {
+          e.preventDefault();
+          const d = mediaBtn.dataset;
+          const action = mediaBtn.classList.contains('bf-placeholder-play') ? 'play' :
+                         (mediaBtn.classList.contains('bf-placeholder-queue') ? 'queue' : 'embed');
+          
+          handleMediaAction(d.type, d.id, d.host, action, { 
+            title: d.title, author: d.author, src: d.src, cover: d.cover 
+          });
+          return;
+        }
+
+        // 3. Mentions
+        const mention = e.target.closest('.mention');
+        if (mention) {
+          e.preventDefault();
+          openProfile(mention.getAttribute('data-user'));
+          return;
         }
       });
       
@@ -2752,6 +2806,7 @@ createApp({
       explorationForm,
       toggleExploration,
       followingSet,
+      handleMediaAction,
       player: BFPlayer,
       handlePlayerSeek,
       vw
