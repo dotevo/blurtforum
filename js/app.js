@@ -714,13 +714,6 @@ createApp({
       // Media detection (Generic: audio, youtube, etc.)
       let media = Parser.detectMedia(p.body);
       
-      // Auto-resolve fixed patterns (like suno song links) to have src/cover immediately
-      // Share links (s/) will still be pending until played or auto-resolved in DOM
-      if (media && media.type === 'audio' && !media.src && media.id.length >= 36) {
-         media.src = `https://cdn1.suno.ai/${media.id}.mp3`;
-         media.cover = `https://cdn2.suno.ai/image_large_${media.id}.jpeg`;
-      }
-
       return {
         author: p.author,
         permlink: p.permlink,

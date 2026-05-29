@@ -216,9 +216,13 @@ window.BFPlayer = (function() {
     
     // Safety check: if track is missing src (e.g. from auto-queue shortlink), resolve it now
     if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
+      const originalId = track.id;
       const resolved = await Parser.resolveMedia(track);
       if (resolved && resolved.src) {
         track = resolved;
+        // Update the autoQueue entry in-place so playNext/playPrev can still find it by ID
+        const aqIdx = state.autoQueue.findIndex(t => t.id === originalId);
+        if (aqIdx !== -1) Object.assign(state.autoQueue[aqIdx], resolved);
       } else {
         handleError('Could not resolve audio source');
         return;

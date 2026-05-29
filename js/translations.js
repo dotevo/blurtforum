@@ -367,6 +367,8 @@ const TR = {
     addToQueue: "Dodaj do kolejki",
     video: "Wideo",
     queue: "Kolejka",
+    playing: "odtwarzanie",
+    addedToQueue: "Dodano do kolejki",
   },
   eo: {
     home: "Hejmo",
