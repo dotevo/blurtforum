@@ -506,6 +506,9 @@
         <button class="btn btn-primary" @click="prevPage" :disabled="loading || !activeForum.pageHistory.length">
           « {{ t('prev') }}
         </button>
+        <button class="btn btn-ghost" v-if="!activeForum.pageHistory.length && activeForum.start_author" @click="openForum(activeForum)">
+          «« {{ t('firstPage') || 'First Page' }}
+        </button>
         <span class="gs" style="font-weight: bold;">{{ t('page') }} {{ activeForum.pageHistory.length + 1 }}</span>
         <button class="btn btn-primary" @click="nextPage" :disabled="loading || !activeForum.hasMore">
           {{ t('next') }} »
@@ -616,7 +619,7 @@
               </div>
             </div>
 
-            <div class="post-body" v-html="renderMD(activeTopic.body)"></div>
+            <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
             <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
               <template v-if="auth.user">
                 <button class="btn btn-sm" @click="startReply(activeTopic)">{{ t('reply') }}</button>
@@ -1007,7 +1010,7 @@
     <i class="fa-solid fa-play"></i> {{ player.state.currentTrack?.title }}
   </button>
 
-  <div class="player-content" v-show="!player.state.minimized">
+  <div class="player-content">
     
     <!-- Mobile Tabs -->
     <div v-if="player.state.expanded" class="player-mobile-tabs show-mobile">
@@ -1020,14 +1023,14 @@
     </div>
 
     <!-- Expanded View (Video & Queue) -->
-    <div v-if="player.state.expanded" class="player-expanded-body" v-show="player.state.expanded">
-      <div class="player-expanded-main" v-show="vw > 800 || player.state.expandedTab === 'video'">
+    <div class="player-expanded-body" :class="{ 'player-hidden': !player.state.expanded }">
+      <div class="player-expanded-main" :class="{ 'mobile-hide': vw <= 800 && player.state.expandedTab !== 'video' }">
         <!-- Video Container YouTube -->
-        <div class="player-video-frame" v-show="player.state.currentTrack?.type === 'youtube'">
+        <div class="player-video-frame" :class="{ 'v-hide': player.state.currentTrack?.type !== 'youtube' }">
           <div id="bf-yt-player-target"></div>
         </div>
         <!-- Video Container PeerTube -->
-        <div class="player-video-frame" v-show="player.state.currentTrack?.type === 'peertube'">
+        <div class="player-video-frame" :class="{ 'v-hide': player.state.currentTrack?.type !== 'peertube' }">
           <iframe id="bf-pt-player-iframe"
                   :key="player.state.currentTrack?.id"
                   :src="player.state.currentTrack?.type === 'peertube' ? 'https://' + player.state.currentTrack.host + '/videos/embed/' + player.state.currentTrack.id + '?api=1&autoplay=1' : ''" 
@@ -1042,7 +1045,7 @@
       </div>
       
       <!-- Queue Sidebar -->
-      <div class="player-queue-panel" v-show="vw > 800 || player.state.expandedTab === 'queue'">
+      <div class="player-queue-panel" :class="{ 'mobile-hide': vw <= 800 && player.state.expandedTab !== 'queue' }">
         <div class="queue-header hide-mobile">{{ t('queue') }} ({{ player.state.queue.length + player.state.autoQueue.length }})</div>
         <div class="queue-list">
           <!-- Manual Queue -->
@@ -1522,3 +1525,4 @@
 </body>
 </html>
 </html>
+ml>

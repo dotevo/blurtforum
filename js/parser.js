@@ -6,7 +6,7 @@ const Parser = {
   /**
    * Main entry point for rendering markdown with rich media embeds
    */
-  render(text) {
+  render(text, context = null) {
     if (!text) return '';
     try {
       // 1. Process auto-embeds for links found in text
@@ -18,7 +18,7 @@ const Parser = {
 
       // 3. Post-process: Replace [[MEDIA:...]] with actual HTML
       html = html.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (match, type, id, host) => {
-        return this.getExperimentalPlaceholder(type, id, host);
+        return this.getExperimentalPlaceholder(type, id, host, context);
       });
 
       // 4. Process mentions
@@ -28,7 +28,7 @@ const Parser = {
       return DOMPurify.sanitize(html, {
         ADD_TAGS: ['iframe', 'button'],
         ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox', 
-                  'data-type', 'data-id', 'data-host', 'data-title', 'data-author']
+                  'data-type', 'data-id', 'data-host', 'data-title', 'data-author', 'onclick']
       });
     } catch (e) {
       console.error('Parser error:', e);
@@ -137,6 +137,9 @@ const Parser = {
 <button class="btn btn-ghost bf-placeholder-queue" data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}">
 <i class="fa-solid fa-plus"></i> Queue
 </button>
+<button class="btn btn-ghost bf-placeholder-embed" data-type="${type}" data-id="${id}" data-host="${host}">
+<i class="fa-solid fa-code"></i> Embed
+</button>
 </div>
 <div class="gs" style="color:#fff; font-size:10px; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">${sourceLabel}</div>
 </div>
@@ -146,5 +149,5 @@ const Parser = {
 
 // Export for use in app.js
 if (typeof window !== 'undefined') {
-  window.renderMarkdown = (text) => Parser.render(text);
+  window.renderMarkdown = (text, context = null) => Parser.render(text, context);
 }

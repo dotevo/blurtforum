@@ -524,6 +524,10 @@ createApp({
         const params = { community: config.communityAccount, limit: 21, sort: 'activity' };
         
         if (direction === 'next' && pag.lastAuthor) {
+          params.start_author = pag.lastAuthor;
+          params.start_permlink = pag.lastPermlink;
+          pag.start_author = pag.lastAuthor;
+          pag.start_permlink = pag.lastPermlink;
           pag.pageHistory.push({ author: pag.lastAuthor, permlink: pag.lastPermlink });
         } else if (direction === 'prev') {
           pag.pageHistory.pop(); // pop current page
@@ -531,13 +535,20 @@ createApp({
           if (prev) {
             params.start_author = prev.author;
             params.start_permlink = prev.permlink;
+            pag.start_author = prev.author;
+            pag.start_permlink = prev.permlink;
           } else {
             params.start_author = undefined;
             params.start_permlink = undefined;
+            pag.start_author = "";
+            pag.start_permlink = "";
           }
-        } else if (pag.lastAuthor) {
+        } else if (pag.lastAuthor && direction === true) {
           params.start_author = pag.lastAuthor;
           params.start_permlink = pag.lastPermlink;
+        } else if (pag.start_author && direction === 'current') {
+          params.start_author = pag.start_author;
+          params.start_permlink = pag.start_permlink;
         }
 
         if (targetForum && targetForum.targetTags.length > 0) params.tags_any = targetForum.targetTags;
@@ -587,11 +598,17 @@ createApp({
       }
     };
 
-    const nextPage = () => {
-      if (activeForum.value) loadData('next', activeForum.value);
+    const nextPage = async () => {
+      if (activeForum.value) {
+        await loadData('next', activeForum.value);
+        syncUrl();
+      }
     };
-    const prevPage = () => {
-      if (activeForum.value) loadData('prev', activeForum.value);
+    const prevPage = async () => {
+      if (activeForum.value) {
+        await loadData('prev', activeForum.value);
+        syncUrl();
+      }
     };
 
     const getNotifIcon = (type) => {
@@ -894,6 +911,10 @@ createApp({
       
       if (view.value === 'forum' && activeForum.value) {
         params.set('forum', activeForum.value.id);
+        if (activeForum.value.start_author && activeForum.value.start_permlink) {
+          params.set('start_author', activeForum.value.start_author);
+          params.set('start_permlink', activeForum.value.start_permlink);
+        }
       } else if (view.value === 'topic' && activeTopic.value) {
         params.set('author', activeTopic.value.author);
         params.set('permlink', activeTopic.value.permlink);
@@ -918,6 +939,8 @@ createApp({
       // Reset pagination to start from page 1
       forum.lastAuthor = "";
       forum.lastPermlink = "";
+      forum.start_author = "";
+      forum.start_permlink = "";
       forum.pageHistory = [];
       forum.hasMore = true;
 
@@ -2461,6 +2484,8 @@ createApp({
       const params = new URLSearchParams(window.location.search);
       const requestedView = params.get('view') || 'index';
       const requestedForumId = params.get('forum');
+      const requestedStartAuthor = params.get('start_author');
+      const requestedStartPermlink = params.get('start_permlink');
       const requestedAuthor = params.get('author');
       const requestedPermlink = params.get('permlink');
       const requestedUser = params.get('user');
@@ -2498,11 +2523,18 @@ createApp({
         if (f) {
           // Check if we are already viewing this forum to avoid double loading
           if (view.value === 'forum' && activeForum.value && activeForum.value.id === f.id && f.posts && f.posts.length > 0) {
-            return;
+             // If URL changed pagination but we are on same forum, we might need to reload.
+             // But usually syncUrl is called after loadData.
+             // However, if user manually changes URL or uses back/forward:
+             if (f.start_author === (requestedStartAuthor || "") && f.start_permlink === (requestedStartPermlink || "")) {
+               return;
+             }
           }
           if (!f.posts) f.posts = []; // ensure posts array exists for virtuals
           f.lastAuthor = "";
           f.lastPermlink = "";
+          f.start_author = requestedStartAuthor || "";
+          f.start_permlink = requestedStartPermlink || "";
           f.pageHistory = [];
           f.hasMore = true;
           activeForum.value = f;
@@ -2552,9 +2584,31 @@ createApp({
       document.body.addEventListener('click', (e) => {
         const playBtn = e.target.closest('.bf-placeholder-play');
         const queueBtn = e.target.closest('.bf-placeholder-queue');
-        if (playBtn || queueBtn) {
+        const embedBtn = e.target.closest('.bf-placeholder-embed');
+
+        if (playBtn || queueBtn || embedBtn) {
           e.preventDefault();
-          const target = playBtn || queueBtn;
+          const target = playBtn || queueBtn || embedBtn;
+
+          if (embedBtn) {
+            const type = target.dataset.type;
+            const id = target.dataset.id;
+            const host = target.dataset.host;
+            const placeholder = target.closest('.media-placeholder');
+            if (placeholder) {
+              let html = '';
+              if (type === 'youtube') {
+                html = `<div class="embed-container"><iframe src="https://www.youtube.com/embed/${id}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
+              } else if (type === 'suno') {
+                html = `<div class="embed-suno"><iframe src="https://suno.com/embed/${id}" frameborder="0" allowfullscreen></iframe></div>`;
+              } else if (type === 'peertube') {
+                html = `<div class="embed-container"><iframe src="https://${host}/videos/embed/${id}" frameborder="0" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe></div>`;
+              }
+              if (html) placeholder.outerHTML = html;
+            }
+            return;
+          }
+
           const track = {
             type: target.dataset.type,
             id: target.dataset.id,

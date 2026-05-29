@@ -299,6 +299,7 @@ const TR = {
     beneficiaryWeight: "udział %",
     next: "Następna",
     prev: "Poprzednia",
+    firstPage: "Pierwsza strona",
     replies: "odpowiedzi",
     page: "Strona",
     claimRewards: "Odbierz nagrody",
@@ -486,6 +487,7 @@ const TR = {
     beneficiaryWeight: "parto %",
     next: "Sekva",
     prev: "Antaŭa",
+    firstPage: "Unua paĝo",
     replies: "respondoj",
     page: "Paĝo",
     claimRewards: "Ricevi rekompencojn",
@@ -547,4 +549,4 @@ const TR = {
     confirmFollow: "Ĉu vi certas, ke vi volas sekvi @{user}?",
     confirmUnfollow: "Ĉu vi certas, ke vi volas malsekvi @{user}?",
     }
-    };
+};
