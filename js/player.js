@@ -30,6 +30,7 @@ window.BFPlayer = (function() {
   let ptPlayer = null;
   let progressTimer = null;
   let isResizing = false;
+  let errorTimer = null;
 
   // --- INTERNAL METHODS ---
 
@@ -52,19 +53,33 @@ window.BFPlayer = (function() {
 
   const handleError = (msg) => {
     if (!state.currentTrack) return;
-    if (state.currentTrack._errorHandled) return;
-    state.currentTrack._errorHandled = true;
+    const trackWithError = state.currentTrack;
 
-    const oldTitle = state.currentTrack.title;
-    state.currentTrack.title = `⚠️ ERROR: ${msg} (Skipping in 5s...)`;
+    // If the track is actually playing, ignore the error (might be a transient network issue)
+    if (state.playing && !state.loading && audioObj && !audioObj.paused && audioObj.currentTime > 0) {
+      console.warn('BFPlayer: Ignored transient error because media is playing:', msg);
+      return;
+    }
+
+    if (trackWithError._errorHandled) return;
+    trackWithError._errorHandled = true;
+
+    const oldTitle = trackWithError.title;
+    trackWithError.title = `⚠️ ERROR: ${msg} (Skipping in 5s...)`;
     state.loading = false;
     state.playing = false;
     
-    setTimeout(() => {
-      if (state.currentTrack && state.currentTrack.title.startsWith('⚠️ ERROR:')) {
-         state.currentTrack.title = oldTitle;
+    if (errorTimer) clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => {
+      // Restore title ONLY if it still has the error message
+      if (trackWithError.title && trackWithError.title.startsWith('⚠️ ERROR:')) {
+         trackWithError.title = oldTitle;
+      }
+      // Skip ONLY if we are still on the same track that failed
+      if (state.currentTrack === trackWithError) {
          playNext();
       }
+      errorTimer = null;
     }, 5000);
   };
   
@@ -104,22 +119,34 @@ window.BFPlayer = (function() {
     audioObj = new Audio();
     audioObj.volume = state.volume;
     
-    audioObj.addEventListener('play', () => { state.playing = true; state.loading = false; });
-    audioObj.addEventListener('pause', () => { state.playing = false; });
-    audioObj.addEventListener('waiting', () => { state.loading = true; });
-    audioObj.addEventListener('playing', () => { state.loading = false; });
+    const isAudioTrack = () => state.currentTrack?.type === 'suno' || state.currentTrack?.type === 'audio';
+
+    audioObj.addEventListener('play', () => { 
+      if (isAudioTrack()) { state.playing = true; state.loading = false; }
+    });
+    audioObj.addEventListener('pause', () => { 
+      if (isAudioTrack()) { state.playing = false; }
+    });
+    audioObj.addEventListener('waiting', () => { 
+      if (isAudioTrack()) { state.loading = true; }
+    });
+    audioObj.addEventListener('playing', () => { 
+      if (isAudioTrack()) { state.loading = false; }
+    });
     audioObj.addEventListener('timeupdate', () => {
-      if (audioObj.duration) {
+      if (isAudioTrack() && audioObj.duration) {
         state.progress = (audioObj.currentTime / audioObj.duration) * 100;
         state.duration = audioObj.duration;
       }
     });
     audioObj.addEventListener('ended', () => {
-      playNext();
+      if (isAudioTrack()) playNext();
     });
     audioObj.addEventListener('error', (e) => {
-      console.error('BFPlayer Audio error:', e);
-      handleError('Audio/Suno file error or broken link');
+      if (isAudioTrack()) {
+        console.error('BFPlayer Audio error:', e);
+        handleError('Audio/Video file error or broken link');
+      }
     });
   };
 
@@ -252,12 +279,16 @@ window.BFPlayer = (function() {
   };
 
   const stopAll = () => {
+    if (errorTimer) {
+      clearTimeout(errorTimer);
+      errorTimer = null;
+    }
     if (audioObj) {
       audioObj.pause();
       audioObj.src = '';
     }
     if (ytPlayer && ytPlayer.stopVideo) {
-      ytPlayer.stopVideo();
+      try { ytPlayer.stopVideo(); } catch(e) {}
     }
     if (ptPlayer && ptPlayer.pause) {
       // Don't kill instance yet, just stop playback
@@ -287,6 +318,16 @@ window.BFPlayer = (function() {
       initAudio();
       audioObj.src = `https://cdn1.suno.ai/${track.id}.mp3`;
       audioObj.play().catch(e => console.warn('Play error:', e));
+    } else if (track.type === 'audio') {
+      initAudio();
+      try {
+        // ID is base64 encoded URL
+        audioObj.src = atob(track.id);
+        audioObj.play().catch(e => console.warn('Play error:', e));
+      } catch(e) {
+        console.error('Failed to decode audio URL:', e);
+        handleError('Invalid audio link');
+      }
     } else if (track.type === 'youtube') {
       if (!ytPlayer) {
         await initYT();
@@ -332,12 +373,21 @@ window.BFPlayer = (function() {
 
   const togglePlay = () => {
     if (!state.currentTrack) return;
+    
+    // Force status sync for YouTube
+    if (state.currentTrack.type === 'youtube' && ytPlayer && ytPlayer.getPlayerState) {
+      const ytState = ytPlayer.getPlayerState();
+      state.playing = (ytState === YT.PlayerState.PLAYING);
+    }
+
     if (state.playing) {
       if (state.currentTrack.type === 'suno' && audioObj) audioObj.pause();
+      if (state.currentTrack.type === 'audio' && audioObj) audioObj.pause();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
       if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.pause();
     } else {
       if (state.currentTrack.type === 'suno' && audioObj) audioObj.play();
+      if (state.currentTrack.type === 'audio' && audioObj) audioObj.play();
       if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
       if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.play();
     }

@@ -389,27 +389,8 @@ createApp({
       imgModal.show = true;
     };
  
-    const fmtDate = (s) => {
-      if (!s) return '';
-      try {
-        return new Date(s.endsWith('Z') ? s : s + 'Z').toLocaleString();
-      } catch (e) { return s || ''; }
-    };
-
-    const timeAgo = (s) => {
-      if (!s) return '';
-      try {
-        const date = new Date(s.endsWith('Z') ? s : s + 'Z');
-        const diff = Math.floor((Date.now() - date.getTime()) / 1000);
-        
-        // Correct unit lookup: ensure we use the translated unit and then append the 'ago' suffix
-        if (diff < 60)     return `${diff}${t('secAgo') || 's'} ${t('ago') || 'ago'}`;
-        if (diff < 3600)   return `${Math.floor(diff / 60)}${t('minAgo') || 'm'} ${t('ago') || 'ago'}`;
-        if (diff < 86400)  return `${Math.floor(diff / 3600)}${t('hourAgo') || 'h'} ${t('ago') || 'ago'}`;
-        if (diff < 604800) return `${Math.floor(diff / 86400)}${t('dayAgo') || 'd'} ${t('ago') || 'ago'}`;
-        return date.toLocaleDateString();
-      } catch (e) { return ''; }
-    };
+    const fmtDate = (s) => BFUtils.fmtDate(s);
+    const timeAgo = (s) => BFUtils.timeAgo(s, t);
 
     const forumHasUnread = (forum) => {
       const topPosts = forum.posts.slice(0, 5);
@@ -471,22 +452,22 @@ createApp({
                   } catch (err) { console.warn('External config load error:', err); }
                 }
 
-                const parsed = parseStructure(structureSource);
+                const parsed = BFUtils.parseStructure(structureSource);
                 if (parsed) {
                   forumStructure.value = parsed;
                 } else {
-                  forumStructure.value = defaultStructure();
+                  forumStructure.value = BFUtils.defaultStructure();
                   structureNote.value = true;
                 }
                 if (cc.team) moderators.value = cc.team.map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
               }
             } else {
-              forumStructure.value = defaultStructure();
+              forumStructure.value = BFUtils.defaultStructure();
               structureNote.value = true;
             }
           } catch (e) {
             console.warn('Nexus getCommunity error:', e.message);
-            if (!forumStructure.value.length) forumStructure.value = defaultStructure();
+            if (!forumStructure.value.length) forumStructure.value = BFUtils.defaultStructure();
             structureNote.value = true;
           }
 
@@ -633,9 +614,9 @@ createApp({
         if (meta && meta.tags) tags = meta.tags;
       } catch (e) { /* ignore */ }
       
-      const pending = parsePayout(p.pending_payout_value || 0);
-      const total = parsePayout(p.total_payout_value || 0);
-      const bridgePayout = typeof p.payout === 'number' ? p.payout : parsePayout(p.payout || 0);
+      const pending = BFUtils.parsePayout(p.pending_payout_value || 0);
+      const total = BFUtils.parsePayout(p.total_payout_value || 0);
+      const bridgePayout = typeof p.payout === 'number' ? p.payout : BFUtils.parsePayout(p.payout || 0);
 
       const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}');
       const lastReadTs = readStatus[`${p.author}/${p.permlink}`] || 0;
@@ -666,24 +647,8 @@ createApp({
       // Auto-collapse support comments
       const isCollapsed = p.body && p.body.startsWith('Supporting original content by @');
 
-      // Media detection (Suno, YouTube)
-      let media = null;
-      if (p.body) {
-        const ytMatch = p.body.match(/https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
-        if (ytMatch) {
-          media = { type: 'youtube', id: ytMatch[1] };
-        } else {
-          const sunoMatch = p.body.match(/https?:\/\/(?:www\.)?suno\.com\/(?:song|s)\/([a-zA-Z0-9_-]+)/);
-          if (sunoMatch) {
-            media = { type: 'suno', id: sunoMatch[1] };
-          } else {
-            const ptMatch = p.body.match(/https?:\/\/(?:www\.)?blurt\.media\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
-            if (ptMatch) {
-              media = { type: 'peertube', id: ptMatch[1], host: 'blurt.media' };
-            }
-          }
-        }
-      }
+      // Media detection (Suno, YouTube, Audio, etc.)
+      const media = Parser.detectMedia(p.body);
 
       return {
         author: p.author,
@@ -1296,7 +1261,7 @@ createApp({
         const acc = accounts && accounts[0];
         if (!acc) return;
 
-        if (parsePayout(acc.reward_blurt_balance) === 0 && parsePayout(acc.reward_vesting_balance) === 0) {
+        if (BFUtils.parsePayout(acc.reward_blurt_balance) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance) === 0) {
           showStatus(t('claimRewards'), t('noRewardsToClaim'), 'info');
           return;
         }
@@ -1353,7 +1318,7 @@ createApp({
           const delta = (now - lastVoteTime) / 1000;
           let vp = acc.voting_power + (10000 * delta / 432000);
           vp = Math.min(vp / 100, 100).toFixed(2);
-          const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+          const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance) > 0;
           auth.user = { 
             ...auth.user, 
             vp, hasRewards, 
@@ -1553,7 +1518,7 @@ createApp({
         parent_author: replyTarget.value.author,
         parent_permlink: replyTarget.value.permlink,
         author: auth.user.username,
-        permlink: genPermlink('re-' + replyTarget.value.author),
+        permlink: BFUtils.genPermlink('re-' + replyTarget.value.author),
         title: '',
         body,
         json_metadata: JSON.stringify({
@@ -1641,7 +1606,7 @@ createApp({
         parent_author: '',
         parent_permlink: primaryTag,
         author: auth.user.username,
-        permlink: genPermlink(title),
+        permlink: BFUtils.genPermlink(title),
         title,
         body,
         json_metadata: JSON.stringify({
@@ -1954,7 +1919,7 @@ createApp({
       oldContentModal.loading = true;
       oldContentModal.status = t('supporting');
       
-      const permlink = genPermlink('support-' + oldContentModal.author);
+      const permlink = BFUtils.genPermlink('support-' + oldContentModal.author);
       // Mirror beneficiaries (ensure they are sorted for comment_options)
       let beneficiaries = [...oldContentModal.beneficiaries].sort((a, b) => a.account.localeCompare(b.account));
       if (beneficiaries.length === 0) {
@@ -2394,7 +2359,7 @@ createApp({
       let vp = acc.voting_power + (10000 * delta / 432000);
       vp = Math.min(vp / 100, 100).toFixed(2);
 
-      const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+      const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance) > 0;
 
       auth.user = { 
         username, type: 'key', key, vp,
@@ -2436,7 +2401,7 @@ createApp({
           const delta = (now - lastVoteTime) / 1000;
           vp = acc.voting_power + (10000 * delta / 432000);
           vp = Math.min(vp / 100, 100).toFixed(2);
-          hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+          hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance) > 0;
           rewardBlurt = acc.reward_blurt_balance;
           rewardVesting = acc.reward_vesting_balance;
         }
@@ -2652,7 +2617,7 @@ createApp({
                 const delta = (now - lastVoteTime) / 1000;
                 let vp = acc.voting_power + (10000 * delta / 432000);
                 vp = Math.min(vp / 100, 100).toFixed(2);
-                const hasRewards = parsePayout(acc.reward_blurt_balance) > 0 || parsePayout(acc.reward_vesting_balance) > 0;
+                const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance) > 0;
                 auth.user = { 
                   username: session.username, type: 'whalevault', key: null, vp, 
                   hasRewards, rewardBlurt: acc.reward_blurt_balance, rewardVesting: acc.reward_vesting_balance 

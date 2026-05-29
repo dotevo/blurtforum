@@ -1501,12 +1501,10 @@ a:hover { color: var(--accent); text-decoration: underline; }
   pointer-events: none !important;
   position: absolute !important;
   top: 0 !important;
-  left: 0 !important;
+  left: -9999px !important;
   width: 100% !important;
   height: 400px !important;
   z-index: -1 !important;
-  transform: scale(0.001) !important;
-  transform-origin: top left !important;
 }
 
 .v-hide {

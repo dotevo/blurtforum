@@ -72,11 +72,39 @@ const Parser = {
   },
 
   /**
+   * Identifies the first media link in the text and returns its metadata
+   */
+  detectMedia(text) {
+    if (!text) return null;
+    
+    // 1. YouTube (including mobile)
+    const ytMatch = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+    if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
+
+    // 2. Suno.ai
+    const sunoMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/(?:song|s)\/([a-zA-Z0-9_-]+)/);
+    if (sunoMatch) return { type: 'suno', id: sunoMatch[1] };
+
+    // 3. PeerTube (blurt.media)
+    const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
+    if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
+
+    // 4. Direct Audio Files
+    const audioMatch = text.match(/https?:\/\/[^\s\)]+\.(mp3|wav|ogg|m4a|flac)(\?.*)?/i);
+    if (audioMatch) {
+      const url = audioMatch[0].replace(/[).,;]$/, '');
+      return { type: 'audio', id: btoa(url) };
+    }
+
+    return null;
+  },
+
+  /**
    * Returns embed HTML or Placeholder tag for a given URL
    */
   getEmbedCode(url) {
-    // YouTube
-    const ytMatch = url.match(/^https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+    // YouTube (including mobile)
+    const ytMatch = url.match(/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
     if (ytMatch) {
       if (window.BFPlayer && window.BFPlayer.state.enabled) {
         return `[[MEDIA:youtube:${ytMatch[1]}:]]`;
@@ -91,6 +119,18 @@ const Parser = {
         return `[[MEDIA:suno:${sunoMatch[1]}:]]`;
       }
       return `<div class="embed-suno"><iframe src="https://suno.com/embed/${sunoMatch[1]}" frameborder="0" allowfullscreen></iframe></div>`;
+    }
+
+    // Direct Audio Files
+    const audioMatch = url.match(/\.(mp3|wav|ogg|m4a|flac)(\?.*)?$/i);
+    if (audioMatch) {
+      const type = 'audio';
+      // For audio files, we use the full URL as ID (properly escaped in placeholder)
+      const audioUrl = url; 
+      if (window.BFPlayer && window.BFPlayer.state.enabled) {
+        return `[[MEDIA:audio:${btoa(audioUrl)}:direct]]`;
+      }
+      return `<div class="embed-audio"><audio controls src="${audioUrl}"></audio></div>`;
     }
 
     // PeerTube
