@@ -1278,6 +1278,8 @@ a:hover { color: var(--accent); text-decoration: underline; }
   border-top: none;
   background: none;
   box-shadow: none;
+  height: 0 !important;
+  overflow: visible !important;
 }
 .player-restore-btn {
   position: absolute;

@@ -42,8 +42,10 @@ window.BFPlayer = (function() {
       
       if (saved) state.queue = JSON.parse(saved);
       if (savedHistory) state.history = JSON.parse(savedHistory);
-      if (savedCurrent) {
-        state.currentTrack = JSON.parse(savedCurrent);
+      
+      const restoredTrack = savedCurrent ? JSON.parse(savedCurrent) : null;
+      if (restoredTrack) {
+        state.currentTrack = restoredTrack;
         state.active = true;
       } else if (state.queue.length > 0) {
         state.active = true;
@@ -294,6 +296,11 @@ window.BFPlayer = (function() {
       }
       // Always play the new index 0
       playTrack(state.autoQueue[0]);
+    } else {
+      // Nothing left to play
+      state.active = false;
+      state.currentTrack = null;
+      stopAll();
     }
   };
 
