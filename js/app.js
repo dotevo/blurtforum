@@ -5,6 +5,7 @@ const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
  
 createApp({
   setup() {
+    const urlParams = new URLSearchParams(window.location.search);
     const langs = ['en', 'pl', 'eo'];
     const browserLang = navigator.language.slice(0, 2).toLowerCase();
     const lang = ref(langs.includes(browserLang) ? browserLang : 'en');
@@ -102,6 +103,7 @@ createApp({
 
     const bodyCache = {};
     const selectedCommunity = ref('blurt-140455');
+    const currentTagFilter = ref(urlParams.get('tag') || '');
     const customTag = ref('');
     const userSubscriptions = ref([]);
     const followingSet = ref(new Set());
@@ -597,7 +599,13 @@ createApp({
           params.start_permlink = pag.start_permlink;
         }
 
-        if (targetForum && targetForum.targetTags.length > 0) params.tags_any = targetForum.targetTags;
+        if (targetForum && targetForum.targetTags.length > 0) params.tags_any = [...targetForum.targetTags];
+        if (currentTagFilter.value) {
+          if (!params.tags_any) params.tags_any = [];
+          if (!params.tags_any.includes(currentTagFilter.value)) {
+            params.tags_any.push(currentTagFilter.value);
+          }
+        }
 
         let rawPosts = [];
         const vf = targetForum ? VIRTUAL_FORUMS.find(v => v.id === targetForum.id) : null;
@@ -608,6 +616,7 @@ createApp({
             start_author: params.start_author,
             start_permlink: params.start_permlink
           };
+          if (currentTagFilter.value) apiParams.tag = currentTagFilter.value;
           
           if (vf.id === 'user-feed' && auth.user) {
             rawPosts = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' });
@@ -938,6 +947,7 @@ createApp({
       const params = new URLSearchParams();
       params.set('community', config.communityAccount);
       if (view.value !== 'index') params.set('view', view.value);
+      if (currentTagFilter.value) params.set('tag', currentTagFilter.value);
       
       if (view.value === 'forum' && activeForum.value) {
         params.set('forum', activeForum.value.id);
@@ -958,12 +968,24 @@ createApp({
       window.history.pushState({ path: newUrl }, '', newUrl);
     };
 
+    const applyTagFilter = async () => {
+      syncUrl();
+      await loadData('current', activeForum.value);
+    };
+
+    const clearTagFilter = async () => {
+      currentTagFilter.value = '';
+      syncUrl();
+      await loadData('current', activeForum.value);
+    };
+
     const goHome = () => {
       view.value = 'index';
       activeForum.value = null;
       activeTopic.value = null;
       replies.value = [];
       showNewPostForm.value = false;
+      currentTagFilter.value = '';
       syncUrl();
     };
  
@@ -975,6 +997,7 @@ createApp({
       forum.start_permlink = "";
       forum.pageHistory = [];
       forum.hasMore = true;
+      currentTagFilter.value = '';
 
       // Handle Virtual Forums (Global Sections)
       const isVirtual = VIRTUAL_FORUMS.find(vf => vf.id === forum.id);
@@ -1109,6 +1132,7 @@ createApp({
 
     const openCommunities = () => {
       view.value = 'communities';
+      currentTagFilter.value = '';
       syncUrl();
       if (BFCommunity.state.list.length === 0) {
         BFCommunity.fetchCommunities(client);
@@ -2547,12 +2571,21 @@ createApp({
     const handleUrlChange = () => {
       const params = new URLSearchParams(window.location.search);
       const requestedView = params.get('view') || 'index';
+      const requestedTag = params.get('tag') || '';
+      
+      const tagChanged = currentTagFilter.value !== requestedTag;
+      currentTagFilter.value = requestedTag;
+
       const requestedForumId = params.get('forum');
       const requestedStartAuthor = params.get('start_author');
       const requestedStartPermlink = params.get('start_permlink');
       const requestedAuthor = params.get('author');
       const requestedPermlink = params.get('permlink');
       const requestedUser = params.get('user');
+
+      if (tagChanged && view.value !== 'topic' && view.value !== 'profile') {
+         loadData('current', activeForum.value);
+      }
 
       if (requestedView === 'index') {
         view.value = 'index';
@@ -2804,7 +2837,7 @@ createApp({
 
       return {      lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
       activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
-      structureNote, selectedCommunity, customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
+      structureNote, selectedCommunity, currentTagFilter, applyTagFilter, clearTagFilter, customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
       loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
       showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
       goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,

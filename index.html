@@ -266,6 +266,24 @@
  
   <template v-if="!loading">
  
+    <!-- TAG FILTER BAR -->
+    <div v-if="view==='index' || view==='forum'" class="tag-filter-bar forumline">
+      <div style="display:flex; align-items:center; gap:10px; width: 100%;">
+        <i class="fa-solid fa-filter" style="color:var(--primary); opacity:0.7;"></i>
+        <div style="position:relative; flex:1; max-width: 300px;">
+          <input type="text" v-model="currentTagFilter" :placeholder="t('filterByTag')" 
+                 @keyup.enter="applyTagFilter"
+                 style="width:100%; padding: 6px 30px 6px 10px; box-sizing:border-box;">
+          <span v-if="currentTagFilter" 
+                @click="clearTagFilter" 
+                style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; opacity:0.5; font-size:14px;">
+            <i class="fa-solid fa-circle-xmark"></i>
+          </span>
+        </div>
+        <button class="btn btn-sm" @click="applyTagFilter">OK</button>
+      </div>
+    </div>
+
     <!-- ========== INDEX VIEW ========== -->
     <div v-if="view==='index'">
 

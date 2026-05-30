@@ -908,6 +908,29 @@ a:hover { color: var(--accent); text-decoration: underline; }
   padding: 4px 8px;
 }
 
+/* TAG FILTER */
+.tag-filter-bar {
+  margin: 0 15px 15px;
+  padding: 8px 15px;
+  background: var(--bg-r2);
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+}
+.tag-filter-bar input {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .tag-filter-bar div {
+    max-width: none !important;
+  }
+}
+
 /* ===== BLOCKCHAIN WAIT QUEUE PANEL ===== */
 .bc-queue-panel {
   position: fixed;
