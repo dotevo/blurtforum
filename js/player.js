@@ -18,6 +18,7 @@ window.BFPlayer = (function() {
     currentTrack: null, // { type: 'youtube'|'peertube'|'audio', id, src?, cover?, title, author, permlink, host? }
     queue: [],
     autoQueue: [],
+    history: [],
     progress: 0,
     duration: 0,
     volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
@@ -36,7 +37,18 @@ window.BFPlayer = (function() {
   const loadSavedQueue = () => {
     try {
       const saved = localStorage.getItem('bf-player-queue');
+      const savedCurrent = localStorage.getItem('bf-player-current');
+      const savedHistory = localStorage.getItem('bf-player-history');
+      
       if (saved) state.queue = JSON.parse(saved);
+      if (savedHistory) state.history = JSON.parse(savedHistory);
+      if (savedCurrent) {
+        state.currentTrack = JSON.parse(savedCurrent);
+        state.active = true;
+      } else if (state.queue.length > 0) {
+        state.active = true;
+        state.currentTrack = state.queue[0];
+      }
     } catch (e) { console.warn('Failed to load queue:', e); }
   };
   loadSavedQueue();
@@ -211,7 +223,7 @@ window.BFPlayer = (function() {
 
   // --- PUBLIC METHODS ---
 
-  const playTrack = async (track, isManual = false, manualIdx = -1) => {
+  const playTrack = async (track, isManual = false, manualIdx = -1, fromHistory = false) => {
     if (!state.enabled) return;
     
     // Safety check: if track is missing src (e.g. from auto-queue shortlink), resolve it now
@@ -220,7 +232,7 @@ window.BFPlayer = (function() {
       const resolved = await Parser.resolveMedia(track);
       if (resolved && resolved.src) {
         track = resolved;
-        // Update the autoQueue entry in-place so playNext/playPrev can still find it by ID
+        // Update the autoQueue entry in-place
         const aqIdx = state.autoQueue.findIndex(t => t.id === originalId);
         if (aqIdx !== -1) Object.assign(state.autoQueue[aqIdx], resolved);
       } else {
@@ -230,10 +242,21 @@ window.BFPlayer = (function() {
     }
 
     stopAll();
+    
+    // Save to history if we were playing something AND it's a different track
+    // If it's fromHistory, we are moving back, so we might want to put current into a 'forward' stack?
+    // For now, let's keep it simple: any track change saves to history unless we're going back.
+    if (state.currentTrack && state.currentTrack.id !== track.id && !fromHistory) {
+       state.history = state.history.filter(t => t.id !== state.currentTrack.id);
+       state.history.unshift(state.currentTrack);
+       if (state.history.length > 20) state.history.pop();
+    }
+
     state.currentTrack = track;
     state.active = true;
     state.loading = true;
     state.minimized = false; 
+    scrollToCurrent();
 
     if (isManual && manualIdx !== -1) state.queue.splice(manualIdx, 1);
 
@@ -260,17 +283,31 @@ window.BFPlayer = (function() {
   };
 
   const playNext = () => {
-    if (state.queue.length > 0) playTrack(state.queue.shift());
-    else if (state.autoQueue.length > 0) {
-      const idx = state.autoQueue.findIndex(t => t.id === state.currentTrack?.id);
-      if (idx !== -1 && idx < state.autoQueue.length - 1) playTrack(state.autoQueue[idx + 1]);
+    if (state.queue.length > 0) {
+      playTrack(state.queue.shift());
+    } else if (state.autoQueue.length > 0) {
+      // Find if current track is the one at index 0
+      if (state.currentTrack && state.autoQueue[0].id === state.currentTrack.id) {
+        // Move it to the end
+        const current = state.autoQueue.shift();
+        state.autoQueue.push(current);
+      }
+      // Always play the new index 0
+      playTrack(state.autoQueue[0]);
     }
   };
 
   const playPrev = () => {
-    if (state.autoQueue.length > 0) {
-      const idx = state.autoQueue.findIndex(t => t.id === state.currentTrack?.id);
-      if (idx > 0) playTrack(state.autoQueue[idx - 1]);
+    if (state.history.length > 0) {
+      const prev = state.history.shift();
+      playTrack(prev, false, -1, true); 
+    } else if (state.autoQueue.length > 0) {
+      // To go back in a circular buffer, we take the last element and put it at the front
+      // But if the current track is already at index 0, we need to move the LAST two
+      // Or more simply: move the last to the front and play it.
+      const last = state.autoQueue.pop();
+      state.autoQueue.unshift(last);
+      playTrack(state.autoQueue[0]);
     }
   };
 
@@ -301,6 +338,18 @@ window.BFPlayer = (function() {
   const setAutoQueue = (tracks) => { state.autoQueue = tracks; };
   const toggleExperimental = (val) => { state.experimental = val; localStorage.setItem('bf-player-experimental', val); };
 
+  const scrollToCurrent = () => {
+    Vue.nextTick(() => {
+      const anchor = document.getElementById('current-queue-anchor');
+      const list = document.querySelector('.queue-list');
+      if (anchor && list) {
+        // Offset to show exactly one history item header (or just a bit of it)
+        // Adjusting to ~40px which is roughly the size of one history row
+        list.scrollTop = anchor.offsetTop - 40;
+      }
+    });
+  };
+
   watch(() => state.volume, (newVol) => {
     if (audioObj) audioObj.volume = newVol;
     if (ytPlayer) ytPlayer.setVolume(newVol * 100);
@@ -308,6 +357,12 @@ window.BFPlayer = (function() {
     localStorage.setItem('bf-player-volume', newVol);
   });
   watch(() => state.queue, (newQueue) => { localStorage.setItem('bf-player-queue', JSON.stringify(newQueue)); }, { deep: true });
+  watch(() => state.currentTrack, (newTrack) => { localStorage.setItem('bf-player-current', JSON.stringify(newTrack)); }, { deep: true });
+  watch(() => state.history, (newHistory) => { localStorage.setItem('bf-player-history', JSON.stringify(newHistory)); }, { deep: true });
 
-  return { state, initResize, playTrack, playNext, playPrev, togglePlay, seek, addToQueue, setAutoQueue, toggleExperimental };
+  watch(() => state.expandedTab, (newTab) => {
+    if (newTab === 'queue') scrollToCurrent();
+  });
+
+  return { state, initResize, playTrack, playNext, playPrev, togglePlay, seek, addToQueue, setAutoQueue, toggleExperimental, scrollToCurrent };
 })();

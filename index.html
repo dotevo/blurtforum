@@ -143,11 +143,11 @@
 
 <!-- GLOBAL ACTIVITY FEED -->
     <div v-if="auth.user && globalActivity.length > 0" style="margin: 0 15px 15px;">
-  <table class="forumline">
+  <table class="forumline activity-table">
     <tr>
-      <td class="catHead" style="height: 34px; padding: 0 12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
-          <span><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
+      <td class="catHead" style="padding: 6px 12px;">
+        <div class="activity-header-container">
+          <span class="activity-label"><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
           
           <div style="display:flex; gap:10px; align-items:center;">
             <!-- Activity Tabs -->
@@ -1032,10 +1032,9 @@
       <button class="player-tab-btn" :class="{ active: player.state.expandedTab === 'video' }" @click="player.state.expandedTab = 'video'">
         <i class="fa-solid fa-video"></i> {{ t('video') }}
       </button>
-      <button class="player-tab-btn" :class="{ active: player.state.expandedTab === 'queue' }" @click="player.state.expandedTab = 'queue'">
+      <button class="player-tab-btn" :class="{ active: player.state.expandedTab === 'queue' }" @click="player.state.expandedTab = 'queue'; player.scrollToCurrent()">
         <i class="fa-solid fa-list-ul"></i> {{ t('queue') }}
-      </button>
-    </div>
+      </button>    </div>
 
     <!-- Expanded View (Video & Queue) -->
     <div class="player-expanded-body" :class="{ 'player-hidden': !player.state.expanded }">
@@ -1067,7 +1066,19 @@
       <div class="player-queue-panel" :class="{ 'mobile-hide': vw <= 800 && player.state.expandedTab !== 'queue' }">
         <div class="queue-header hide-mobile">{{ t('queue') }} ({{ player.state.queue.length + player.state.autoQueue.length }})</div>
         <div class="queue-list">
+          <!-- History -->
+          <div v-if="player.state.history.length > 0" class="queue-section-header">{{ t('queueHistory') }}</div>
+          <div v-for="(track, idx) in player.state.history" :key="'h-'+idx" class="queue-item history">
+            <span class="queue-idx"><i class="fa-solid fa-clock-rotate-left"></i></span>
+            <div class="queue-info" @click="player.playTrack(track)">
+              <div class="queue-title">{{ track.title }}</div>
+              <div class="queue-author">@{{ track.author }}</div>
+            </div>
+          </div>
+
           <!-- Manual Queue -->
+          <div id="current-queue-anchor"></div>
+          <div v-if="player.state.queue.length > 0" class="queue-section-header">{{ t('queueManual') }}</div>
           <div v-for="(track, idx) in player.state.queue" :key="'q-'+idx" class="queue-item manual">
             <span class="queue-idx">P</span>
             <div class="queue-info" @click="player.playTrack(track, true, idx)">
@@ -1075,10 +1086,17 @@
               <div class="queue-author">@{{ track.author }}</div>
             </div>
           </div>
+
           <!-- Auto Queue -->
+          <div v-if="player.state.autoQueue.length > 0" class="queue-section-header">{{ t('queueAutoplay') }}</div>
           <div v-for="(track, idx) in player.state.autoQueue" :key="'a-'+idx" 
-               class="queue-item" :class="{ active: player.state.currentTrack?.id === track.id }">
-            <span class="queue-idx">{{ idx + 1 }}</span>
+               class="queue-item" :class="{ active: idx === 0 }">
+            <span class="queue-idx">
+              <i v-if="idx === 0" 
+                 :class="player.state.playing ? 'fa-solid fa-volume-high' : 'fa-solid fa-play'"
+                 style="color: var(--accent)"></i>
+              <span v-else>{{ idx + 1 }}</span>
+            </span>
             <div class="queue-info" @click="player.playTrack(track)">
               <div class="queue-title">{{ track.title }}</div>
               <div class="queue-author">@{{ track.author }}</div>
