@@ -950,6 +950,8 @@ createApp({
         params.set('permlink', activeTopic.value.permlink);
       } else if (view.value === 'profile' && profileUser.username) {
         params.set('user', profileUser.username);
+      } else if (view.value === 'communities') {
+        // no extra params needed for now
       }
 
       const newUrl = window.location.pathname + '?' + params.toString();
@@ -1103,6 +1105,38 @@ createApp({
     const handleCommunityChange = () => {
       const tag = selectedCommunity.value === 'custom' ? customTag.value.trim() : selectedCommunity.value;
       switchCommunity(tag);
+    };
+
+    const openCommunities = () => {
+      view.value = 'communities';
+      syncUrl();
+      if (BFCommunity.state.list.length === 0) {
+        BFCommunity.fetchCommunities(client);
+      }
+    };
+
+    const toggleCommunitySub = async (communityName) => {
+      if (!auth.user) { openLoginModal(); return; }
+      if (checkLock(() => toggleCommunitySub(communityName))) return;
+
+      const isSub = userSubscriptions.value.some(s => s.account === communityName);
+      try {
+        await BFCommunity.toggleSubscription(auth, broadcast, communityName, isSub);
+
+        // Update local list
+        if (isSub) {
+          userSubscriptions.value = userSubscriptions.value.filter(s => s.account !== communityName);
+        } else {
+          const commInfo = BFCommunity.state.list.find(c => c.name === communityName);
+          userSubscriptions.value.push({ 
+            account: communityName, 
+            title: commInfo ? commInfo.title : communityName 
+          });
+        }
+        showStatus('Community', (isSub ? 'Unsubscribed from ' : 'Subscribed to ') + communityName, 'success');
+      } catch (err) {
+        showStatus('Community', 'Error: ' + (err.message || err), 'error');
+      }
     };
 
     const broadcastKey = async (ops) => {
@@ -2591,6 +2625,11 @@ createApp({
           return;
         }
         openProfile(requestedUser, false);
+      } else if (requestedView === 'communities') {
+        view.value = 'communities';
+        if (BFCommunity.state.list.length === 0) {
+          BFCommunity.fetchCommunities(client);
+        }
       }
     };
 
@@ -2765,10 +2804,11 @@ createApp({
 
       return {      lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
       activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
-      structureNote, selectedCommunity, customTag, allCommunities, auth, showLoginModal, loginTab,
+      structureNote, selectedCommunity, customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
       loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
       showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
-      goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openLoginModal,
+      goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,
+      community: BFCommunity,
       doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
       nextPage, prevPage,
       submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
@@ -2802,7 +2842,8 @@ createApp({
       handleMediaAction,
       player: BFPlayer,
       handlePlayerSeek,
-      vw
+      vw,
+      client
     };
   }
 }).mount('#app');

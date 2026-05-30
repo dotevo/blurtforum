@@ -138,6 +138,11 @@
     <input type="text" v-model="customTag" :placeholder="t('enterTag')" @keyup.enter="handleCommunityChange" style="width:150px;">
     <button class="btn btn-sm" @click="handleCommunityChange">OK</button>
   </template>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <button class="btn btn-sm btn-ghost" @click="openCommunities">
+      <i class="fa-solid fa-magnifying-glass"></i> {{ t('exploreCommunities') }}
+    </button>
+  </div>
   <span class="gs" style="margin-left:auto; font-weight: bold;">{{ t('currentCommunity') }}: {{ config.communityAccount }}</span>
 </div>
 
@@ -215,6 +220,7 @@
 <!-- BREADCRUMB -->
 <div class="breadcrumb">
   <a href="#" @click.prevent="goHome">BlurtForum</a>
+  <template v-if="view==='communities'"> &raquo; {{ t('exploreCommunities') }}</template>
   <template v-if="activeForum"> &raquo; <a href="#" @click.prevent="openForum(activeForum)">{{ activeForum.name }}</a></template>
   <template v-if="activeTopic"> &raquo; {{ activeTopic.title }}</template>
   <template v-if="view==='newpost'"> &raquo; {{ t('newPost') }}</template>
@@ -872,6 +878,53 @@
       </template>
  
     </div><!-- /topic -->
+
+    <!-- ========== COMMUNITIES EXPLORATION VIEW ========== -->
+    <div v-if="view==='communities'">
+      <div class="forumline" style="margin-bottom: 20px; padding: 15px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="text" v-model="community.state.query" :placeholder="t('searchCommunities')" 
+                 @keyup.enter="community.fetchCommunities(client, true)" style="flex: 1; padding: 8px;">
+          <button class="btn" @click="community.fetchCommunities(client, true)">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="community-grid">
+        <div v-for="c in community.state.list" :key="c.name" class="forumline community-card">
+          <div class="community-card-header">
+            <div class="avatar-sm" :style="{backgroundImage: 'url(' + (c.avatar_url || 'https://imgp.blurt.blog/profileimage/' + c.name + '/64x64') + ')'}"></div>
+            <div class="community-card-info">
+              <div class="community-card-title" @click="switchCommunity(c.name)">{{ c.title }}</div>
+              <div class="community-card-name">@{{ c.name }}</div>
+            </div>
+          </div>
+          <div class="community-card-about">{{ c.about }}</div>
+          <div class="community-card-meta">
+            <span :title="t('subscribers')"><i class="fa-solid fa-users"></i> {{ c.subscribers }}</span>
+            <span :title="t('activeAuthors')"><i class="fa-solid fa-pen-nib"></i> {{ c.num_authors }}</span>
+            <span v-if="c.sum_pending > 0" :title="t('pendingRewards')"><i class="fa-solid fa-coins"></i> {{ (c.sum_pending / 1000).toFixed(0) }} BLURT</span>
+            <span v-if="c.lang" :title="t('language')"><i class="fa-solid fa-language"></i> {{ c.lang.toUpperCase() }}</span>
+          </div>
+          <div class="gs" style="font-size: 10px; margin-top: 4px;">{{ t('created') }}: {{ fmtDate(c.created_at) }}</div>
+          <div class="community-card-actions">
+            <button class="btn btn-sm" :class="userSubscriptions.some(s => s.account === c.name) ? 'btn-ghost' : 'btn-main'"
+                    @click="toggleCommunitySub(c.name)">
+              <i class="fa-solid" :class="userSubscriptions.some(s => s.account === c.name) ? 'fa-minus' : 'fa-plus'"></i>
+              {{ userSubscriptions.some(s => s.account === c.name) ? t('unsubscribe') : t('subscribe') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="community.state.loading" style="text-align: center; padding: 20px;">
+        <div class="spin" style="width: 32px; height: 32px; margin: 0 auto;"></div>
+      </div>
+      <div v-else-if="community.state.hasMore" style="text-align: center; padding: 20px;">
+        <button class="btn" @click="community.fetchCommunities(client)">{{ t('showMore') }}</button>
+      </div>
+    </div>
  
     <!-- ========== PROFILE VIEW ========== -->
     <div v-if="view==='profile' && profileUser.username">
@@ -1555,6 +1608,7 @@
 <script src="js/whalevault.js"></script>
 <script src="js/translations.js"></script>
 <script src="js/player.js"></script>
+<script src="js/community.js"></script>
 <script src="js/parser.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/auth.js"></script>
