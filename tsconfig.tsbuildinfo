@@ -1,0 +1,1 @@
+{"root":["./src/env.d.ts","./src/main.ts","./src/composables/useApp.ts","./src/modules/auth.ts","./src/modules/community.ts","./src/modules/parser.ts","./src/modules/player.ts","./src/modules/translations.raw.ts","./src/modules/translations.ts","./src/modules/utils.ts","./src/modules/whalevault.ts","./src/types/index.ts","./src/App.vue"],"version":"6.0.3"}

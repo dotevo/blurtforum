@@ -1,28 +1,39 @@
 /**
  * BlurtForum Parser — Markdown and Rich Media Embedding
  */
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import type { MediaTrack } from '../types';
 
-const Parser = {
-  /**
-   * Main entry point for rendering markdown with rich media embeds
-   */
-  render(text, context = null) {
+interface ParseContext {
+  title?: string;
+  author?: string;
+  body?: string;
+}
+
+export const Parser = {
+  /** Main entry point: renders markdown with rich media embeds */
+  render(text: string, context: ParseContext | null = null): string {
     if (!text) return '';
     try {
-      let processedText = this.autoEmbed(text);
-      let html = marked.parse(processedText, { breaks: true, gfm: true });
+      const processedText = this.autoEmbed(text);
+      let html = marked.parse(processedText, { breaks: true, gfm: true }) as string;
 
-      // Replace [[MEDIA:...]] with generic placeholders
-      html = html.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (match, type, id, host) => {
-        return this.getExperimentalPlaceholder(type, id, host, context);
-      });
-
-      html = html.replace(/(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g, '$1<a href="#" class="mention" data-user="$2">@$2</a>');
+      html = html.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (_match, type, id, host) =>
+        this.getExperimentalPlaceholder(type, id, host, context)
+      );
+      html = html.replace(
+        /(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g,
+        '$1<a href="#" class="mention" data-user="$2">@$2</a>'
+      );
 
       return DOMPurify.sanitize(html, {
         ADD_TAGS: ['iframe', 'button'],
-        ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox', 
-                  'data-type', 'data-id', 'data-host', 'data-title', 'data-author', 'data-src', 'data-cover', 'data-pending']
+        ADD_ATTR: [
+          'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox',
+          'data-type', 'data-id', 'data-host', 'data-title', 'data-author',
+          'data-src', 'data-cover', 'data-pending',
+        ],
       });
     } catch (e) {
       console.error('Parser error:', e);
@@ -30,16 +41,16 @@ const Parser = {
     }
   },
 
-  autoEmbed(text) {
+  autoEmbed(text: string): string {
     const lines = text.split('\n');
-    const embeddedUrls = new Set();
+    const embeddedUrls = new Set<string>();
     const processedLines = lines.map(line => {
       if (line.trim().startsWith('<') || line.trim().startsWith('[[')) return line;
       const urlRegex = /(https?:\/\/[^\s\)]+)/g;
       const matches = line.match(urlRegex);
       if (!matches) return line;
       let embedsForThisLine = '';
-      for (let rawUrl of matches) {
+      for (const rawUrl of matches) {
         const cleanUrl = rawUrl.replace(/[).,;]$/, '');
         if (!embeddedUrls.has(cleanUrl)) {
           const embed = this.getEmbedCode(cleanUrl);
@@ -51,48 +62,49 @@ const Parser = {
     return processedLines.join('\n');
   },
 
-  /**
-   * Detects media and returns GENERIC types only: 'audio', 'youtube', 'peertube'
-   */
-  detectMedia(text) {
+  /** Detects media type from text — returns generic: 'audio', 'youtube', 'peertube' */
+  detectMedia(text: string | undefined): MediaTrack | null {
     if (!text) return null;
-    
-    // 1. YouTube
-    const ytMatch = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+
+    // YouTube
+    const ytMatch = text.match(
+      /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/
+    );
     if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
 
-    // 2. Suno.ai (Resolved)
+    // Suno.ai (Resolved)
     const sunoSongMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/song\/([a-zA-Z0-9-]+)/);
-    if (sunoSongMatch) return { 
-      type: 'audio', 
-      id: sunoSongMatch[1], 
-      src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`, 
-      cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg` 
+    if (sunoSongMatch) return {
+      type: 'audio',
+      id: sunoSongMatch[1],
+      src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`,
+      cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg`,
     };
-    
-    // 3. Suno.ai (Share - Pending)
+
+    // Suno.ai (Share — pending resolution)
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
 
-    // 4. PeerTube
+    // PeerTube
     const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
     if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
 
-    // 5. Direct Audio Files
+    // Direct audio files
     const audioMatch = text.match(/https?:\/\/[^\s\)]+\.(mp3|wav|ogg|m4a|flac)(\?.*)?/i);
     if (audioMatch) {
       const url = audioMatch[0].replace(/[).,;]$/, '');
       return { type: 'audio', id: btoa(url), src: url };
     }
+
     return null;
   },
 
-  getEmbedCode(url) {
+  getEmbedCode(url: string): string | null {
     const media = this.detectMedia(url);
     if (!media) return null;
 
-    if (window.BFPlayer && window.BFPlayer.state.enabled) {
-      // Internal tag used for rendering experimental placeholders
+    // Check if BFPlayer is enabled (window global injected by player module)
+    if ((window as Record<string, unknown>)['__bfPlayerEnabled']) {
       return `[[MEDIA:${media.type}:${media.id}:${media.host || ''}]]`;
     }
 
@@ -108,8 +120,7 @@ const Parser = {
     return null;
   },
 
-  async resolveMedia(track) {
-    // If it's a Suno share (we know this by the ID length or a flag if we had one, but let's be smart)
+  async resolveMedia(track: MediaTrack): Promise<MediaTrack> {
     if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
       try {
         const url = `https://suno.com/s/${track.id}`;
@@ -119,45 +130,39 @@ const Parser = {
         const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
         if (uuidMatch) {
           const uuid = uuidMatch[1];
-          return {
-            ...track,
-            id: uuid,
-            src: `https://cdn1.suno.ai/${uuid}.mp3`,
-            cover: `https://cdn2.suno.ai/image_large_${uuid}.jpeg`
-          };
+          return { ...track, id: uuid, src: `https://cdn1.suno.ai/${uuid}.mp3`, cover: `https://cdn2.suno.ai/image_large_${uuid}.jpeg` };
         }
       } catch (e) { console.error('Parser: Resolution failed', e); }
     }
     return track;
   },
 
-  getExperimentalPlaceholder(type, id, host, context = null) {
-    const media = this.detectMedia(context?.body?.includes(id) ? id : `fakeurl.com/${type}/${id}`); 
-    // Fallback: detect from just the type/id if URL detection is too specific
+  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null): string {
     let thumb = '';
     let isPending = false;
     let src = '';
     let cover = '';
 
-    if (type === 'youtube') thumb = `https://img.youtube.com/vi/${id}/0.jpg`;
-    else if (type === 'audio') {
-      if (id.length >= 36) { // Looks like a UUID
+    if (type === 'youtube') {
+      thumb = `https://img.youtube.com/vi/${id}/0.jpg`;
+    } else if (type === 'audio') {
+      if (id.length >= 36) {
         thumb = `https://cdn2.suno.ai/image_large_${id}.jpeg`;
         src = `https://cdn1.suno.ai/${id}.mp3`;
         cover = thumb;
       } else if (id.length < 30) {
         isPending = true;
       } else {
-        try { src = atob(id); } catch(e) { src = id; }
+        try { src = atob(id); } catch { src = id; }
       }
     }
-    
+
     const sourceLabel = isPending ? 'resolving...' : (host || type);
-    const title = (context?.title || 'Media Content').replace(/'/g, "&apos;");
+    const title = (context?.title || 'Media Content').replace(/'/g, '&apos;');
     const author = context?.author || 'post';
 
     return `<div class="media-placeholder ${isPending ? 'is-resolving' : ''}" 
-                 style="${thumb ? 'background-image:url('+thumb+')' : ''}" 
+                 style="${thumb ? 'background-image:url(' + thumb + ')' : ''}" 
                  data-type="${type}" data-id="${id}" data-host="${host}" 
                  data-src="${src}" data-cover="${cover}" data-pending="${isPending}">
 <div class="media-placeholder-overlay">
@@ -175,9 +180,5 @@ const Parser = {
 <div class="gs" style="color:#fff; font-size:10px; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">${sourceLabel}</div>
 </div>
 </div>`;
-  }
+  },
 };
-
-if (typeof window !== 'undefined') {
-  window.renderMarkdown = (text, context = null) => Parser.render(text, context);
-}

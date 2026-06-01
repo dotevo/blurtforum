@@ -1,4 +1,4 @@
-const TR = {
+export const TR_RAW = {
   en: {
     home: "Home",
     refresh: "Refresh",
