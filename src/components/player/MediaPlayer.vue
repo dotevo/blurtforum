@@ -33,6 +33,10 @@ function handleProgressHover(e: MouseEvent): void {
   hoverProgressTime.value = (hoverProgressPct.value / 100) * props.player.state.duration;
 }
 
+const displayedAutoQueue = computed(() => {
+  return props.player.state.autoQueue.filter(t => t.id !== props.player.state.currentTrack?.id);
+});
+
 // ── Time formatting ─────────────────────────────────────────────────────────
 function formatTime(seconds: number | null | undefined): string {
   if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
@@ -142,11 +146,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
 </script>
 
 <template>
-<!-- ═══════════════════════════════════════════════════════
-     BFP BAR — fixed bottom player bar
-     ═══════════════════════════════════════════════════════ -->
 <div
-  v-if="player.state.active"
   class="bfp-bar"
   :class="{
     'bfp-bar--minimized': player.state.minimized,
@@ -154,7 +154,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
   }"
 >
 
-  <!-- ── Progress bar ─────────────────────────────────── -->
   <div
     class="bfp-progress-wrap"
     @click="handleProgressClick"
@@ -173,30 +172,28 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
     >{{ formatTime(hoverProgressTime) }}</div>
   </div>
 
-  <!-- ── Bar inner ─────────────────────────────────────── -->
   <div class="bfp-bar-inner">
 
-    <!-- Minimized restore button -->
     <template v-if="player.state.minimized">
-      <button class="bfp-btn bfp-btn--play" @click="player.togglePlay()">
+      <button class="bfp-btn bfp-btn--play" @click="if(!player.state.currentTrack) { player.state.minimized = false; player.state.expanded = true; player.state.expandedTab = 'playlists'; } else player.togglePlay()">
         <div class="bfp-cover bfp-cover--minimized">
-          <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" alt="" />
+          <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-cover-img" alt="" />
           <div v-else class="bfp-cover-placeholder"><i class="fa-solid fa-music"></i></div>
         </div>
         <div class="bfp-minimized-info">
-          <div class="bfp-minimized-title">{{ player.state.currentTrack?.title }}</div>
-          <div class="bfp-minimized-author">@{{ player.state.currentTrack?.author }}</div>
+          <div class="bfp-minimized-title">{{ player.state.currentTrack?.title || 'Brak utworu' }}</div>
+          <div class="bfp-minimized-author">{{ player.state.currentTrack ? '@' + player.state.currentTrack.author : 'Otwórz playlisty' }}</div>
         </div>
-        <i class="fa-solid" :class="player.state.playing ? 'fa-pause' : 'fa-play'" style="margin: 0 15px;"></i>
+        <i v-if="player.state.currentTrack" class="fa-solid" :class="player.state.playing ? 'fa-pause' : 'fa-play'" style="margin: 0 15px;"></i>
+        <i v-else class="fa-solid fa-list" style="margin: 0 15px;"></i>
       </button>
-      <button class="bfp-btn" @click="player.state.minimized = false" title="Maximize"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+      <button class="bfp-btn" @click="player.state.minimized = false; if(!player.state.currentTrack) { player.state.expanded = true; player.state.expandedTab = 'playlists'; }" title="Maximize"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
     </template>
 
     <template v-else>
-      <!-- Cover -->
       <div
         class="bfp-cover"
-        @click="player.state.expanded = !player.state.expanded; if(player.state.expanded) player.state.expandedTab = 'queue'"
+        @click="player.state.expanded = !player.state.expanded; if(player.state.expanded) { player.state.expandedTab = 'queue'; player.scrollToCurrent(); }"
         :title="player.state.expanded ? 'Close panel' : 'Open queue'"
       >
         <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-cover-img" alt="Cover" />
@@ -216,12 +213,10 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
         </div>
       </div>
 
-      <!-- Info -->
       <div class="bfp-info">
         <div class="bfp-info-top">
           <div class="bfp-track-title">{{ player.state.currentTrack?.title || 'No title' }}</div>
           <div class="bfp-info-spacer"></div>
-          <!-- Voting & Payout (Next to title, aligned right) -->
           <template v-if="player.state.currentTrack?.permlink">
             <div class="bfp-post-stats">
               <span class="badge payout-link" 
@@ -257,7 +252,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
         </div>
       </div>
 
-      <!-- Controls -->
       <div class="bfp-controls">
         <button class="bfp-btn" @click="player.playPrev()" title="Previous"><i class="fa-solid fa-backward-step"></i></button>
         <button class="bfp-btn bfp-btn--play" @click="player.togglePlay()" :title="player.state.playing ? 'Pause' : 'Play'">
@@ -265,10 +259,11 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
           <i class="fa-solid fa-pause" v-else-if="player.state.playing"></i>
           <i class="fa-solid fa-play"  v-else></i>
         </button>
-        <button class="bfp-btn" @click="player.playNext()" title="Next"><i class="fa-solid fa-forward-step"></i></button>
+        <button class="bfp-btn" @click="player.playNext()" :title="(player.state.queue.length === 0 && displayedAutoQueue.length === 0) ? 'Zatrzymaj' : 'Next'">
+          <i class="fa-solid" :class="(player.state.queue.length === 0 && displayedAutoQueue.length === 0) ? 'fa-xmark' : 'fa-forward-step'"></i>
+        </button>
       </div>
 
-      <!-- Volume -->
       <div class="bfp-vol">
         <button
           class="bfp-btn bfp-vol-icon"
@@ -283,10 +278,9 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
                :style="`background: linear-gradient(to right, var(--bfp-accent) ${player.state.volume * 100}%, rgba(255,255,255,0.15) ${player.state.volume * 100}%)`" />
       </div>
 
-      <!-- Expand / Minimize -->
       <button
         class="bfp-btn bfp-expand-btn"
-        @click="player.state.expanded = !player.state.expanded"
+        @click="player.state.expanded = !player.state.expanded; if(player.state.expanded) { player.state.expandedTab = 'queue'; player.scrollToCurrent(); }"
         :class="{ active: player.state.expanded }"
         title="Expand panel"
       >
@@ -299,20 +293,12 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </button>
 
     </template>
-  </div><!-- /bfp-bar-inner -->
-</div><!-- /bfp-bar -->
-
-
-<!-- ═══════════════════════════════════════════════════════
-     BFP PANEL — expanded panel above bar
-     ═══════════════════════════════════════════════════════ -->
-<div
+  </div></div><div
   class="bfp-panel"
-  :class="{ 'bfp-panel--hidden': !player.state.active || !player.state.expanded || player.state.minimized }"
+  :class="{ 'bfp-panel--hidden': !player.state.expanded || player.state.minimized }"
   :style="{ height: player.state.expandedHeight + 'px' }"
 >
 
-  <!-- Resize handle -->
   <div class="bfp-panel-resize"
        @mousedown="player.initResize($event)"
        @touchstart.prevent="player.initResize($event)"
@@ -320,10 +306,8 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
 
   <div class="bfp-panel-content">
     
-    <!-- ── VIDEO SECTION ──────────────── -->
     <div class="bfp-panel-video" :class="{ 'bfp-media-hidden': vw <= 900 && player.state.expandedTab !== 'video' }">
       
-      <!-- Video Header (Stats inside panel) -->
       <div class="bfp-video-header">
         <div class="bfp-video-header-info">
           <div class="bfp-video-header-title">{{ player.state.currentTrack?.title }}</div>
@@ -345,12 +329,10 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
 
       <div class="bfp-video-wrap">
-        <!-- YouTube Container -->
         <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'youtube' }" class="bfp-video-iframe-wrap">
           <div id="bf-yt-player-target" style="width:100%; height:100%;"></div>
         </div>
         
-        <!-- PeerTube Container -->
         <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'peertube' }" class="bfp-video-iframe-wrap">
           <iframe
             id="bf-pt-player-iframe"
@@ -363,7 +345,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
           ></iframe>
         </div>
 
-        <!-- Audio Placeholder -->
         <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'audio' }" class="bfp-video-audio-placeholder">
           <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-placeholder-cover" alt="Cover" />
           <div v-else class="bfp-placeholder-icon"><i class="fa-solid fa-music" style="font-size:48px; opacity:0.3;"></i></div>
@@ -378,7 +359,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
     </div>
 
-    <!-- ── TABS SECTION ─────────────────────── -->
     <div class="bfp-panel-tabs">
       <div class="bfp-panel-header">
         <button v-if="vw <= 900" class="bfp-tab" :class="{ active: player.state.expandedTab === 'video' }" @click="player.state.expandedTab = 'video'">
@@ -387,8 +367,8 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
         <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'queue' }"
                 @click="player.state.expandedTab = 'queue'; player.scrollToCurrent()">
           <i class="fa-solid fa-list-ul"></i> {{ t('queue') }}
-          <span class="bfp-tab-count" v-if="player.state.queue.length + player.state.autoQueue.length > 0">
-            {{ player.state.queue.length + player.state.autoQueue.length }}
+          <span class="bfp-tab-count" v-if="player.state.queue.length + displayedAutoQueue.length > 0">
+            {{ player.state.queue.length + displayedAutoQueue.length }}
           </span>
         </button>
         <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'playlists' }" @click="player.state.expandedTab = 'playlists'">
@@ -401,11 +381,8 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
         </button>
       </div>
 
-      <!-- ── QUEUE TAB ────────────────── -->
       <div class="bfp-panel-body queue-list" v-show="player.state.expandedTab === 'queue'">
-        <!-- ... content remains similar but check v-show/v-if inside ... -->
 
-    <!-- History -->
     <div class="pq-section-label pq-label--history" v-if="player.state.history.length > 0">
       <i class="fa-solid fa-clock-rotate-left"></i> {{ t('history') }}
     </div>
@@ -433,10 +410,8 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
     </div>
 
-    <!-- Current track anchor -->
     <div id="current-queue-anchor"></div>
 
-    <!-- Now playing -->
     <div class="pq-section-label pq-label--now" v-if="player.state.currentTrack">
       <i class="fa-solid fa-play"></i> {{ t('playing') || 'Now playing' }}
     </div>
@@ -469,7 +444,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
     </div>
 
-    <!-- Manual queue -->
     <div class="pq-section-label pq-label--manual" v-if="player.state.queue.length > 0">
       <i class="fa-solid fa-hand-pointer"></i> {{ t('queueManual') || 'Up next' }}
       <button class="pq-section-clear" @click="player.state.queue = []" title="Clear queue">{{ t('clear') || 'Clear' }}</button>
@@ -478,7 +452,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
          class="pq-item pq-item--manual" :class="{ 'pq-item--next': idx === 0 }">
       <div class="pq-timeline-col">
         <div class="pq-dot pq-dot--manual"><span>{{ idx + 1 }}</span></div>
-        <div class="pq-line" v-if="idx < player.state.queue.length - 1 || player.state.autoQueue.length > 0"></div>
+        <div class="pq-line" v-if="idx < player.state.queue.length - 1 || displayedAutoQueue.length > 0"></div>
       </div>
       <div class="pq-card" @click="player.playTrack(track, true, idx)">
         <img v-if="track.cover" :src="track.cover" class="pq-thumb" alt="" />
@@ -499,15 +473,14 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
     </div>
 
-    <!-- Auto queue -->
-    <div class="pq-section-label pq-label--auto" v-if="player.state.autoQueue.length > 0">
+    <div class="pq-section-label pq-label--auto" v-if="displayedAutoQueue.length > 0">
       <i class="fa-solid fa-shuffle"></i> {{ t('queueAutoplay') || 'Autoplay' }}
     </div>
-    <div v-for="(track, idx) in player.state.autoQueue" :key="'a-'+track.id+idx"
+    <div v-for="(track, idx) in displayedAutoQueue" :key="'a-'+track.id+idx"
          class="pq-item pq-item--auto" @click="player.playTrack(track)">
       <div class="pq-timeline-col">
         <div class="pq-dot pq-dot--auto"><span>{{ idx + 1 }}</span></div>
-        <div class="pq-line" v-if="idx < player.state.autoQueue.length - 1"></div>
+        <div class="pq-line" v-if="idx < displayedAutoQueue.length - 1"></div>
       </div>
       <div class="pq-card">
         <img v-if="track.cover" :src="track.cover" class="pq-thumb" alt="" />
@@ -526,17 +499,13 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       </div>
     </div>
 
-    <div class="pq-empty" v-if="!player.state.currentTrack && !player.state.queue.length && !player.state.autoQueue.length">
+    <div class="pq-empty" v-if="!player.state.currentTrack && !player.state.queue.length && !displayedAutoQueue.length">
       <i class="fa-solid fa-headphones" style="font-size:32px; opacity:0.2;"></i>
       <div>{{ t('queueEmpty') || 'Queue is empty' }}</div>
     </div>
-  </div><!-- /queue-list -->
-
-  <!-- ── PLAYLISTS TAB ──────────────────────────────── -->
-  <div class="bfp-panel-body" v-show="player.state.expandedTab === 'playlists'">
+  </div><div class="bfp-panel-body" v-show="player.state.expandedTab === 'playlists'">
     <div class="pl-wrap">
 
-      <!-- Playlist list view -->
       <template v-if="!activePlaylistId">
         <div class="pl-header">
           <span class="pl-header-title"><i class="fa-solid fa-list"></i> {{ t('playlists') || 'Playlists' }}</span>
@@ -545,7 +514,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
           </button>
         </div>
 
-        <!-- Playlist rows -->
         <div class="pl-list">
           <div v-for="pl in player.playlistState.playlists" :key="pl.id" class="pl-row">
             <div class="pl-dot" :style="{ background: pl.color }"></div>
@@ -563,7 +531,6 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
         </div>
       </template>
 
-      <!-- Playlist detail view -->
       <template v-else>
         <div class="pl-inner-header">
           <button class="pl-back-btn" @click="activePlaylistId = null"><i class="fa-solid fa-arrow-left"></i></button>
@@ -612,14 +579,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
           </div>
         </div>
       </template>
-    </div><!-- /pl-wrap -->
-  </div><!-- /bfp-panel-body-playlists -->
-  </div><!-- /bfp-panel-tabs -->
-  </div><!-- /bfp-panel-content -->
-</div><!-- /bfp-panel -->
-
-<!-- Playlist dropdown -->
-<div class="pl-dropdown" v-if="dropdownVisible"
+    </div></div></div></div></div><div class="pl-dropdown" v-if="dropdownVisible"
      :style="{ top: dropdownY + 'px', left: dropdownX + 'px' }"
      @click.stop>
   <div class="pl-dropdown-title">Add to playlist</div>

@@ -116,10 +116,10 @@ declare global {
 
 const state = reactive<PlayerState>({
   enabled: true,
-  active: false,
+  active: true,
   playing: false,
   loading: false,
-  minimized: false,
+  minimized: true,
   expanded: false,
   expandedHeight: 400,
   expandedTab: 'video',
@@ -189,10 +189,12 @@ const loadSavedQueue = (): void => {
     const restoredTrack = savedCurrent ? JSON.parse(savedCurrent) : null;
     if (restoredTrack) {
       state.currentTrack = restoredTrack;
-      state.active = true;
+      state.minimized = false;
     } else if (state.queue.length > 0) {
-      state.active = true;
+      state.minimized = false;
       state.currentTrack = state.queue[0];
+    } else {
+      state.minimized = true;
     }
     state.playing = false; // Force paused on load
   } catch (e) { console.warn('Failed to load queue:', e); }
@@ -401,7 +403,6 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
 
   stopAll();
   state.currentTrack = track;
-  state.active = true;
   state.loading = true;
   state.minimized = false;
   scrollToCurrent();
@@ -437,14 +438,14 @@ export const playNext = (): void => {
     }
     playTrack(state.autoQueue[0]);
   } else {
-    state.active = false; state.currentTrack = null; stopAll();
+    state.minimized = true; state.currentTrack = null; stopAll();
   }
 };
 
 export const playPrev = (): void => {
   _emit('prev', state.currentTrack);
   if (state.history.length > 0) {
-    playTrack(state.history.shift()!, false, -1, true);
+    playTrack(state.history.pop()!, false, -1, true);
   } else if (state.autoQueue.length > 0) {
     const last = state.autoQueue.pop()!;
     state.autoQueue.unshift(last);
