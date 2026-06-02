@@ -337,6 +337,7 @@ const initPT = (): void => {
           if (stats && typeof stats.position !== 'undefined') {
             state.progress = (stats.position / stats.duration) * 100;
             state.duration = stats.duration;
+            state.volume = stats.volume;
             if (stats.playbackState === 'ended') playNext();
           }
        });
