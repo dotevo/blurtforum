@@ -44,7 +44,7 @@ const emit = defineEmits<{
           <div class="community-card-meta">
             <span :title="t('subscribers')"><i class="fa-solid fa-users"></i> {{ c.subscribers }}</span>
             <span :title="t('activeAuthors')"><i class="fa-solid fa-pen-nib"></i> {{ c.num_authors }}</span>
-            <span v-if="(c.sum_pending ?? 0) > 0" :title="t('pendingRewards')"><i class="fa-solid fa-coins"></i> {{ ((c.sum_pending as number) / 1000).toFixed(0) }} BLURT</span>
+            <span v-if="(c.sum_pending ?? 0) > 0" :title="t('pendingRewards')"><i class="fa-solid fa-coins"></i> {{ ((c.sum_pending as number) / 1000).toFixed(0) }} $</span>
             <span v-if="c.lang" :title="t('language')"><i class="fa-solid fa-language"></i> {{ c.lang.toUpperCase() }}</span>
           </div>
           <div class="gs" style="font-size: 10px; margin-top: 4px;">{{ t('created') }}: {{ fmtDate(c.created_at || '') }}</div>
