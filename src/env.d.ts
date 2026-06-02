@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-// Allow dynamic property access on window (needed for polyfill pattern and app global)
+// Allow dynamic property access on window
 interface Window {
   [key: string]: unknown;
   app?: { openProfile: (username: string) => void };

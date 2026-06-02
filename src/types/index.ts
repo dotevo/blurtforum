@@ -173,6 +173,9 @@ export interface MediaTrack {
   title?: string;
   author?: string;
   permlink?: string;
+  payout?: number;
+  voteCount?: number;
+  voted?: boolean;
   pending?: boolean;
   _errorHandled?: boolean;
 }

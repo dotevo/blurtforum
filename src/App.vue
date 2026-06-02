@@ -30,6 +30,7 @@ import OldContentModal from './components/modals/OldContentModal.vue';
 import StructureDocs from './components/modals/StructureDocs.vue';
 import LayoutEditor from './components/modals/LayoutEditor.vue';
 import ImageLightbox from './components/modals/ImageLightbox.vue';
+import PlaylistModal from './components/modals/PlaylistModal.vue';
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -45,6 +46,7 @@ const {
   doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
   nextPage, prevPage,
   submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+  playlistModal, handlePlaylistConfirm,
   followModal, confirmToggleFollow,
   openProfile, profileUser, profileTab, openNotification,
   userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
@@ -362,8 +364,10 @@ const {
     :player="player"
     :vw="vw"
     :t="t"
-    @player-seek="handlePlayerSeek"
+    @player-seek="(pct: number) => player.seek(pct)"
     @open-profile="openProfile"
+    @open-topic="(p) => openTopic(p as any)"
+    @open-playlist-modal="(track) => { playlistModal.track = track; playlistModal.show = true; }"
   />
 
   <!-- ── Modals ─────────────────────────────────────────────────── -->
@@ -462,6 +466,14 @@ const {
     :t="t"
     @close="followModal.show = false"
     @confirm="confirmToggleFollow"
+  />
+
+  <PlaylistModal
+    :show="playlistModal.show"
+    :track="playlistModal.track"
+    :t="t"
+    @close="playlistModal.show = false"
+    @confirm="handlePlaylistConfirm"
   />
 
   <!-- Status modal -->

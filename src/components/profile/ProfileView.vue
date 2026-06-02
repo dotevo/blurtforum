@@ -97,54 +97,62 @@ const emit = defineEmits<{
       </div>
 
       <table class="forumline profile-list-table" v-if="profileTab==='posts'">
-        <tr>
-          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
-          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
-          <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
-        </tr>
-        <tr v-for="post in profileUser.posts" :key="post.permlink" 
-            class="row-hover" @click="emit('openTopic', post)">
-          <td class="row1">
-            <a href="#" @click.stop.prevent="emit('openTopic', post)">{{ post.title }}</a><br>
-            <div v-if="post.beneficiaries && post.beneficiaries.length" class="beneficiaries-inline" style="margin-top:4px;">
-              <span class="ben-icon">👥</span>
-              <template v-for="(b, bi) in post.beneficiaries.slice(0,2)" :key="b.account">
-                <span class="ben-link" style="font-size: 10px;">@{{ b.account }}</span>
-                <span v-if="bi < post.beneficiaries.slice(0,2).length-1" class="ben-sep">,</span>
-              </template>
-              <span v-if="post.beneficiaries.length > 2" class="ben-more" style="font-size: 10px;">+{{ post.beneficiaries.length - 2 }}</span>
-            </div>
-          </td>
-          <td class="row2" align="center">
-            <span class="badge" :class="(post.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (post.payout || 0).toFixed(2) }} B</span>
-          </td>
-          <td class="row1" align="center">
-            <span class="gs">{{ fmtDate(post.created) }}</span>
-          </td>
-        </tr>
-        <tr v-if="profileUser.posts.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
+        <thead>
+          <tr>
+            <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
+            <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+            <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="post in profileUser.posts" :key="post.permlink" 
+              class="row-hover" @click="emit('openTopic', post)">
+            <td class="row1">
+              <a href="#" @click.stop.prevent="emit('openTopic', post)">{{ post.title }}</a><br>
+              <div v-if="post.beneficiaries && post.beneficiaries.length" class="beneficiaries-inline" style="margin-top:4px;">
+                <span class="ben-icon">👥</span>
+                <template v-for="(b, bi) in post.beneficiaries.slice(0,2)" :key="b.account">
+                  <span class="ben-link" style="font-size: 10px;">@{{ b.account }}</span>
+                  <span v-if="bi < post.beneficiaries.slice(0,2).length-1" class="ben-sep">,</span>
+                </template>
+                <span v-if="post.beneficiaries.length > 2" class="ben-more" style="font-size: 10px;">+{{ post.beneficiaries.length - 2 }}</span>
+              </div>
+            </td>
+            <td class="row2" align="center">
+              <span class="badge" :class="(post.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (post.payout || 0).toFixed(2) }} B</span>
+            </td>
+            <td class="row1" align="center">
+              <span class="gs">{{ fmtDate(post.created) }}</span>
+            </td>
+          </tr>
+          <tr v-if="profileUser.posts.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
+        </tbody>
       </table>
 
       <table class="forumline profile-list-table" v-if="profileTab==='comments'">
-        <tr>
-          <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
-          <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
-          <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
-        </tr>
-        <tr v-for="c in profileUser.comments" :key="c.permlink" 
-            class="row-hover" @click="emit('openTopic', c)">
-          <td class="row1">
-            <span class="gs">RE: @{{ c.parent_author }}</span><br>
-            {{ c.body.substring(0, 100) }}...
-          </td>
-          <td class="row2" align="center">
-            <span class="badge" :class="(c.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (c.payout || 0).toFixed(2) }} B</span>
-          </td>
-          <td class="row1" align="center">
-            <span class="gs">{{ fmtDate(c.created) }}</span>
-          </td>
-        </tr>
-        <tr v-if="profileUser.comments.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
+        <thead>
+          <tr>
+            <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
+            <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+            <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in profileUser.comments" :key="c.permlink" 
+              class="row-hover" @click="emit('openTopic', c)">
+            <td class="row1">
+              <span class="gs">RE: @{{ c.parent_author }}</span><br>
+              {{ c.body.substring(0, 100) }}...
+            </td>
+            <td class="row2" align="center">
+              <span class="badge" :class="(c.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (c.payout || 0).toFixed(2) }} B</span>
+            </td>
+            <td class="row1" align="center">
+              <span class="gs">{{ fmtDate(c.created) }}</span>
+            </td>
+          </tr>
+          <tr v-if="profileUser.comments.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
+        </tbody>
       </table>
     <!-- /profile -->
 </template>

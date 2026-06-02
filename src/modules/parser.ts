@@ -8,7 +8,11 @@ import type { MediaTrack } from '../types';
 interface ParseContext {
   title?: string;
   author?: string;
+  permlink?: string;
   body?: string;
+  payout?: number;
+  voteCount?: number;
+  voted?: boolean;
 }
 
 export const Parser = {
@@ -160,6 +164,10 @@ export const Parser = {
     const sourceLabel = isPending ? 'resolving...' : (host || type);
     const title = (context?.title || 'Media Content').replace(/'/g, '&apos;');
     const author = context?.author || 'post';
+    const permlink = context?.permlink || '';
+    const payout = context?.payout || 0;
+    const voteCount = context?.voteCount || 0;
+    const voted = context?.voted || false;
 
     return `<div class="media-placeholder ${isPending ? 'is-resolving' : ''}" 
                  style="${thumb ? 'background-image:url(' + thumb + ')' : ''}" 
@@ -167,10 +175,16 @@ export const Parser = {
                  data-src="${src}" data-cover="${cover}" data-pending="${isPending}">
 <div class="media-placeholder-overlay">
 <div class="media-placeholder-actions">
-<button class="btn btn-primary bf-placeholder-play" data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" data-src="${src}" data-cover="${cover}">
+<button class="btn btn-primary bf-placeholder-play" 
+        data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" 
+        data-permlink="${permlink}" data-payout="${payout}" data-votecount="${voteCount}" data-voted="${voted}"
+        data-src="${src}" data-cover="${cover}">
 <i class="fa-solid fa-play"></i> Play
 </button>
-<button class="btn btn-ghost bf-placeholder-queue" data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" data-src="${src}" data-cover="${cover}">
+<button class="btn btn-ghost bf-placeholder-queue" 
+        data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" 
+        data-permlink="${permlink}" data-payout="${payout}" data-votecount="${voteCount}" data-voted="${voted}"
+        data-src="${src}" data-cover="${cover}">
 <i class="fa-solid fa-plus"></i> Queue
 </button>
 <button class="btn btn-ghost bf-placeholder-embed" data-type="${type}" data-id="${id}" data-host="${host}">

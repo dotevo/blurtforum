@@ -3,7 +3,7 @@
  * Ports the entire app.js setup() logic into a typed Vue 3 composable.
  */
 import {
-  ref, reactive, computed, onMounted, nextTick,
+  ref, reactive, computed, onMounted, watch, nextTick,
 } from 'vue';
 import CryptoJS from 'crypto-js';
 import { BFUtils } from '../modules/utils';
@@ -270,8 +270,17 @@ export function useApp() {
     return topPosts.some(p => p.isUnread);
   };
 
-  const renderMD = (text: string, context: Record<string, unknown> | null = null): string => {
-    const html = Parser.render(text, context);
+  const renderMD = (text: string, context: any = null): string => {
+    let ctx = context;
+    if (context && context.author && context.permlink) {
+      // Map Post fields to ParseContext
+      ctx = {
+        ...context,
+        voteCount: context.vote_count,
+        voted: hasVoted(context)
+      };
+    }
+    const html = Parser.render(text, ctx);
     if (html.includes('is-resolving')) {
       setTimeout(() => {
         const pending = document.querySelectorAll<HTMLElement>('.media-placeholder.is-resolving');
@@ -1082,6 +1091,13 @@ export function useApp() {
     postForm.loading = false;
   };
 
+  const playlistModal = reactive({ show: false, track: null as MediaTrack | null });
+  const handlePlaylistConfirm = (name: string, color: string, track: MediaTrack | null) => {
+    const pl = player.createPlaylist(name, color);
+    if (pl && track) player.addTrackToPlaylist(pl.id, track);
+    playlistModal.show = false;
+  };
+
   // ── Vote ──────────────────────────────────────────────────────────────────
   const voteModal = reactive({ show: false, post: null as Post | null, weight: parseInt(localStorage.getItem('bf-vote-weight') || '100'), estimatedValue: null as null | { vpCostPct: string; vpAfter: string; voteValue: string; fee: string }, estimating: false });
   const estCache = { acc: null as Record<string, unknown> | null, fund: null as Record<string, unknown> | null, props: null as GlobalProps | null, last: 0 };
@@ -1614,6 +1630,32 @@ export function useApp() {
 
   const player = BFPlayer;
 
+  // ── Dynamic Data Refresh ──────────────────────────────────────────────────
+  watch(() => player.state.currentTrack, async (newTrack) => {
+    if (newTrack && newTrack.author && newTrack.permlink) {
+      try {
+        const client = new dblurt.Client(config.nodes);
+        const post = await client.condenser.getContent(newTrack.author, newTrack.permlink);
+        if (post && player.state.currentTrack && 
+            player.state.currentTrack.author === post.author && 
+            player.state.currentTrack.permlink === post.permlink) {
+          
+          const parsePayout = (val: any) => typeof val === 'string' ? parseFloat(val.split(' ')[0]) : (typeof val === 'number' ? val : 0);
+          const payout = parsePayout(post.pending_payout_value) + 
+                         parsePayout(post.total_payout_value) +
+                         parsePayout((post as any).curator_payout_value);
+
+          // Update properties individually to avoid triggering a full object change
+          player.state.currentTrack.payout = payout;
+          player.state.currentTrack.voteCount = post.active_votes?.length || 0;
+          player.state.currentTrack.voted = hasVoted(post as any);
+        }
+      } catch (e) {
+        console.error('Failed to refresh track post data:', e);
+      }
+    }
+  });
+
   onMounted(() => {
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
@@ -1627,7 +1669,16 @@ export function useApp() {
         e.preventDefault();
         const d = (mediaBtn as HTMLElement).dataset;
         const action = mediaBtn.classList.contains('bf-placeholder-play') ? 'play' : (mediaBtn.classList.contains('bf-placeholder-queue') ? 'queue' : 'embed');
-        handleMediaAction(d.type!, d.id!, d.host!, action, { title: d.title, author: d.author, src: d.src, cover: d.cover });
+        handleMediaAction(d.type!, d.id!, d.host!, action, { 
+          title: d.title, 
+          author: d.author, 
+          permlink: d.permlink,
+          payout: d.payout ? parseFloat(d.payout) : 0,
+          voteCount: d.votecount ? parseInt(d.votecount) : 0,
+          voted: d.voted === 'true',
+          src: d.src, 
+          cover: d.cover 
+        });
         return;
       }
       const mention = target.closest('.mention');
@@ -1721,8 +1772,8 @@ export function useApp() {
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
     nextPage, prevPage,
     submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
-    followModal, confirmToggleFollow,
-    openProfile, profileUser, profileTab, openNotification,
+    playlistModal, handlePlaylistConfirm,
+    followModal, confirmToggleFollow,    openProfile, profileUser, profileTab, openNotification,
     userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,

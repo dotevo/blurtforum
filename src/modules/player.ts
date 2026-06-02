@@ -1,12 +1,14 @@
 /**
  * BlurtForum MediaPlayer Library
- * Handles audio/video playback, queuing, and PiP UI.
+ * Handles audio/video playback, queuing, playlists, event emitter and plugin API.
  */
 import { reactive, watch, nextTick } from 'vue';
 import type { MediaTrack } from '../types';
 import { Parser } from './parser';
 
-interface PlayerState {
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export interface PlayerState {
   enabled: boolean;
   active: boolean;
   playing: boolean;
@@ -14,7 +16,7 @@ interface PlayerState {
   minimized: boolean;
   expanded: boolean;
   expandedHeight: number;
-  expandedTab: 'video' | 'queue';
+  expandedTab: 'video' | 'queue' | 'playlists';
   currentTrack: MediaTrack | null;
   queue: MediaTrack[];
   autoQueue: MediaTrack[];
@@ -23,6 +25,54 @@ interface PlayerState {
   duration: number;
   volume: number;
   experimental: boolean;
+  isAutoStarting: boolean;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: number;
+  updatedAt: number;
+  tracks: (MediaTrack & { addedAt?: number })[];
+}
+
+export interface PlaylistState {
+  playlists: Playlist[];
+}
+
+export type PlayerEvent =
+  | 'trackChange' | 'play' | 'pause' | 'next' | 'prev'
+  | 'ended' | 'volumeChange' | 'error';
+
+export interface PlayerPlugin {
+  name: string;
+  install?: (player: BFPlayerAPI) => void;
+  onTrackChange?: (track: MediaTrack) => void;
+}
+
+export interface BFPlayerAPI {
+  state: PlayerState;
+  playlistState: PlaylistState;
+  playTrack: (track: MediaTrack, isManual?: boolean, manualIdx?: number, fromHistory?: boolean) => Promise<void>;
+  playNext: () => void;
+  playPrev: () => void;
+  togglePlay: () => void;
+  seek: (pct: number) => void;
+  addToQueue: (track: MediaTrack) => void;
+  setAutoQueue: (tracks: MediaTrack[]) => void;
+  initResize: (e: MouseEvent | TouchEvent) => void;
+  scrollToCurrent: () => void;
+  toggleExperimental: (val: boolean) => void;
+  on: (event: PlayerEvent, fn: (data: unknown) => void) => void;
+  off: (event: PlayerEvent, fn: (data: unknown) => void) => void;
+  registerPlugin: (plugin: PlayerPlugin) => void;
+  createPlaylist: (name: string, color?: string) => Playlist | null;
+  deletePlaylist: (id: string) => void;
+  renamePlaylist: (id: string, newName: string) => void;
+  addTrackToPlaylist: (playlistId: string, track: MediaTrack) => boolean;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
+  playPlaylist: (playlistId: string, startIndex?: number) => void;
 }
 
 // Minimal YouTube IFrame API typings
@@ -42,12 +92,12 @@ export interface YTNamespace {
   PlayerState: { PLAYING: number; PAUSED: number; BUFFERING: number; ENDED: number };
 }
 
-// Minimal PeerTube embed API typings
 export interface PTPlayer {
   ready: Promise<void>;
   setVolume(v: number): void;
   addEventListener(evt: string, cb: (data: unknown) => void): void;
   getDuration(): Promise<number>;
+  getCurrentTime(): Promise<number>;
   pause(): void;
   play(): void;
   seek(t: number): void;
@@ -61,6 +111,8 @@ declare global {
     __bfPlayerEnabled?: boolean;
   }
 }
+
+// ─── State ─────────────────────────────────────────────────────────────────
 
 const state = reactive<PlayerState>({
   enabled: true,
@@ -79,10 +131,47 @@ const state = reactive<PlayerState>({
   duration: 0,
   volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
   experimental: localStorage.getItem('bf-player-experimental') === 'true',
+  isAutoStarting: false
 });
 
-// Sync flag for Parser to know if player is enabled
+const playlistState = reactive<PlaylistState>({ playlists: [] });
+
 window.__bfPlayerEnabled = state.enabled;
+
+// ─── Event Emitter ─────────────────────────────────────────────────────────
+
+const _listeners: Partial<Record<PlayerEvent, Array<(data: unknown) => void>>> = {};
+
+const on = (event: PlayerEvent, fn: (data: unknown) => void): void => {
+  if (!_listeners[event]) _listeners[event] = [];
+  _listeners[event]!.push(fn);
+};
+
+const off = (event: PlayerEvent, fn: (data: unknown) => void): void => {
+  if (_listeners[event]) {
+    _listeners[event] = _listeners[event]!.filter(f => f !== fn);
+  }
+};
+
+const _emit = (event: PlayerEvent, data?: unknown): void => {
+  (_listeners[event] || []).forEach(fn => {
+    try { fn(data); } catch (e) { console.warn(`BFPlayer plugin error in "${event}":`, e); }
+  });
+};
+
+// ─── Plugin API ─────────────────────────────────────────────────────────────
+
+const _plugins: PlayerPlugin[] = [];
+
+const registerPlugin = (plugin: PlayerPlugin): void => {
+  if (!plugin?.name) { console.warn('BFPlayer.registerPlugin: plugin must have a name'); return; }
+  if (_plugins.find(p => p.name === plugin.name)) { console.warn(`BFPlayer: plugin "${plugin.name}" already registered`); return; }
+  _plugins.push(plugin);
+  if (typeof plugin.install === 'function') plugin.install(BFPlayer);
+  if (typeof plugin.onTrackChange === 'function') on('trackChange', plugin.onTrackChange.bind(plugin) as (data: unknown) => void);
+};
+
+// ─── Internals ─────────────────────────────────────────────────────────────
 
 let audioObj: HTMLAudioElement | null = null;
 let ytPlayer: YTPlayer | null = null;
@@ -105,9 +194,22 @@ const loadSavedQueue = (): void => {
       state.active = true;
       state.currentTrack = state.queue[0];
     }
+    state.playing = false; // Force paused on load
   } catch (e) { console.warn('Failed to load queue:', e); }
 };
 loadSavedQueue();
+
+const _loadPlaylists = (): void => {
+  try {
+    const raw = localStorage.getItem('bf-player-playlists');
+    if (raw) playlistState.playlists = JSON.parse(raw);
+  } catch (e) { console.warn('BFPlayer: failed to load playlists:', e); }
+};
+_loadPlaylists();
+
+const _savePlaylists = (): void => {
+  localStorage.setItem('bf-player-playlists', JSON.stringify(playlistState.playlists));
+};
 
 const handleError = (msg: string): void => {
   if (!state.currentTrack) return;
@@ -122,6 +224,7 @@ const handleError = (msg: string): void => {
   trackWithError.title = `⚠️ ERROR: ${msg} (Skipping in 5s...)`;
   state.loading = false;
   state.playing = false;
+  _emit('error', { track: trackWithError, message: msg });
   if (errorTimer) clearTimeout(errorTimer);
   errorTimer = setTimeout(() => {
     if (trackWithError.title?.startsWith('⚠️ ERROR:')) trackWithError.title = oldTitle;
@@ -161,14 +264,14 @@ const initAudio = (): void => {
   audioObj.addEventListener('play', () => { if (isAudioTrack()) { state.playing = true; state.loading = false; } });
   audioObj.addEventListener('pause', () => { if (isAudioTrack()) state.playing = false; });
   audioObj.addEventListener('waiting', () => { if (isAudioTrack()) state.loading = true; });
-  audioObj.addEventListener('playing', () => { if (isAudioTrack()) state.loading = false; });
+  audioObj.addEventListener('playing', () => { if (isAudioTrack()) { state.loading = false; if (audioObj && audioObj.duration) state.duration = audioObj.duration; } });
   audioObj.addEventListener('timeupdate', () => {
-    if (isAudioTrack() && audioObj!.duration) {
-      state.progress = (audioObj!.currentTime / audioObj!.duration) * 100;
-      state.duration = audioObj!.duration;
+    if (audioObj && isAudioTrack() && audioObj.duration > 0) {
+      if (!state.duration) state.duration = audioObj.duration;
+      state.progress = (audioObj.currentTime / audioObj.duration) * 100;
     }
   });
-  audioObj.addEventListener('ended', () => { if (isAudioTrack()) playNext(); });
+  audioObj.addEventListener('ended', () => { if (isAudioTrack()) { _emit('ended', state.currentTrack); playNext(); } });
   audioObj.addEventListener('error', (e) => {
     if (isAudioTrack()) { console.error('BFPlayer Audio error:', e); handleError('Audio file error or broken link'); }
   });
@@ -205,7 +308,9 @@ const initYT = async (): Promise<void> => {
         } else if (event.data === YT.PlayerState.BUFFERING) {
           state.loading = true;
         } else if (event.data === YT.PlayerState.ENDED) {
-          state.playing = false; stopYTProgress(); playNext();
+          state.playing = false; stopYTProgress();
+          _emit('ended', state.currentTrack);
+          playNext();
         }
       },
       onError: (e: unknown) => { console.error('BFPlayer YT error:', e); handleError('YouTube video unavailable or blocked'); },
@@ -214,22 +319,32 @@ const initYT = async (): Promise<void> => {
 };
 
 const initPT = (): void => {
-  const iframe = document.getElementById('bf-pt-player-iframe');
-  if (!iframe || !window.PeerTubePlayer) return;
-  ptPlayer = new window.PeerTubePlayer(iframe);
-  ptPlayer.ready.then(() => {
-    ptPlayer!.setVolume(state.volume);
-    ptPlayer!.addEventListener('playbackStatusUpdate', (status: unknown) => {
-      if (status === 'playing') state.playing = true;
-      else if (status === 'paused') state.playing = false;
+  const iframe = document.getElementById('bf-pt-player-iframe') as HTMLIFrameElement;
+  if (!iframe || !window.PeerTubePlayer || !state.currentTrack || state.currentTrack.type !== 'peertube') return;
+
+  const PTConstructor = window.PeerTubePlayer as any;
+  if (PTConstructor) {
+    ptPlayer = new PTConstructor(iframe);
+    ptPlayer!.ready.then(() => {
+       state.loading = false;
+       ptPlayer!.setVolume(state.volume);
+       ptPlayer!.play(); // Auto-play via API as in legacy
+       
+       ptPlayer!.addEventListener('playbackStatusUpdate', (stats: any) => {
+          if (state.currentTrack?.type !== 'peertube') return;
+          if (stats && typeof stats.position !== 'undefined') {
+            state.progress = (stats.position / stats.duration) * 100;
+            state.duration = stats.duration;
+            if (stats.playbackState === 'ended') playNext();
+          }
+       });
+
+       ptPlayer!.addEventListener('playbackStatusChange', (playbackState: any) => {
+          if (state.currentTrack?.type !== 'peertube') return;
+          state.playing = (playbackState === 'playing');
+       });
     });
-    ptPlayer!.addEventListener('timeupdate', (time: unknown) => {
-      ptPlayer!.getDuration().then(dur => {
-        state.duration = dur;
-        state.progress = ((time as number) / dur) * 100;
-      });
-    });
-  });
+  }
 };
 
 const startYTProgress = (): void => {
@@ -248,16 +363,21 @@ const stopAll = (): void => {
   if (audioObj) { audioObj.pause(); audioObj.src = ''; }
   if (ytPlayer?.stopVideo) { try { ytPlayer.stopVideo(); } catch { /* ignore */ } }
   if (ptPlayer?.pause) { try { ptPlayer.pause(); } catch { /* ignore */ } }
-  state.playing = false; state.progress = 0;
+  ptPlayer = null; // Important: reset PT player instance
+  state.playing = false; 
+  state.progress = 0;
+  state.isAutoStarting = false;
 };
 
-const scrollToCurrent = (): void => {
+export const scrollToCurrent = (): void => {
   nextTick(() => {
     const anchor = document.getElementById('current-queue-anchor');
     const list = document.querySelector<HTMLElement>('.queue-list');
     if (anchor && list) list.scrollTop = anchor.offsetTop - 40;
   });
 };
+
+// ─── Public Playback Methods ────────────────────────────────────────────────
 
 export const playTrack = async (track: MediaTrack, isManual = false, manualIdx = -1, fromHistory = false): Promise<void> => {
   if (!state.enabled) return;
@@ -271,19 +391,21 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
     } else { handleError('Could not resolve audio source'); return; }
   }
 
-  stopAll();
-
+  // Save to history if we were playing something AND it's a different track
   if (state.currentTrack && state.currentTrack.id !== track.id && !fromHistory) {
-    state.history = state.history.filter(t => t.id !== state.currentTrack!.id);
-    state.history.unshift(state.currentTrack);
-    if (state.history.length > 20) state.history.pop();
+    const historyEntry = { ...state.currentTrack };
+    state.history = state.history.filter(t => t.id !== historyEntry.id);
+    state.history.push(historyEntry); // Add to end (bottom of history section)                                                                                                                                                                                                                                                                                                                                                │
+    if (state.history.length > 20) state.history.shift();
   }
 
+  stopAll();
   state.currentTrack = track;
   state.active = true;
   state.loading = true;
   state.minimized = false;
   scrollToCurrent();
+  _emit('trackChange', track);
 
   if (isManual && manualIdx !== -1) state.queue.splice(manualIdx, 1);
 
@@ -299,11 +421,13 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
     else { ytPlayer.loadVideoById(track.id); ytPlayer.playVideo(); }
   } else if (track.type === 'peertube') {
     state.playing = true; state.loading = false;
+    state.isAutoStarting = true;
     nextTick(() => { setTimeout(() => initPT(), 1000); });
   }
 };
 
 export const playNext = (): void => {
+  _emit('next', state.currentTrack);
   if (state.queue.length > 0) {
     playTrack(state.queue.shift()!);
   } else if (state.autoQueue.length > 0) {
@@ -318,6 +442,7 @@ export const playNext = (): void => {
 };
 
 export const playPrev = (): void => {
+  _emit('prev', state.currentTrack);
   if (state.history.length > 0) {
     playTrack(state.history.shift()!, false, -1, true);
   } else if (state.autoQueue.length > 0) {
@@ -329,9 +454,26 @@ export const playPrev = (): void => {
 
 export const togglePlay = (): void => {
   if (!state.currentTrack) return;
+
+  // If we have a track but no media object initialized (e.g. after refresh),
+  // start playback properly instead of just toggling the state.
+  if (state.currentTrack.type === 'audio' && !audioObj) {
+    playTrack(state.currentTrack);
+    return;
+  }
+  if (state.currentTrack.type === 'youtube' && !ytPlayer) {
+    playTrack(state.currentTrack);
+    return;
+  }
+  if (state.currentTrack.type === 'peertube' && !ptPlayer) {
+    playTrack(state.currentTrack);
+    return;
+  }
+
   if (state.currentTrack.type === 'youtube' && ytPlayer?.getPlayerState) {
     state.playing = ytPlayer.getPlayerState() === window.YT!.PlayerState.PLAYING;
   }
+
   if (state.playing) {
     if (state.currentTrack.type === 'audio' && audioObj) audioObj.pause();
     if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
@@ -352,34 +494,91 @@ export const seek = (pct: number): void => {
 
 export const addToQueue = (track: MediaTrack): void => { state.queue.push(track); };
 export const setAutoQueue = (tracks: MediaTrack[]): void => { state.autoQueue = tracks; };
+
 export const toggleExperimental = (val: boolean): void => {
   state.experimental = val;
   localStorage.setItem('bf-player-experimental', String(val));
   window.__bfPlayerEnabled = val;
 };
 
-// Persist state to localStorage
+// ─── Playlist Methods ───────────────────────────────────────────────────────
+
+export const createPlaylist = (name: string, color = '#1a9b78'): Playlist | null => {
+  if (!name?.trim()) return null;
+  const pl: Playlist = {
+    id: 'pl_' + Date.now(),
+    name: name.trim(), color,
+    createdAt: Date.now(), updatedAt: Date.now(),
+    tracks: [],
+  };
+  playlistState.playlists.unshift(pl);
+  _savePlaylists();
+  return pl;
+};
+
+export const deletePlaylist = (id: string): void => {
+  playlistState.playlists = playlistState.playlists.filter(p => p.id !== id);
+  _savePlaylists();
+};
+
+export const renamePlaylist = (id: string, newName: string): void => {
+  const pl = playlistState.playlists.find(p => p.id === id);
+  if (pl && newName?.trim()) { pl.name = newName.trim(); pl.updatedAt = Date.now(); _savePlaylists(); }
+};
+
+export const addTrackToPlaylist = (playlistId: string, track: MediaTrack): boolean => {
+  const pl = playlistState.playlists.find(p => p.id === playlistId);
+  if (!pl) return false;
+  if (pl.tracks.some(t => t.id === track.id)) return false;
+  pl.tracks.push({ ...track, addedAt: Date.now() });
+  pl.updatedAt = Date.now();
+  _savePlaylists();
+  return true;
+};
+
+export const removeTrackFromPlaylist = (playlistId: string, trackId: string): void => {
+  const pl = playlistState.playlists.find(p => p.id === playlistId);
+  if (!pl) return;
+  pl.tracks = pl.tracks.filter(t => t.id !== trackId);
+  pl.updatedAt = Date.now();
+  _savePlaylists();
+};
+
+export const playPlaylist = (playlistId: string, startIndex = 0): void => {
+  const pl = playlistState.playlists.find(p => p.id === playlistId);
+  if (!pl || !pl.tracks.length) return;
+  state.autoQueue = [...pl.tracks];
+  if (state.autoQueue[startIndex]) playTrack(state.autoQueue[startIndex]);
+};
+
+// ─── Watchers ───────────────────────────────────────────────────────────────
+
 watch(() => state.volume, v => {
   if (audioObj) audioObj.volume = v;
   if (ytPlayer) ytPlayer.setVolume(v * 100);
   if (ptPlayer) ptPlayer.setVolume(v);
   localStorage.setItem('bf-player-volume', String(v));
+  _emit('volumeChange', v);
 });
+
+watch(() => state.playing, isPlaying => {
+  _emit(isPlaying ? 'play' : 'pause', state.currentTrack);
+});
+
 watch(() => state.queue, q => { localStorage.setItem('bf-player-queue', JSON.stringify(q)); }, { deep: true });
 watch(() => state.currentTrack, t => { localStorage.setItem('bf-player-current', JSON.stringify(t)); }, { deep: true });
 watch(() => state.history, h => { localStorage.setItem('bf-player-history', JSON.stringify(h)); }, { deep: true });
 watch(() => state.expandedTab, tab => { if (tab === 'queue') scrollToCurrent(); });
 
-export const BFPlayer = {
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+export const BFPlayer: BFPlayerAPI = {
   state,
-  initResize,
-  playTrack,
-  playNext,
-  playPrev,
-  togglePlay,
-  seek,
-  addToQueue,
-  setAutoQueue,
-  toggleExperimental,
-  scrollToCurrent,
+  playlistState,
+  playTrack, playNext, playPrev, togglePlay, seek,
+  addToQueue, setAutoQueue,
+  initResize, scrollToCurrent, toggleExperimental,
+  on, off, registerPlugin,
+  createPlaylist, deletePlaylist, renamePlaylist,
+  addTrackToPlaylist, removeTrackFromPlaylist, playPlaylist,
 };
