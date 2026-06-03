@@ -20,7 +20,12 @@ export const Parser = {
   render(text: string, context: ParseContext | null = null): string {
     if (!text) return '';
     try {
-      const processedText = this.autoEmbed(text);
+      // Fix for nested image URLs like ![](https://imgp.blurt.blog/.../https://...)
+      let processedText = text.replace(/!\[(.*?)\]\((https?:\/\/.*?\/)(https?:\/\/.*?)\)/g, (match, alt, proxy, nested) => {
+        return `![${alt}](${nested})`;
+      });
+      
+      processedText = this.autoEmbed(processedText);
       let html = marked.parse(processedText, { breaks: true, gfm: true }) as string;
 
       html = html.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (_match, type, id, host) =>
@@ -32,11 +37,11 @@ export const Parser = {
       );
 
       return DOMPurify.sanitize(html, {
-        ADD_TAGS: ['iframe', 'button'],
+        ADD_TAGS: ['iframe', 'button', 'img'],
         ADD_ATTR: [
           'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox',
           'data-type', 'data-id', 'data-host', 'data-title', 'data-author',
-          'data-src', 'data-cover', 'data-pending',
+          'data-src', 'data-cover', 'data-pending', 'src', 'alt'
         ],
       });
     } catch (e) {
@@ -89,7 +94,7 @@ export const Parser = {
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
 
-    // PeerTube
+    // PeerTube (including blurt.media)
     const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
     if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
 
@@ -138,6 +143,17 @@ export const Parser = {
         }
       } catch (e) { console.error('Parser: Resolution failed', e); }
     }
+    // Resolution for PeerTube thumbnails (e.g. blurt.media)
+    if (track.type === 'peertube' && !track.cover) {
+      try {
+        const apiUrl = `https://${track.host}/api/v1/videos/${track.id}`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        if (data.thumbnailPath) {
+          track.cover = `https://${track.host}${data.thumbnailPath}`;
+        }
+      } catch (e) { /* ignore */ }
+    }
     return track;
   },
 
@@ -158,6 +174,13 @@ export const Parser = {
         isPending = true;
       } else {
         try { src = atob(id); } catch { src = id; }
+      }
+    } else if (type === 'peertube') {
+      if (cover) {
+        thumb = cover;
+      } else {
+        // Fallback placeholder while resolving
+        thumb = ''; 
       }
     }
 

@@ -48,7 +48,7 @@ const {
   submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
   playlistModal, handlePlaylistConfirm,
   followModal, confirmToggleFollow,
-  openProfile, profileUser, profileTab, openNotification,
+  openProfile, profileUser, profileTab, fetchEarningsHistory, openNotification,
   userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
   forumPagination, loadMorePosts,
@@ -118,6 +118,7 @@ const {
     @go-home="goHome"
     @open-login-modal="openLoginModal"
     @open-notif-modal="openNotifModal"
+    @open-profile="openProfile"
     @logout="logout"
   />
 
@@ -200,7 +201,7 @@ const {
     <template v-if="!loading">
 
       <!-- Tag filter bar -->
-      <div v-if="view==='index' || view==='forum'" class="tag-filter-bar forumline">
+      <div v-if="(view==='index' && currentTagFilter) || (view==='forum')" class="tag-filter-bar forumline">
         <div style="display:flex; align-items:center; gap:10px; width: 100%;">
           <i class="fa-solid fa-filter" style="color:var(--primary); opacity:0.7;"></i>
           <div style="position:relative; flex:1; max-width: 300px;">
@@ -339,11 +340,14 @@ const {
         :fmt-date="fmtDate"
         :time-ago="timeAgo"
         :render-m-d="(s: string, ctx?: unknown) => renderMD(s, ctx as Record<string,unknown> | null)"
+        :player="player"
         @open-profile="openProfile"
         @open-topic="openTopic"
         @open-payout-modal="openPayoutModal"
         @toggle-follow="toggleFollow"
+        @handle-media-action="(type, id, host, action, data) => handleMediaAction(type, id, host, action, data)"
         @update:profile-tab="profileTab = $event"
+        @fetch-earnings="() => fetchEarningsHistory(profileUser.username, ((profileUser as any).earnings.history[(profileUser as any).earnings.history.length-1]?.seq || 0) - 1)"
       />
 
     </template>
@@ -368,6 +372,8 @@ const {
     @open-profile="openProfile"
     @open-topic="(p) => openTopic(p as any)"
     @open-playlist-modal="(track) => { playlistModal.track = track; playlistModal.show = true; }"
+    @submit-vote="(p) => submitVote(p as any)"
+    @open-payout-modal="(p) => openPayoutModal(p as any)"
   />
 
   <!-- ── Modals ─────────────────────────────────────────────────── -->

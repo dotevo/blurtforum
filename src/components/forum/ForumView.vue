@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Forum, Post, AuthUser } from '../../types';
+import VoteButton from '../layout/VoteButton.vue';
 
 const props = defineProps<{
   activeForum: Forum;
@@ -142,72 +143,77 @@ const emit = defineEmits<{
       </div>
  
       <table class="forumline post-list-table">
-        <tr>
-          <td class="thHead" width="30"></td>
-          <td class="thHead col-topic" style="text-align:left;padding-left:10px"><i class="fa-solid fa-comments"></i> {{ t('topic') }}</td>
-          <td class="thHead col-author" width="120" align="center"><i class="fa-solid fa-user"></i> {{ t('author') }}</td>
-          <td class="thHead col-payout" width="100" align="center"><i class="fa-solid fa-coins"></i> {{ t('payout') }}</td>
-          <td class="thHead col-lastpost" width="180" align="center"><i class="fa-solid fa-clock"></i> {{ t('lastPost') }}</td>
-        </tr>
-        <tr v-if="activeForum.posts.length===0">
-          <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
-        </tr>
-        <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
-            class="row-hover" @click="emit('openTopic', post)"
-            :style="{ opacity: post.isMuted ? 0.4 : 1, backgroundColor: post.isMuted ? 'var(--bg-r3)' : 'inherit' }">
-          <td :class="i%2===0?'row1':'row2'" align="center" width="40">
-            <div class="vote-btn" :class="{active: hasVoted(post)}" @click.stop="emit('submitVote', post)">
-              <i class="fa-solid fa-caret-up"></i>
-              <div style="font-size: 10px; font-weight: bold; margin-top: -2px;">{{ post.vote_count }}</div>
-            </div>
-          </td>
-          <td :class="i%2===0?'row1':'row2'" class="col-topic">
-            <span v-if="post.isMuted" style="margin-right:5px; color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-            <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
-            <span v-else style="display:inline-block; width:8px; height:8px; background:var(--border-main); border-radius:50%; margin-right:8px;" title="Read"></span>
-            
-            <!-- Media icons (Moved before title) -->
-            <template v-if="player.state.enabled && post.media">
-              <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'play', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('playNow') || 'Play Now'">
-                <i :class="post.media.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
-              </span>
-              <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'queue', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('addToQueue') || 'Add to Queue'">
-                <i class="fa-solid fa-plus"></i>
-              </span>
-            </template>
+        <thead>
+          <tr>
+            <td class="thHead" width="30"></td>
+            <td class="thHead col-topic" style="text-align:left;padding-left:10px"><i class="fa-solid fa-comments"></i> {{ t('topic') }}</td>
+            <td class="thHead col-author" width="120" align="center"><i class="fa-solid fa-user"></i> {{ t('author') }}</td>
+            <td class="thHead col-payout" width="100" align="center"><i class="fa-solid fa-coins"></i> {{ t('payout') }}</td>
+            <td class="thHead col-lastpost" width="180" align="center"><i class="fa-solid fa-clock"></i> {{ t('lastPost') }}</td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="activeForum.posts.length===0">
+            <td colspan="5" class="row1" style="text-align:center;padding:30px; font-weight: bold;">{{ t('noPosts') }}</td>
+          </tr>
+          <tr v-for="(post,i) in activeForum.posts.slice(0, forumPagination.visibleCount)" :key="post.permlink"
+              class="row-hover" @click="emit('openTopic', post)"
+              :style="{ opacity: post.isMuted ? 0.4 : 1, backgroundColor: post.isMuted ? 'var(--bg-r3)' : 'inherit' }">
+            <td :class="i%2===0?'row1':'row2'" align="center" width="40">
+              <VoteButton 
+                :voted="hasVoted(post)" 
+                :count="post.vote_count" 
+                @vote="emit('submitVote', post)" 
+              />
+            </td>
+            <td :class="i%2===0?'row1':'row2'" class="col-topic">
+              <span v-if="post.isMuted" style="margin-right:5px; color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
+              <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
+              <span v-else style="display:inline-block; width:8px; height:8px; background:var(--border-main); border-radius:50%; margin-right:8px;" title="Read"></span>
+              
+              <!-- Media icons (Moved before title) -->
+              <template v-if="player.state.enabled && post.media">
+                <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'play', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('playNow') || 'Play Now'">
+                  <i :class="post.media.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
+                </span>
+                <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'queue', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('addToQueue') || 'Add to Queue'">
+                  <i class="fa-solid fa-plus"></i>
+                </span>
+              </template>
 
-            <a href="#" @click.stop.prevent="emit('openTopic', post)" 
-               :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
-            <br>
-            <span class="gs">
-              {{ fmtDate(post.created) }}
-              <span v-if="post.tags && post.tags.length" style="opacity: 0.7;"> • #{{ post.tags.join(' #') }}</span>
-            </span>
-          </td>
-          <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
-            <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-              <a href="#" @click.stop.prevent="emit('openProfile', post.author)">@{{ post.author }}</a>
-              <span v-if="post.isFollowing" class="gs" style="color:var(--accent); font-size:9px;" :title="t('followed')"><i class="fa-solid fa-user-check"></i></span>
-            </div>
-          </td>
-          <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
-            <span class="badge payout-link" :class="post.isPaid?'badge-green':'badge-blue'" @click.stop="emit('openPayoutModal', post)">
-              {{ (post.payout || 0).toFixed(2) }} B
-            </span>
-          </td>
-          <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
-            <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br>
-            <a href="#" @click.stop.prevent="emit('openProfile', post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
-            <span class="gs" style="font-size: 10px; opacity: 0.8;">💬 {{ post.replyCount }} {{ t('replies') }}</span>
-          </td>
-        </tr>
+              <a href="#" @click.stop.prevent="emit('openTopic', post)" 
+                 :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
+              <br>
+              <span class="gs">
+                {{ fmtDate(post.created) }}
+                <span v-if="post.tags && post.tags.length" style="opacity: 0.7;"> • #{{ post.tags.join(' #') }}</span>
+              </span>
+            </td>
+            <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
+              <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                <a href="#" @click.stop.prevent="emit('openProfile', post.author)">@{{ post.author }}</a>
+                <span v-if="post.isFollowing" class="gs" style="color:var(--accent); font-size:9px;" :title="t('followed')"><i class="fa-solid fa-user-check"></i></span>
+              </div>
+            </td>
+            <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
+              <span class="badge payout-link" :class="post.isPaid?'badge-green':'badge-blue'" @click.stop="emit('openPayoutModal', post)">
+                {{ (post.payout || 0).toFixed(2) }} B
+              </span>
+            </td>
+            <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
+              <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br>
+              <a href="#" @click.stop.prevent="emit('openProfile', post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
+              <span class="gs" style="font-size: 10px; opacity: 0.8;">💬 {{ post.replyCount }} {{ t('replies') }}</span>
+            </td>
+          </tr>
+        </tbody>
       </table>
 
       <div  style="display: flex; justify-content: center; gap: 20px; margin-top: 20px; align-items: center;">
-        <button class="btn btn-primary" @click="emit('prevPage')" :disabled="loading || !activeForum.pageHistory.length">
+        <button class="btn btn-primary" v-if="activeForum.pageHistory.length" @click="emit('prevPage')" :disabled="loading">
           « {{ t('prev') }}
         </button>
-        <button class="btn btn-ghost" v-if="!activeForum.pageHistory.length && activeForum.start_author" @click="emit('openForum', activeForum)">
+        <button class="btn btn-ghost" v-if="activeForum.pageHistory.length === 0 && activeForum.start_author" @click="emit('openForum', activeForum)">
           «« {{ t('firstPage') || 'First Page' }}
         </button>
         <span class="gs" style="font-weight: bold;">{{ t('page') }} {{ activeForum.pageHistory.length + 1 }}</span>

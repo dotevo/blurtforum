@@ -23,28 +23,30 @@ const emit = defineEmits<{
 <!-- GLOBAL ACTIVITY FEED -->
 <div v-if="auth.user && globalActivity.length > 0" style="margin: 0 15px 15px;">
   <table class="forumline activity-table">
-    <tr>
-      <td class="catHead" style="padding: 6px 12px;">
-        <div class="activity-header-container">
-          <span class="activity-label"><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <!-- Activity Tabs -->
-            <div style="display:flex; gap:2px; background:rgba(0,0,0,0.05); padding:2px; border-radius:4px; margin-right:5px;">
-              <button class="activity-tab-btn" :class="{ active: activityTab === 'comments' }" @click="emit('update:activityTab', 'comments')">
-                {{ t('comments') }} {{ globalActivity.filter(a => !a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => !a.is_post && !a.isRead).length + ')' : '' }}
-              </button>
-              <button class="activity-tab-btn" :class="{ active: activityTab === 'posts' }" @click="emit('update:activityTab', 'posts')">
-                {{ t('posts') }} {{ globalActivity.filter(a => a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => a.is_post && !a.isRead).length + ')' : '' }}
+    <thead>
+      <tr>
+        <td class="catHead" style="padding: 6px 12px;">
+          <div class="activity-header-container">
+            <span class="activity-label"><i class="fa-solid fa-rss"></i> {{ t('globalActivity') }}</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <!-- Activity Tabs -->
+              <div style="display:flex; gap:2px; background:rgba(0,0,0,0.05); padding:2px; border-radius:4px; margin-right:5px;">
+                <button class="activity-tab-btn" :class="{ active: activityTab === 'comments' }" @click="emit('update:activityTab', 'comments')">
+                  {{ t('comments') }} {{ globalActivity.filter(a => !a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => !a.is_post && !a.isRead).length + ')' : '' }}
+                </button>
+                <button class="activity-tab-btn" :class="{ active: activityTab === 'posts' }" @click="emit('update:activityTab', 'posts')">
+                  {{ t('posts') }} {{ globalActivity.filter(a => a.is_post && !a.isRead).length ? '(' + globalActivity.filter(a => a.is_post && !a.isRead).length + ')' : '' }}
+                </button>
+              </div>
+              <button class="btn btn-sm btn-ghost" @click="emit('update:activityExpanded', !activityExpanded)" style="padding: 2px 8px; font-size: 10px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
+                {{ activityExpanded ? t('hide') : t('show') + ' (' + globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).length + ')' }}
               </button>
             </div>
-            <button class="btn btn-sm btn-ghost" @click="emit('update:activityExpanded', !activityExpanded)" style="padding: 2px 8px; font-size: 10px; color: var(--primary); border-color: var(--primary); background: var(--bg-white);">
-              {{ activityExpanded ? t('hide') : t('show') + ' (' + globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).length + ')' }}
-            </button>
           </div>
-        </div>
-      </td>
-    </tr>
-    <template v-if="activityExpanded">
+        </td>
+      </tr>
+    </thead>
+    <tbody v-if="activityExpanded">
       <tr v-for="act in globalActivity.filter(a => activityTab === 'posts' ? a.is_post : !a.is_post).slice(0, activityFullList ? 20 : 3)" :key="act.id">
         <td class="row1" style="padding: 10px 15px; border-bottom: 1px solid var(--bg-white);">
           <a href="#" @click.prevent="emit('openActivity', act)"
@@ -74,7 +76,7 @@ const emit = defineEmits<{
           </a>
         </td>
       </tr>
-    </template>
+    </tbody>
   </table>
 </div>
 </template>

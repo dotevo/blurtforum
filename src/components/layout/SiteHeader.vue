@@ -14,6 +14,7 @@ const emit = defineEmits<{
   goHome: [];
   openLoginModal: [];
   openNotifModal: [];
+  openProfile: [username: string];
   logout: [];
 }>();
 </script>
@@ -46,7 +47,7 @@ const emit = defineEmits<{
           <span v-if="hasNewNotif" style="position:absolute; top:-2px; right:-2px; width:8px; height:8px; background:#ff4400; border-radius:50%; border:1px solid #fff;"></span>
         </button>
         <span style="margin-right: 5px;">
-          {{ t('loggedInAs') }}: <b>@{{ auth.user.username }}</b>
+          {{ t('loggedInAs') }}: <b class="interactive-username" style="cursor: pointer; color: var(--primary);" @click="emit('openProfile', auth.user!.username)">@{{ auth.user.username }}</b>
           <span class="gs" style="margin-left: 5px;">(VP: {{ auth.user.vp }}%)</span>
         </span>
         <button class="btn-hdr" @click="emit('logout')"><i class="fa-solid fa-right-from-bracket"></i> {{ t('logout') }}</button>

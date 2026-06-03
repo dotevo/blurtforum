@@ -7,6 +7,7 @@ import type { MediaTrack } from '../types';
 import { Parser } from './parser';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
+export type PlayMode = 'sequential' | 'shuffle' | 'repeat-all' | 'repeat-one';
 
 export interface PlayerState {
   enabled: boolean;
@@ -26,8 +27,8 @@ export interface PlayerState {
   volume: number;
   experimental: boolean;
   isAutoStarting: boolean;
+  playMode: PlayMode;
 }
-
 export interface Playlist {
   id: string;
   name: string;
@@ -55,7 +56,7 @@ export interface BFPlayerAPI {
   state: PlayerState;
   playlistState: PlaylistState;
   playTrack: (track: MediaTrack, isManual?: boolean, manualIdx?: number, fromHistory?: boolean) => Promise<void>;
-  playNext: () => void;
+  playNext: (isAuto?: boolean) => void;
   playPrev: () => void;
   togglePlay: () => void;
   seek: (pct: number) => void;
@@ -64,6 +65,7 @@ export interface BFPlayerAPI {
   initResize: (e: MouseEvent | TouchEvent) => void;
   scrollToCurrent: () => void;
   toggleExperimental: (val: boolean) => void;
+  togglePlayMode: () => void;
   on: (event: PlayerEvent, fn: (data: unknown) => void) => void;
   off: (event: PlayerEvent, fn: (data: unknown) => void) => void;
   registerPlugin: (plugin: PlayerPlugin) => void;
@@ -131,7 +133,8 @@ const state = reactive<PlayerState>({
   duration: 0,
   volume: parseFloat(localStorage.getItem('bf-player-volume') || '0.7'),
   experimental: localStorage.getItem('bf-player-experimental') === 'true',
-  isAutoStarting: false
+  isAutoStarting: false,
+  playMode: (localStorage.getItem('bf-player-mode') as PlayMode) || 'sequential'
 });
 
 const playlistState = reactive<PlaylistState>({ playlists: [] });
@@ -230,7 +233,7 @@ const handleError = (msg: string): void => {
   if (errorTimer) clearTimeout(errorTimer);
   errorTimer = setTimeout(() => {
     if (trackWithError.title?.startsWith('⚠️ ERROR:')) trackWithError.title = oldTitle;
-    if (state.currentTrack === trackWithError) playNext();
+    if (state.currentTrack === trackWithError) playNext(true);
     errorTimer = null;
   }, 5000);
 };
@@ -273,7 +276,7 @@ const initAudio = (): void => {
       state.progress = (audioObj.currentTime / audioObj.duration) * 100;
     }
   });
-  audioObj.addEventListener('ended', () => { if (isAudioTrack()) { _emit('ended', state.currentTrack); playNext(); } });
+  audioObj.addEventListener('ended', () => { if (isAudioTrack()) { _emit('ended', state.currentTrack); playNext(true); } });
   audioObj.addEventListener('error', (e) => {
     if (isAudioTrack()) { console.error('BFPlayer Audio error:', e); handleError('Audio file error or broken link'); }
   });
@@ -312,7 +315,7 @@ const initYT = async (): Promise<void> => {
         } else if (event.data === YT.PlayerState.ENDED) {
           state.playing = false; stopYTProgress();
           _emit('ended', state.currentTrack);
-          playNext();
+          playNext(true);
         }
       },
       onError: (e: unknown) => { console.error('BFPlayer YT error:', e); handleError('YouTube video unavailable or blocked'); },
@@ -338,7 +341,7 @@ const initPT = (): void => {
             state.progress = (stats.position / stats.duration) * 100;
             state.duration = stats.duration;
             state.volume = stats.volume;
-            if (stats.playbackState === 'ended') playNext();
+            if (stats.playbackState === 'ended') playNext(true);
           }
        });
 
@@ -384,6 +387,13 @@ export const scrollToCurrent = (): void => {
 
 export const playTrack = async (track: MediaTrack, isManual = false, manualIdx = -1, fromHistory = false): Promise<void> => {
   if (!state.enabled) return;
+  
+  // Prevent duplicate concurrent loads of the same track
+  if (state.loading && state.currentTrack?.id === track.id) return;
+
+  // Singleton: stop everything else before starting new track
+  stopAll();
+
   if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
     const originalId = track.id;
     const resolved = await Parser.resolveMedia(track);
@@ -397,26 +407,31 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   // Save to history if we were playing something AND it's a different track
   if (state.currentTrack && state.currentTrack.id !== track.id && !fromHistory) {
     const historyEntry = { ...state.currentTrack };
+    // Remove if already in history to avoid duplicates and move to end
     state.history = state.history.filter(t => t.id !== historyEntry.id);
-    state.history.push(historyEntry); // Add to end (bottom of history section)                                                                                                                                                                                                                                                                                                                                                │
+    state.history.push(historyEntry);
     if (state.history.length > 20) state.history.shift();
   }
 
-  stopAll();
   state.currentTrack = track;
   state.loading = true;
   state.minimized = false;
   scrollToCurrent();
   _emit('trackChange', track);
 
-  if (isManual && manualIdx !== -1) state.queue.splice(manualIdx, 1);
+  if (isManual && manualIdx !== -1) {
+    state.queue.splice(manualIdx, 1);
+  }
 
   if (track.type === 'audio') {
     initAudio();
     try {
       if (!track.src && track.id) { try { track.src = atob(track.id); } catch { track.src = track.id; } }
       audioObj!.src = track.src!;
-      audioObj!.play().catch(e => console.warn('Play error:', e));
+      audioObj!.play().catch(e => {
+        console.warn('Play error, retrying once:', e);
+        setTimeout(() => audioObj?.play(), 100);
+      });
     } catch (e) { console.error('Failed to load audio:', e); handleError('Invalid audio link'); }
   } else if (track.type === 'youtube') {
     if (!ytPlayer) await initYT();
@@ -428,30 +443,73 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   }
 };
 
-export const playNext = (): void => {
+export const playNext = (isAuto = false): void => {
   _emit('next', state.currentTrack);
+  
+  // Handle repeat 'repeat-one'
+  if (isAuto && state.playMode === 'repeat-one' && state.currentTrack) {
+    playTrack(state.currentTrack);
+    return;
+  }
+
   if (state.queue.length > 0) {
     playTrack(state.queue.shift()!);
-  } else if (state.autoQueue.length > 0) {
-    if (state.currentTrack && state.autoQueue[0].id === state.currentTrack.id) {
-      const current = state.autoQueue.shift()!;
-      state.autoQueue.push(current);
+    return;
+  } 
+  
+  if (state.autoQueue.length > 0) {
+    let nextTrack: MediaTrack | null = null;
+    
+    if (state.playMode === 'shuffle') {
+      const remaining = state.autoQueue.filter(t => t.id !== state.currentTrack?.id);
+      if (remaining.length > 0) {
+        nextTrack = remaining[Math.floor(Math.random() * remaining.length)];
+      }
+    } else {
+      const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.id === state.currentTrack?.id) : -1;
+      if (currentIndex !== -1 && currentIndex < state.autoQueue.length - 1) {
+        nextTrack = state.autoQueue[currentIndex + 1];
+      } else if (state.playMode === 'repeat-all' || (currentIndex === -1 && state.autoQueue.length > 0)) {
+        nextTrack = state.autoQueue[0];
+      }
     }
-    playTrack(state.autoQueue[0]);
-  } else {
-    state.minimized = true; state.currentTrack = null; stopAll();
+
+    if (nextTrack) {
+      playTrack(nextTrack);
+      return;
+    }
   }
+
+  // End of queue/autoplay
+  state.minimized = true;
+  state.playing = false;
+  if (audioObj) audioObj.pause();
+  if (ytPlayer) ytPlayer.pauseVideo();
+  if (ptPlayer) ptPlayer.pause();
 };
 
 export const playPrev = (): void => {
   _emit('prev', state.currentTrack);
+  
   if (state.history.length > 0) {
-    playTrack(state.history.pop()!, false, -1, true);
+    // Current track goes back to queue (or just ignore it)
+    const prev = state.history.pop()!;
+    playTrack(prev, false, -1, true);
   } else if (state.autoQueue.length > 0) {
-    const last = state.autoQueue.pop()!;
-    state.autoQueue.unshift(last);
-    playTrack(state.autoQueue[0]);
+    const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.id === state.currentTrack?.id) : -1;
+    if (currentIndex > 0) {
+      playTrack(state.autoQueue[currentIndex - 1]);
+    } else if (state.playMode === 'repeat-all') {
+      playTrack(state.autoQueue[state.autoQueue.length - 1]);
+    }
   }
+};
+
+export const togglePlayMode = (): void => {
+  const modes: PlayMode[] = ['sequential', 'shuffle', 'repeat-all', 'repeat-one'];
+  const currentIdx = modes.indexOf(state.playMode);
+  state.playMode = modes[(currentIdx + 1) % modes.length];
+  localStorage.setItem('bf-player-mode', state.playMode);
 };
 
 export const togglePlay = (): void => {
@@ -580,6 +638,7 @@ export const BFPlayer: BFPlayerAPI = {
   playTrack, playNext, playPrev, togglePlay, seek,
   addToQueue, setAutoQueue,
   initResize, scrollToCurrent, toggleExperimental,
+  togglePlayMode,
   on, off, registerPlugin,
   createPlaylist, deletePlaylist, renamePlaylist,
   addTrackToPlaylist, removeTrackFromPlaylist, playPlaylist,

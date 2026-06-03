@@ -7,6 +7,7 @@ import {
 } from 'vue';
 import CryptoJS from 'crypto-js';
 import { BFUtils } from '../modules/utils';
+import * as Earnings from '../modules/earnings';
 import { AuthService } from '../modules/auth';
 import { BFCommunity } from '../modules/community';
 import { BFPlayer } from '../modules/player';
@@ -177,9 +178,67 @@ export function useApp() {
     data: Record<string, unknown> | null;
     posts: Post[];
     comments: Post[];
+    earnings: {
+      rawHistory: any[];
+      history: any[];
+      stats: {
+        author: number;
+        curation: number;
+        benefactor: number;
+        claimed: number;
+        total: number;
+        avgPerDay: number;
+        range: string;
+      };
+      chartData: {
+        daily: Array<{ date: string; author: number, curation: number, benefactor: number, total: number }>;
+        distribution: { author: number; curation: number; benefactor: number };
+      };
+      loading: boolean;
+    };
     loading: boolean;
-  }>({ username: '', data: null, posts: [], comments: [], loading: false });
+  }>({
+    username: '',
+    data: null,
+    posts: [],
+    comments: [],
+    earnings: {
+      rawHistory: [],
+      history: [],
+      stats: { author: 0, curation: 0, benefactor: 0, claimed: 0, total: 0, avgPerDay: 0, range: '' },
+      chartData: { daily: [], distribution: { author: 0, curation: 0, benefactor: 0 } },
+      loading: false
+    },
+    loading: false
+  });
   const profileTab = ref('posts');
+
+  const _fetchEarningsHistory = async (username: string, start = -1, limit = 500): Promise<void> => {
+    profileUser.earnings.loading = true;
+    try {
+      const history = await client.call('condenser_api', 'get_account_history', [username, start, limit] as any) as Array<[number, any]>;
+      if (!Array.isArray(history)) return;
+      
+      const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
+      
+      if (start === -1) {
+        profileUser.earnings.rawHistory = history;
+      } else {
+        // Avoid duplicates if any, though sequence numbers should be unique
+        const existingIds = new Set(profileUser.earnings.rawHistory.map((h: any) => h[0]));
+        const newItems = history.filter(h => !existingIds.has(h[0]));
+        profileUser.earnings.rawHistory = [...profileUser.earnings.rawHistory, ...newItems];
+      }
+
+      const { ops, stats, daily } = Earnings.processHistory(profileUser.earnings.rawHistory, ratio);
+
+      profileUser.earnings.history = ops.reverse(); // Newest first for table
+      profileUser.earnings.chartData.daily = daily;
+      profileUser.earnings.stats = stats;
+      profileUser.earnings.chartData.distribution = { author: stats.author, curation: stats.curation, benefactor: stats.benefactor };
+    } catch (e) { console.error('Earnings fetch error:', e); }
+    finally { profileUser.earnings.loading = false; }
+  };
 
   const pinModal = reactive({ show: false, mode: 'setup', value: '', error: '', tempUser: null as null | { username: string; key: string; acc: Record<string, unknown> }, loading: false });
   const editModal = reactive({ show: false, loading: false, isPost: false, author: '', permlink: '', title: '', body: '', error: '', success: '', target: null as Post | null });
@@ -312,10 +371,12 @@ export function useApp() {
 
   const handleMediaAction = async (type: string, id: string, host: string, action: string, trackData: Partial<MediaTrack> = {}): Promise<void> => {
     let media: MediaTrack = { type: type as MediaTrack['type'], id, host, ...trackData };
-    if (!media.src && type === 'audio' && id && id.length < 30) {
+    
+    // Always attempt to resolve to get full SRC and COVER (thumbnails)
+    if (!media.src || (type === 'peertube' && !media.cover)) {
       media = await Parser.resolveMedia(media);
-      if (!media.src) { showStatus('Error', 'Could not resolve media link', 'error'); return; }
     }
+    
     if (action === 'play') { BFPlayer.playTrack(media); }
     else if (action === 'queue') { BFPlayer.addToQueue(media); showStatus(t('addedToQueue'), media.title || '', 'success'); }
     else if (action === 'embed') {
@@ -590,10 +651,6 @@ export function useApp() {
       if (post.isMuted && !canMute.value) return;
       if (targetForum) {
         if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) targetForum.posts.push(post);
-        if (activeForum.value?.id === targetForum.id) {
-          const mediaTracks = targetForum.posts.filter(p => p.media).map(p => ({ ...p.media!, title: p.title, author: p.author, permlink: p.permlink }));
-          BFPlayer.setAutoQueue(mediaTracks);
-        }
         return;
       }
       let assignedCount = 0;
@@ -688,6 +745,7 @@ export function useApp() {
         params.set('start_permlink', activeForum.value.start_permlink);
       }
     } else if (view.value === 'topic' && activeTopic.value) {
+      if (activeForum.value) params.set('forum', activeForum.value.id);
       params.set('author', activeTopic.value.author);
       params.set('permlink', activeTopic.value.permlink);
     } else if (view.value === 'profile' && profileUser.username) {
@@ -779,10 +837,19 @@ export function useApp() {
           Object.assign(profileUser.data, { about: p.about || '', website: p.website || '', location: p.location || '', displayName: p.name || acc.name });
         } catch { /* ignore */ }
       }
-      const history = await client.condenser.getDiscussions('blog', { tag: username, limit: 20 });
-      profileUser.posts = history.filter(p => p.author === username).map(normalizePost);
+      const posts = await client.call('bridge', 'get_account_posts', { account: username, sort: 'posts', limit: 20 }) as RawPost[];
+      if (posts) profileUser.posts = posts.map(normalizePost);
+      
+      // Resolve media for profile posts (thumbnails, etc)
+      profileUser.posts.filter(p => p.media).forEach(async (p) => {
+        if (p.media) p.media = await Parser.resolveMedia(p.media);
+      });
+
       const comments = await client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 }) as RawPost[];
       if (comments) profileUser.comments = comments.map(normalizePost);
+
+      // Fetch earnings
+      _fetchEarningsHistory(username);
     } catch (err) { console.error('Profile error:', err); }
     profileUser.loading = false;
   };
@@ -1005,9 +1072,21 @@ export function useApp() {
       if (pendingRef) delete pendingRef._pending;
     }
 
-    if (lastContent && activeTopic.value?.author === lastContent.author && activeTopic.value?.permlink === lastContent.permlink) {
-      activeTopic.value = { ...activeTopic.value, ...normalizePost(lastContent) };
-      markTopicAsRead(activeTopic.value);
+    if (lastContent) {
+      const normalized = normalizePost(lastContent);
+      if (activeTopic.value?.author === normalized.author && activeTopic.value?.permlink === normalized.permlink) {
+        activeTopic.value = { ...activeTopic.value, ...normalized };
+        markTopicAsRead(activeTopic.value);
+      }
+      // Also update in profileUser.posts if we are in profile view
+      if (view.value === 'profile' && profileUser.username === normalized.author) {
+        const idx = profileUser.posts.findIndex(p => p.permlink === normalized.permlink);
+        if (idx >= 0) {
+          profileUser.posts[idx] = normalized;
+          // Trigger media resolution if needed
+          if (normalized.media) Parser.resolveMedia(normalized.media).then(resolved => profileUser.posts[idx].media = resolved);
+        }
+      }
     } else if (activeTopic.value) {
       try {
         const fresh = await client.condenser.getContent(activeTopic.value.author, activeTopic.value.permlink);
@@ -1147,7 +1226,7 @@ export function useApp() {
       try {
         const [accs, fund, props] = await Promise.all([
           client.condenser.getAccounts([auth.user.username]),
-          client.call('condenser_api', 'get_reward_fund', { name: 'post' }),
+          client.call('condenser_api', 'get_reward_fund', ['post'] as any),
           client.condenser.getDynamicGlobalProperties(),
         ]);
         if (accs?.[0]) estCache.acc = accs[0] as Record<string, unknown>;
@@ -1227,19 +1306,50 @@ export function useApp() {
     } catch (err) { console.error('Vote error:', err); }
   };
 
-  const submitVote = async (post: Post): Promise<void> => {
+  const submitVote = async (post: Post | { author: string; permlink: string }): Promise<void> => {
     if (!auth.user) { openLoginModal(); return; }
-    if (hasVoted(post)) {
+    
+    // If it's a partial post from player, we might need to normalize it or handle differently
+    // For voting, we primarily need author and permlink.
+    // However, hasVoted() needs active_votes.
+    
+    let fullPost: Post;
+    if (!('active_votes' in post)) {
+      // Partial post, try to find in current views or fetch
+      const found = [
+        activeTopic.value,
+        ...replies.value,
+        ...(activeForum.value?.posts || []),
+        ...profileUser.posts
+      ].find(p => p && p.author === post.author && p.permlink === post.permlink);
+      
+      if (found) {
+        fullPost = found;
+      } else {
+        // Fallback: fetch it
+        try {
+          const raw = await client.condenser.getContent(post.author, post.permlink);
+          fullPost = normalizePost(raw);
+        } catch (e) {
+          showStatus('Error', 'Could not fetch post for voting', 'error');
+          return;
+        }
+      }
+    } else {
+      fullPost = post as Post;
+    }
+
+    if (hasVoted(fullPost)) {
       if (!confirm(t('confirmUnvote'))) return;
-      const op = ['vote', { voter: auth.user.username, author: post.author, permlink: post.permlink, weight: 0 }];
+      const op = ['vote', { voter: auth.user.username, author: fullPost.author, permlink: fullPost.permlink, weight: 0 }];
       try {
         await broadcast([op]);
         const voter = auth.user.username;
-        waitAndReload(view.value === 'topic', post.author, post.permlink, (c) => !(c.active_votes || []).some(v => v.voter === voter && v.percent > 0), t('syncingWithBlockchain'));
+        waitAndReload(view.value === 'topic' || view.value === 'profile', fullPost.author, fullPost.permlink, (c) => !(c.active_votes || []).some(v => v.voter === voter && v.percent > 0), t('syncingWithBlockchain'));
       } catch (err) { console.error('Unvote error:', err); }
       return;
     }
-    openVoteModal(post);
+    openVoteModal(fullPost);
   };
 
   const submitSupportComment = async (): Promise<void> => {
@@ -1284,13 +1394,32 @@ export function useApp() {
     structureForm.loading = false;
   };
 
-  const openPayoutModal = async (post: Post): Promise<void> => {
-    const dateObj = new Date((post.created.endsWith('Z') ? post.created : post.created + 'Z'));
+  const openPayoutModal = async (post: Post | { author: string; permlink: string }): Promise<void> => {
+    let fullPost: Post;
+    if (!('created' in post) || !post.created) {
+      loading.value = true;
+      try {
+        const raw = await client.condenser.getContent(post.author, post.permlink);
+        fullPost = normalizePost(raw);
+      } catch (e) {
+        showStatus('Error', 'Could not fetch post details', 'error');
+        loading.value = false;
+        return;
+      }
+      loading.value = false;
+    } else {
+      fullPost = post as Post;
+    }
+
+    const dateObj = new Date((fullPost.created.endsWith('Z') ? fullPost.created : fullPost.created + 'Z'));
     dateObj.setDate(dateObj.getDate() + 7);
-    const sortedVotes = [...(post.active_votes || [])].sort((a, b) => parseFloat(String(b.rshares || 0)) - parseFloat(String(a.rshares || 0)));
-    payoutModal.post = { ...post, active_votes: sortedVotes, payoutDate: dateObj.toLocaleString() };
+    const sortedVotes = [...(fullPost.active_votes || [])].sort((a, b) => parseFloat(String(b.rshares || 0)) - parseFloat(String(a.rshares || 0)));
+    payoutModal.post = { ...fullPost, active_votes: sortedVotes, payoutDate: dateObj.toLocaleString() };
     payoutModal.beneficiaries = []; payoutModal.show = true;
-    try { const fullPost = await client.condenser.getContent(post.author, post.permlink); if (fullPost?.beneficiaries) payoutModal.beneficiaries = fullPost.beneficiaries as Beneficiary[]; } catch { /* ignore */ }
+    if (fullPost.beneficiaries?.length) payoutModal.beneficiaries = fullPost.beneficiaries as Beneficiary[];
+    else {
+      try { const fresh = await client.condenser.getContent(fullPost.author, fullPost.permlink); if (fresh?.beneficiaries) payoutModal.beneficiaries = fresh.beneficiaries as Beneficiary[]; } catch { /* ignore */ }
+    }
   };
 
   const getNotifIcon = (type: string): string => {
@@ -1483,6 +1612,11 @@ export function useApp() {
       };
       const ops = [['claim_reward_balance', { account: auth.user.username, reward_blurt: fmtAsset(acc.reward_blurt_balance as string, 'BLURT'), reward_vests: fmtAsset(acc.reward_vesting_balance as string, 'VESTS') }]];
       await broadcast(ops);
+      if (auth.user) {
+        auth.user.hasRewards = false;
+        auth.user.rewardBlurt = '0.000 BLURT';
+        auth.user.rewardVesting = '0.000000 VESTS';
+      }
       await refreshUser();
       showStatus(t('claimRewards'), t('claimSuccess'), 'success');
     } catch (err) { console.error('Claim rewards error:', err); showStatus(t('claimRewards'), (t('claimError') || 'Error claiming rewards: ') + ((err as Error).message || err), 'error'); }
@@ -1554,6 +1688,14 @@ export function useApp() {
       }
     } else if (requestedView === 'topic' && requestedAuthor && requestedPermlink) {
       if (view.value === 'topic' && activeTopic.value?.author === requestedAuthor && activeTopic.value?.permlink === requestedPermlink) return;
+      
+      // Restore forum context if present
+      if (requestedForumId) {
+        let f: Forum | undefined = VIRTUAL_FORUMS.find(vf => vf.id === requestedForumId);
+        if (!f) { for (const cat of forumStructure.value) { f = cat.forums.find(forum => forum.id === requestedForumId); if (f) break; } }
+        if (f) activeForum.value = f;
+      }
+
       client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
         if (content?.author) { activeTopic.value = { ...normalizePost(content), beneficiaries: (content.beneficiaries || []) as Beneficiary[] }; view.value = 'topic'; loadReplies(content.author, content.permlink); }
       });
@@ -1695,7 +1837,6 @@ export function useApp() {
         const session = JSON.parse(saved) as { username: string; type: string; key: string };
         if (session.type === 'whalevault') {
           auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
-          loadUserCommunities(session.username); loadFollowingList(session.username);
           client.condenser.getAccounts([session.username]).then(accounts => {
             if (accounts?.[0]) {
               const acc = accounts[0] as Record<string, unknown>;
@@ -1713,7 +1854,6 @@ export function useApp() {
         }
       } catch { /* ignore */ }
     } else {
-      // One-time legacy migration
       const legacy = localStorage.getItem('bf-session');
       if (legacy) {
         try { const session = JSON.parse(legacy) as { username?: string; type?: string }; if (session.username && session.type === 'whalevault') { localStorage.setItem('blurtforum_session', legacy); location.reload(); } } catch { /* ignore */ }
@@ -1773,7 +1913,7 @@ export function useApp() {
     nextPage, prevPage,
     submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
     playlistModal, handlePlaylistConfirm,
-    followModal, confirmToggleFollow,    openProfile, profileUser, profileTab, openNotification,
+    followModal, confirmToggleFollow,    openProfile, profileUser, profileTab, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
     userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
@@ -1803,6 +1943,6 @@ export function useApp() {
     player,
     handlePlayerSeek,
     vw,
-    client,
+    client: forumClient,
   };
 }

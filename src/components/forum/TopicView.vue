@@ -293,8 +293,11 @@ const emit = defineEmits<{
                             style="width:auto; margin:0; padding:2px 6px !important;">
                       <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                     </button>
-                    <span class="vote-btn" :class="{active: hasVoted(r)}" @click="emit('submitVote', r)"><i class="fa-solid fa-caret-up"></i></span>
-                    <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
+                    <VoteButton 
+                      :voted="hasVoted(r)" 
+                      :count="r.vote_count" 
+                      @vote="emit('submitVote', r)" 
+                    />
                   </div>
 
                   <!-- Mobile Header Stats (payout/votes) -->
@@ -394,3 +397,4 @@ const emit = defineEmits<{
     <!-- /topic -->
 
 </template>
+late>
