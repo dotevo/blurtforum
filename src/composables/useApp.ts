@@ -8,10 +8,14 @@ import {
 import CryptoJS from 'crypto-js';
 import { BFUtils } from '../modules/utils';
 import * as Earnings from '../modules/earnings';
+import { Blockchain } from '../modules/blockchain';
+import { useVote } from './useVote';
+import { BlurtPlayerPlugin } from '../modules/blurt-player-plugin';
 import { AuthService } from '../modules/auth';
 import { BFCommunity } from '../modules/community';
 import { BFPlayer } from '../modules/player';
 import { Parser } from '../modules/parser';
+
 import { TR } from '../modules/translations';
 import '../modules/whalevault';
 import type {
@@ -339,53 +343,7 @@ export function useApp() {
         voted: hasVoted(context)
       };
     }
-    const html = Parser.render(text, ctx);
-    if (html.includes('is-resolving')) {
-      setTimeout(() => {
-        const pending = document.querySelectorAll<HTMLElement>('.media-placeholder.is-resolving');
-        pending.forEach(async (el) => {
-          const id = el.getAttribute('data-id')!;
-          const type = el.getAttribute('data-type')! as MediaTrack['type'];
-          const resolved = await Parser.resolveMedia({ type, id });
-          if (resolved?.src) {
-            el.classList.remove('is-resolving');
-            if (resolved.cover) el.style.backgroundImage = `url(${resolved.cover})`;
-            el.setAttribute('data-id', resolved.id);
-            el.setAttribute('data-type', resolved.type);
-            el.setAttribute('data-src', resolved.src);
-            el.setAttribute('data-cover', resolved.cover || '');
-            const label = el.querySelector('.gs');
-            if (label) label.textContent = resolved.type;
-            el.querySelectorAll('button').forEach(btn => {
-              btn.setAttribute('data-id', resolved.id);
-              btn.setAttribute('data-type', resolved.type);
-              btn.setAttribute('data-src', resolved.src!);
-              btn.setAttribute('data-cover', resolved.cover || '');
-            });
-          }
-        });
-      }, 100);
-    }
-    return html; // DOMPurify is applied inside Parser.render
-  };
-
-  const handleMediaAction = async (type: string, id: string, host: string, action: string, trackData: Partial<MediaTrack> = {}): Promise<void> => {
-    let media: MediaTrack = { type: type as MediaTrack['type'], id, host, ...trackData };
-    
-    // Always attempt to resolve to get full SRC and COVER (thumbnails)
-    if (!media.src || (type === 'peertube' && !media.cover)) {
-      media = await Parser.resolveMedia(media);
-    }
-    
-    if (action === 'play') { BFPlayer.playTrack(media); }
-    else if (action === 'queue') { BFPlayer.addToQueue(media); showStatus(t('addedToQueue'), media.title || '', 'success'); }
-    else if (action === 'embed') {
-      const placeholders = document.querySelectorAll<HTMLElement>(`.media-placeholder[data-id="${id}"]`);
-      placeholders.forEach(p => {
-        const url = media.type === 'youtube' ? `https://youtube.com/watch?v=${media.id}` : (media.src || '');
-        if (url) { const embedHtml = Parser.getEmbedCode(url); if (embedHtml) p.outerHTML = embedHtml; }
-      });
-    }
+    return Parser.render(text, ctx);
   };
 
   const isNestedReply = (r: Post): boolean => {
@@ -435,11 +393,16 @@ export function useApp() {
   };
 
   const updateGlobalActivity = async (): Promise<void> => {
-    if (!auth.user || !userSubscriptions.value.length) return;
+    if (!auth.user) return;
     const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
     const allActivity: ActivityItem[] = [];
     const currentUsername = auth.user.username;
-    const subsToCheck = userSubscriptions.value.slice(0, 25);
+    
+    // Fallback: if no subscriptions, check the primary community account
+    const subsToCheck = userSubscriptions.value.length > 0 
+      ? userSubscriptions.value.slice(0, 25) 
+      : [{ account: config.communityAccount, title: 'Blurt' }];
+
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     for (const sub of subsToCheck) {
       try {
@@ -585,7 +548,8 @@ export function useApp() {
       }
 
       const pag = targetForum || forumPagination;
-      const params: Record<string, unknown> = { community: config.communityAccount, limit: 21, sort: 'activity' };
+      const fetchLimit = 31;
+      const params: Record<string, unknown> = { community: config.communityAccount, limit: fetchLimit, sort: 'activity' };
 
       if (direction === 'next' && pag.lastAuthor) {
         params.start_author = pag.lastAuthor;
@@ -611,29 +575,43 @@ export function useApp() {
       }
 
       let rawPosts: RawPost[] = [];
-      const vf = targetForum ? VIRTUAL_FORUMS.find(v => v.id === targetForum.id) : null;
+      const forumId = targetForum?.id || activeForum.value?.id;
+      const vf = VIRTUAL_FORUMS.find(v => v.id === forumId);
 
       if (vf) {
-        const apiParams: Record<string, unknown> = { limit: 21, start_author: params.start_author, start_permlink: params.start_permlink };
+        const apiParams: Record<string, unknown> = { limit: fetchLimit };
+        if (params.start_author) {
+          apiParams.start_author = params.start_author;
+          apiParams.start_permlink = params.start_permlink;
+        }
+        
         if (currentTagFilter.value) apiParams.tag = currentTagFilter.value;
-        if (vf.id === 'user-feed' && auth.user) rawPosts = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' }) as RawPost[];
-        else if (vf.id === 'global-trending') rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' }) as RawPost[];
-        else if (vf.id === 'global-new') rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' }) as RawPost[];
-        else if (vf.id === 'global-activity') rawPosts = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' }) as RawPost[];
+
+        if (vf.id === 'user-feed' && auth.user) {
+          rawPosts = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' }) as RawPost[];
+        } else if (vf.id === 'global-trending') {
+          rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' }) as RawPost[];
+        } else if (vf.id === 'global-new') {
+          rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' }) as RawPost[];
+        } else if (vf.id === 'global-activity') {
+          rawPosts = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' }) as RawPost[];
+        }
       } else {
-        rawPosts = await forumClient.call('bridge', 'get_forum_posts', params) as RawPost[];
+        const qp: Record<string, any> = { ...params };
+        if (!qp.start_author) { delete qp.start_author; delete qp.start_permlink; }
+        rawPosts = await forumClient.call('bridge', 'get_forum_posts', qp) as RawPost[];
       }
 
       if (!rawPosts || rawPosts.length === 0) {
         pag.hasMore = false;
-        if (targetForum) targetForum.posts = [];
+        if (targetForum && direction !== true) targetForum.posts = [];
       } else {
-        if (targetForum) targetForum.posts = [];
+        if (targetForum && direction !== true) targetForum.posts = [];
         processBatch(rawPosts, null, targetForum);
         const lastItem = rawPosts[rawPosts.length - 1];
         pag.lastAuthor = lastItem.author;
         pag.lastPermlink = lastItem.permlink;
-        pag.hasMore = rawPosts.length >= 20;
+        pag.hasMore = rawPosts.length >= fetchLimit;
       }
     } catch (err) {
       console.error('loadData error:', err);
@@ -648,6 +626,7 @@ export function useApp() {
     slice.forEach(p => {
       const post = normalizePost(p);
       bodyCache[`${p.author}/${p.permlink}`] = p.body;
+      
       if (post.isMuted && !canMute.value) return;
       if (targetForum) {
         if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) targetForum.posts.push(post);
@@ -696,11 +675,17 @@ export function useApp() {
     const flat: Post[] = [];
     const recurse = async (pAuthor: string, pPermlink: string, depth: number): Promise<void> => {
       let results: RawPost[];
-      try { results = await client.condenser.getContentReplies(pAuthor, pPermlink); } catch { return; }
+      try {
+        results = await client.condenser.getContentReplies(pAuthor, pPermlink);
+      } catch (e) {
+        console.error(`Error loading replies for ${pAuthor}/${pPermlink}:`, e);
+        return;
+      }
       if (!results?.length) return;
       for (const r of results) {
         bodyCache[`${r.author}/${r.permlink}`] = r.body;
-        flat.push({ ...normalizePost(r), depth, _qOpen: false });
+        const post = { ...normalizePost(r), depth, _qOpen: false };
+        flat.push(post);
         if (r.children && r.children > 0) await recurse(r.author, r.permlink, depth + 1);
       }
     };
@@ -770,6 +755,7 @@ export function useApp() {
   const openForum = (forum: Forum): void => {
     forum.lastAuthor = ''; forum.lastPermlink = ''; forum.start_author = ''; forum.start_permlink = '';
     forum.pageHistory = []; forum.hasMore = true;
+    forumPagination.visibleCount = 20; // Reset visibility limit
     currentTagFilter.value = '';
     const isVirtual = VIRTUAL_FORUMS.find(vf => vf.id === forum.id);
     if (!isVirtual) { localStorage.setItem('bf_last_forum_id', forum.id); localStorage.setItem('bf_last_community', config.communityAccount); }
@@ -777,8 +763,8 @@ export function useApp() {
     view.value = 'forum';
     activeTopic.value = null;
     showNewPostForm.value = false;
-    syncUrl();
     loadData('current', forum);
+    syncUrl();
   };
 
   const openTopic = async (topic: Post): Promise<void> => {
@@ -793,9 +779,9 @@ export function useApp() {
     activeTopic.value = { ...topic, beneficiaries: topic.beneficiaries || [] };
     bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
     view.value = 'topic';
-    loadReplies(topic.author, topic.permlink);
     syncUrl();
     markTopicAsRead(activeTopic.value);
+    loadReplies(topic.author, topic.permlink);
     if (!topic.beneficiaries?.length) {
       client.condenser.getContent(topic.author, topic.permlink).then(full => {
         if (full?.beneficiaries?.length && activeTopic.value?.permlink === topic.permlink) {
@@ -839,11 +825,6 @@ export function useApp() {
       }
       const posts = await client.call('bridge', 'get_account_posts', { account: username, sort: 'posts', limit: 20 }) as RawPost[];
       if (posts) profileUser.posts = posts.map(normalizePost);
-      
-      // Resolve media for profile posts (thumbnails, etc)
-      profileUser.posts.filter(p => p.media).forEach(async (p) => {
-        if (p.media) p.media = await Parser.resolveMedia(p.media);
-      });
 
       const comments = await client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 }) as RawPost[];
       if (comments) profileUser.comments = comments.map(normalizePost);
@@ -890,19 +871,10 @@ export function useApp() {
     } catch (err) { showStatus('Community', 'Error: ' + ((err as Error).message || err), 'error'); }
   };
 
-  const broadcastKey = async (ops: unknown[]): Promise<void> => {
-    const privKey = dblurt.PrivateKey.from(auth.user!.key!);
-    await client.broadcast.sendOperations(ops, privKey);
+  const broadcast = (ops: unknown[]) => {
+    if (!auth.user) throw new Error('Not logged in');
+    return Blockchain.broadcast(client, auth.user, ops);
   };
-  const broadcastWV = async (ops: unknown[]): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (!window.blurt_keychain) { reject(new Error('WhaleVault polyfill not available')); return; }
-      (window.blurt_keychain as Record<string, Function>).requestBroadcast(auth.user!.username, ops, 'posting', (res: { success: boolean; message?: string }) => {
-        if (res?.success) resolve(); else reject(new Error(res?.message ?? 'WhaleVault broadcast error'));
-      });
-    });
-  };
-  const broadcast = (ops: unknown[]) => auth.user!.type === 'key' ? broadcastKey(ops) : broadcastWV(ops);
 
   const loadFollowingList = async (username: string): Promise<void> => {
     if (!username) return;
@@ -1083,8 +1055,6 @@ export function useApp() {
         const idx = profileUser.posts.findIndex(p => p.permlink === normalized.permlink);
         if (idx >= 0) {
           profileUser.posts[idx] = normalized;
-          // Trigger media resolution if needed
-          if (normalized.media) Parser.resolveMedia(normalized.media).then(resolved => profileUser.posts[idx].media = resolved);
         }
       }
     } else if (activeTopic.value) {
@@ -1120,7 +1090,6 @@ export function useApp() {
     }
     return bens.sort((a, b) => a.account.localeCompare(b.account));
   };
-
   const submitReply = async (): Promise<void> => {
     if (checkLock(submitReply)) return;
     if (!auth.user || !replyTarget.value) return;
@@ -1170,28 +1139,55 @@ export function useApp() {
     postForm.loading = false;
   };
 
-  const playlistModal = reactive({ show: false, track: null as MediaTrack | null });
-  const handlePlaylistConfirm = (name: string, color: string, track: MediaTrack | null) => {
-    const pl = player.createPlaylist(name, color);
-    if (pl && track) player.addTrackToPlaylist(pl.id, track);
-    playlistModal.show = false;
+  const {
+    voteModal,
+    estimateVote,
+    openVoteModal,
+    hasVoted,
+    submitVoteConfirmed: _submitVoteConfirmed,
+    submitVote: _submitVote
+  } = useVote(client, auth, broadcast as any, waitAndReload, t);
+
+  const getFullPost = async (post: { author: string; permlink: string }): Promise<Post> => {
+    const found = [
+      activeTopic.value,
+      ...replies.value,
+      ...(activeForum.value?.posts || []),
+      ...profileUser.posts
+    ].find(p => p && p.author === post.author && p.permlink === post.permlink);
+    
+    if (found) return found;
+    const raw = await client.condenser.getContent(post.author, post.permlink);
+    return normalizePost(raw);
   };
 
-  // ── Vote ──────────────────────────────────────────────────────────────────
-  const voteModal = reactive({ show: false, post: null as Post | null, weight: parseInt(localStorage.getItem('bf-vote-weight') || '100'), estimatedValue: null as null | { vpCostPct: string; vpAfter: string; voteValue: string; fee: string }, estimating: false });
-  const estCache = { acc: null as Record<string, unknown> | null, fund: null as Record<string, unknown> | null, props: null as GlobalProps | null, last: 0 };
-  const feeInfo = reactive({ flatFee: 0.050, bwFee: 0.150, loaded: false });
-  const fetchFeeInfo = async (): Promise<void> => {
-    if (feeInfo.loaded) return;
+  const submitVote = async (post: Post | { author: string; permlink: string }) => {
+    if (checkLock(() => submitVote(post))) return;
     try {
-      const props = await client.call('condenser_api', 'get_chain_properties', {}) as Record<string, string>;
-      if (props) { if (props.operation_flat_fee) feeInfo.flatFee = parseFloat(props.operation_flat_fee); if (props.bandwidth_kbytes_fee) feeInfo.bwFee = parseFloat(props.bandwidth_kbytes_fee); feeInfo.loaded = true; }
-    } catch (e) { console.warn('Fee info fetch error (using fallback values):', e); feeInfo.loaded = true; }
+      await _submitVote(post, getFullPost);
+    } catch (err: any) {
+      if (err.message === 'NOT_LOGGED_IN') openLoginModal();
+      else showStatus('Error', 'Voting failed: ' + err.message, 'error');
+    }
   };
-  const estimateTxFee = (numOps: number, payloadBytes: number): string => {
-    const totalBytes = 300 + payloadBytes;
-    return ((feeInfo.flatFee * numOps) + (totalBytes / 1024) * feeInfo.bwFee).toFixed(3);
+
+  const topicViewRef = ref<any>(null);
+
+  const submitVoteConfirmed = async () => {
+    if (checkLock(submitVoteConfirmed)) return;
+    try {
+      const oldPost = await _submitVoteConfirmed();
+      if (oldPost && (topicViewRef.value as any)?.triggerSupportLogic) {
+        (topicViewRef.value as any).triggerSupportLogic(oldPost, (voteModal.weight * 100));
+      }
+    } catch (err: any) {
+      showStatus('Error', 'Vote confirmation failed: ' + err.message, 'error');
+    }
   };
+
+  const feeInfo = Blockchain.feeInfo;
+  const fetchFeeInfo = () => Blockchain.fetchFeeInfo(client);
+  const estimateTxFee = (numOps: number, payloadBytes: number) => Blockchain.estimateTxFee(numOps, payloadBytes);
   const postFeeEstimate  = ref<string | null>(null);
   const replyFeeEstimate = ref<string | null>(null);
   let _postFeeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1216,160 +1212,6 @@ export function useApp() {
   const startReply = (target: Post): void => {
     replyTarget.value = target; replyForm.body = replyForm.error = replyForm.success = '';
     fetchFeeInfo().then(() => { replyFeeEstimate.value = estimateTxFee(2, 0); });
-  };
-
-  const estimateVote = async (weight: number): Promise<void> => {
-    if (!auth.user) return;
-    const now = Date.now();
-    if (!estCache.acc || now - estCache.last > 60000) {
-      voteModal.estimating = true;
-      try {
-        const [accs, fund, props] = await Promise.all([
-          client.condenser.getAccounts([auth.user.username]),
-          client.call('condenser_api', 'get_reward_fund', ['post'] as any),
-          client.condenser.getDynamicGlobalProperties(),
-        ]);
-        if (accs?.[0]) estCache.acc = accs[0] as Record<string, unknown>;
-        if (fund) estCache.fund = fund as Record<string, unknown>;
-        if (props) estCache.props = props;
-        estCache.last = now;
-      } catch (e) { console.warn('Vote estimate fetch error:', e); }
-      voteModal.estimating = false;
-    }
-    const acc = estCache.acc; const fund = estCache.fund;
-    if (!acc || !fund) return;
-    try {
-      const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
-      const delta = (Date.now() - lastVoteTime) / 1000;
-      const rawVP = Math.min((acc.voting_power as number) + Math.floor(10000 * delta / 432000), 10000);
-      const voteWeight = weight * 100;
-      const usedPower = Math.ceil(rawVP * voteWeight / 10000 / 50);
-      const vpAfterRaw = rawVP - usedPower;
-      const vpCostPct = (usedPower / 100).toFixed(2);
-      const vpAfter   = (vpAfterRaw / 100).toFixed(2);
-      const vestingShares    = parseFloat(acc.vesting_shares as string);
-      const receivedVesting  = parseFloat(acc.received_vesting_shares as string || '0');
-      const delegatedVesting = parseFloat(acc.delegated_vesting_shares as string || '0');
-      const effectiveVests   = vestingShares + receivedVesting - delegatedVesting;
-      const microVests = BigInt(Math.floor(effectiveVests * 1000000));
-      const rs = (microVests * BigInt(usedPower)) / 10000n;
-      const rcStr = fund.recent_claims as string;
-      const rc = BigInt(typeof rcStr === 'string' ? (rcStr.split(' ')[0] || rcStr) : String(rcStr));
-      const rb = parseFloat(fund.reward_balance as string);
-      let voteValue = 0;
-      if (rc > 0n) voteValue = (Number(rs) / Number(rc)) * rb;
-      const voteFee = estimateTxFee(1, 150);
-      voteModal.estimatedValue = { vpCostPct, vpAfter, voteValue: voteValue.toFixed(4), fee: voteFee };
-    } catch (e) { console.warn('Vote estimate calculation error:', e); }
-  };
-
-  const openVoteModal = (post: Post): void => { voteModal.post = post; voteModal.show = true; fetchFeeInfo().then(() => estimateVote(voteModal.weight)); };
-  const hasVoted = (post: Post): boolean => !!(auth.user && post.active_votes?.some(v => v.voter === auth.user!.username && v.percent > 0));
-
-  const triggerSupportLogic = async (post: Post, weight: number): Promise<void> => {
-    let fullPost: RawPost = post as unknown as RawPost;
-    if (!post.beneficiaries?.length) {
-      try { fullPost = await client.condenser.getContent(post.author, post.permlink); } catch { /* ignore */ }
-    }
-    const beneficiaries = (fullPost.beneficiaries || []) as Beneficiary[];
-    let existingSupport: RawPost | undefined;
-    try {
-      const reps = await client.condenser.getContentReplies(post.author, post.permlink);
-      existingSupport = reps.find(r => {
-        if (!r.body?.trim().startsWith('Supporting original content by @')) return false;
-        const rBens = (r.beneficiaries || []) as Beneficiary[];
-        return rBens.length === beneficiaries.length && beneficiaries.every(b => rBens.some(rb => rb.account === b.account && rb.weight === b.weight));
-      });
-    } catch { /* ignore */ }
-    if (existingSupport) {
-      try { await broadcast([['vote', { voter: auth.user!.username, author: existingSupport.author, permlink: existingSupport.permlink, weight }]]); } catch { /* ignore */ }
-    } else {
-      oldContentModal.author = post.author; oldContentModal.permlink = post.permlink; oldContentModal.beneficiaries = beneficiaries; oldContentModal.originalPost = fullPost; oldContentModal.weight = weight; oldContentModal.body = 'Supporting original content by @' + post.author; oldContentModal.status = ''; oldContentModal.loading = false; oldContentModal.show = true;
-    }
-  };
-
-  const submitVoteConfirmed = async (): Promise<void> => {
-    voteModal.show = false;
-    if (checkLock(submitVoteConfirmed)) return;
-    if (!auth.user || !voteModal.post) return;
-    const post = voteModal.post;
-    const weight = Math.min(Math.max(Math.round(voteModal.weight), 1), 100) * 100;
-    localStorage.setItem('bf-vote-weight', String(voteModal.weight));
-    const op = ['vote', { voter: auth.user.username, author: post.author, permlink: post.permlink, weight }];
-    try {
-      await broadcast([op]);
-      const voter = auth.user.username;
-      const created = new Date((post.created.endsWith('Z') ? post.created : post.created + 'Z')).getTime();
-      const isOld = (Date.now() - created) > 7 * 24 * 60 * 60 * 1000;
-      if (isOld) triggerSupportLogic(post, weight);
-      waitAndReload(view.value === 'topic', post.author, post.permlink, (c) => (c.active_votes || []).some(v => v.voter === voter && v.percent > 0), t('syncingWithBlockchain'));
-    } catch (err) { console.error('Vote error:', err); }
-  };
-
-  const submitVote = async (post: Post | { author: string; permlink: string }): Promise<void> => {
-    if (!auth.user) { openLoginModal(); return; }
-    
-    // If it's a partial post from player, we might need to normalize it or handle differently
-    // For voting, we primarily need author and permlink.
-    // However, hasVoted() needs active_votes.
-    
-    let fullPost: Post;
-    if (!('active_votes' in post)) {
-      // Partial post, try to find in current views or fetch
-      const found = [
-        activeTopic.value,
-        ...replies.value,
-        ...(activeForum.value?.posts || []),
-        ...profileUser.posts
-      ].find(p => p && p.author === post.author && p.permlink === post.permlink);
-      
-      if (found) {
-        fullPost = found;
-      } else {
-        // Fallback: fetch it
-        try {
-          const raw = await client.condenser.getContent(post.author, post.permlink);
-          fullPost = normalizePost(raw);
-        } catch (e) {
-          showStatus('Error', 'Could not fetch post for voting', 'error');
-          return;
-        }
-      }
-    } else {
-      fullPost = post as Post;
-    }
-
-    if (hasVoted(fullPost)) {
-      if (!confirm(t('confirmUnvote'))) return;
-      const op = ['vote', { voter: auth.user.username, author: fullPost.author, permlink: fullPost.permlink, weight: 0 }];
-      try {
-        await broadcast([op]);
-        const voter = auth.user.username;
-        waitAndReload(view.value === 'topic' || view.value === 'profile', fullPost.author, fullPost.permlink, (c) => !(c.active_votes || []).some(v => v.voter === voter && v.percent > 0), t('syncingWithBlockchain'));
-      } catch (err) { console.error('Unvote error:', err); }
-      return;
-    }
-    openVoteModal(fullPost);
-  };
-
-  const submitSupportComment = async (): Promise<void> => {
-    if (checkLock(submitSupportComment)) return;
-    if (!auth.user || !oldContentModal.author) return;
-    oldContentModal.loading = true; oldContentModal.status = t('supporting');
-    const permlink = BFUtils.genPermlink('support-' + oldContentModal.author);
-    const beneficiaries = oldContentModal.beneficiaries.length ? [...oldContentModal.beneficiaries].sort((a, b) => a.account.localeCompare(b.account)) : [{ account: oldContentModal.author, weight: 10000 }];
-    const op = ['comment', { parent_author: oldContentModal.author, parent_permlink: oldContentModal.permlink, author: auth.user.username, permlink, title: '', body: oldContentModal.body, json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: [config.communityAccount] }) }];
-    const options = ['comment_options', { author: auth.user.username, permlink, max_accepted_payout: '1000000.000 BLURT', percent_steem_dollars: 10000, allow_votes: true, allow_curation_rewards: true, extensions: [[0, { beneficiaries }]] }];
-    try {
-      await broadcast([op, options]);
-      oldContentModal.status = t('waitingForBlock');
-      await new Promise(r => setTimeout(r, 5000));
-      oldContentModal.status = t('votingOnSupport');
-      await broadcast([['vote', { voter: auth.user.username, author: auth.user.username, permlink, weight: oldContentModal.weight || 10000 }]]);
-      oldContentModal.status = t('supportSuccess');
-      setTimeout(() => { oldContentModal.show = false; loadReplies(oldContentModal.author, oldContentModal.permlink); }, 1500);
-    } catch (err) { console.error('Support error:', err); oldContentModal.status = 'Error: ' + (err as Error).message; }
-    oldContentModal.loading = false;
   };
 
   const mutePost = async (post: Post, mute = true): Promise<void> => {
@@ -1753,9 +1595,6 @@ export function useApp() {
     loading.value = false;
   };
 
-  const vw = ref(window.innerWidth);
-  window.addEventListener('resize', () => vw.value = window.innerWidth);
-
   const checkNewNotifications = async (): Promise<void> => {
     if (!auth.user || notifModal.show) return;
     try {
@@ -1764,41 +1603,10 @@ export function useApp() {
     } catch { /* ignore */ }
   };
 
-  const handlePlayerSeek = (e: MouseEvent): void => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const pct = ((e.clientX - rect.left) / rect.width) * 100;
-    BFPlayer.seek(pct);
-  };
-
   const player = BFPlayer;
 
-  // ── Dynamic Data Refresh ──────────────────────────────────────────────────
-  watch(() => player.state.currentTrack, async (newTrack) => {
-    if (newTrack && newTrack.author && newTrack.permlink) {
-      try {
-        const client = new dblurt.Client(config.nodes);
-        const post = await client.condenser.getContent(newTrack.author, newTrack.permlink);
-        if (post && player.state.currentTrack && 
-            player.state.currentTrack.author === post.author && 
-            player.state.currentTrack.permlink === post.permlink) {
-          
-          const parsePayout = (val: any) => typeof val === 'string' ? parseFloat(val.split(' ')[0]) : (typeof val === 'number' ? val : 0);
-          const payout = parsePayout(post.pending_payout_value) + 
-                         parsePayout(post.total_payout_value) +
-                         parsePayout((post as any).curator_payout_value);
-
-          // Update properties individually to avoid triggering a full object change
-          player.state.currentTrack.payout = payout;
-          player.state.currentTrack.voteCount = post.active_votes?.length || 0;
-          player.state.currentTrack.voted = hasVoted(post as any);
-        }
-      } catch (e) {
-        console.error('Failed to refresh track post data:', e);
-      }
-    }
-  });
-
   onMounted(() => {
+    BFPlayer.registerPlugin(BlurtPlayerPlugin(client, auth));
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
     setInterval(checkNewNotifications, 60000);
@@ -1806,27 +1614,9 @@ export function useApp() {
     document.addEventListener('click', (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'IMG' && target.closest('.post-body')) { openImgModal((target as HTMLImageElement).src); return; }
-      const mediaBtn = target.closest('.bf-placeholder-play, .bf-placeholder-queue, .bf-placeholder-embed');
-      if (mediaBtn) {
-        e.preventDefault();
-        const d = (mediaBtn as HTMLElement).dataset;
-        const action = mediaBtn.classList.contains('bf-placeholder-play') ? 'play' : (mediaBtn.classList.contains('bf-placeholder-queue') ? 'queue' : 'embed');
-        handleMediaAction(d.type!, d.id!, d.host!, action, { 
-          title: d.title, 
-          author: d.author, 
-          permlink: d.permlink,
-          payout: d.payout ? parseFloat(d.payout) : 0,
-          voteCount: d.votecount ? parseInt(d.votecount) : 0,
-          voted: d.voted === 'true',
-          src: d.src, 
-          cover: d.cover 
-        });
-        return;
-      }
       const mention = target.closest('.mention');
       if (mention) { e.preventDefault(); openProfile((mention as HTMLElement).getAttribute('data-user')!); return; }
     });
-
     // Expose openProfile for DOMPurify-sanitized content
     (window as Record<string, unknown>).app = { openProfile };
 
@@ -1848,6 +1638,7 @@ export function useApp() {
               auth.user = { username: session.username, type: 'whalevault', key: null, vp: vp.toFixed(2), hasRewards, rewardBlurt: acc.reward_blurt_balance as string, rewardVesting: acc.reward_vesting_balance as string };
             }
           });
+          loadUserCommunities(session.username); loadFollowingList(session.username);
         } else {
           auth.user = { username: session.username, type: 'key', key: session.key, vp: '…', locked: true };
           loadUserCommunities(session.username); loadFollowingList(session.username); refreshUser();
@@ -1912,15 +1703,14 @@ export function useApp() {
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
     nextPage, prevPage,
     submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
-    playlistModal, handlePlaylistConfirm,
-    followModal, confirmToggleFollow,    openProfile, profileUser, profileTab, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
+    followModal, confirmToggleFollow,
+    openProfile, profileUser, profileTab, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
     userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
     pinModal, handlePinSubmit,
     globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
     editModal, startEdit, submitEdit,
-    oldContentModal, submitSupportComment,
     voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
     feeInfo, postFeeEstimate, replyFeeEstimate, schedulePostFeeUpdate, scheduleReplyFeeUpdate,
     bcWaitQueue, bcQueueExpanded,
@@ -1935,14 +1725,13 @@ export function useApp() {
     loadTopicContext,
     isPostInCommunity,
     toggleFollow,
+    topicViewRef,
+    broadcast, waitAndReload, checkLock,
     explorationExpanded,
     explorationForm,
     toggleExploration,
     followingSet,
-    handleMediaAction,
-    player,
-    handlePlayerSeek,
-    vw,
+    player: BFPlayer,
     client: forumClient,
   };
 }

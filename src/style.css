@@ -82,6 +82,7 @@ body.theme-subsilver, :root {
   --error-bg:      #FDECEA;   --error-text:   #922B21; --error-border:   #C0392B;
   /* WV Button */
   --wv-bg:         #000000; --wv-text: #FFFFFF;
+  --accent-active: #2ecc71;
   /* Typography */
   --sans: Verdana, Geneva, Tahoma, sans-serif;
   --mono: "Courier New", Courier, monospace;
@@ -109,6 +110,7 @@ body.theme-modern {
   --success-bg:    #d4edda; --success-text: #155724; --success-border: #c3e6cb;
   --error-bg:      #f8d7da;   --error-text:   #721c24; --error-border:   #f5c6cb;
   --wv-bg:         #2c3e50; --wv-text: #ffffff;
+  --accent-active: #3498db;
 }
 
 /* 3. DEEP NIGHT (Dark) */
@@ -133,6 +135,7 @@ body.theme-deepnight {
   --success-bg:    #1b3324; --success-text: #2ecc71; --success-border: #27ae60;
   --error-bg:      #3d1a1a;   --error-text:   #e74c3c; --error-border:   #c0392b;
   --wv-bg:         #000000; --wv-text: #ffffff;
+  --accent-active: #e67e22;
 }
 
 /* 4. DARK OCEAN (Dark Blue/Teal) */
@@ -157,6 +160,7 @@ body.theme-ocean {
   --success-bg:    #143330; --success-text: #1abc9c; --success-border: #16a085;
   --error-bg:      #331414;   --error-text:   #e74c3c; --error-border:   #c0392b;
   --wv-bg:         #0a192f; --wv-text: #ccd6f6;
+  --accent-active: #1abc9c;
 }
 
 /* 5. FOREST (Warm earthy light) */
@@ -181,6 +185,7 @@ body.theme-forest {
   --success-bg:    #dcf0e7; --success-text: #1b4332; --success-border: #74c69d;
   --error-bg:      #f9e5e5;   --error-text:   #bc4749; --error-border:   #e5989b;
   --wv-bg:         #2D2926; --wv-text: #F5F1EB;
+  --accent-active: #2D6A4F;
 }
 
 /* 6. MIDNIGHT (Deep dark blue) */
@@ -205,6 +210,7 @@ body.theme-midnight {
   --success-bg:    #13231b; --success-text: #3fb950; --success-border: #238636;
   --error-bg:      #2b1316;   --error-text:   #f85149; --error-border:   #da3633;
   --wv-bg:         #000000; --wv-text: #E6EDF3;
+  --accent-active: #FFA657;
 }
 
 
@@ -859,15 +865,10 @@ a:hover { color: var(--accent); text-decoration: underline; }
   color: var(--primary);
 }
 
-/* VOTING */
-.vote-btn { cursor: pointer; color: var(--text-muted); font-size: 18px; user-select: none; transition: all 0.2s ease; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
-.vote-btn:hover { color: var(--primary); transform: scale(1.1); }
-.vote-btn.active { color: #1e8449; filter: drop-shadow(0 0 3px rgba(30,132,73,0.5)); transform: scale(1.1); }
-.vote-btn i { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)); }
-
+ 
 /* PAYOUT LINK */
 .payout-link { cursor: pointer; text-decoration: underline dotted; }
-.payout-link:hover { color: #1e8449; }
+.payout-link:hover { color: var(--accent-active); }
 
 /* NOTIFICATIONS */
 .notif-item { padding: 10px; border-bottom: 1px solid var(--border-main); font-size: 13px; color: var(--text); }
@@ -1009,26 +1010,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
   .bc-queue-label { max-width: 55vw; }
 }
 
-/* ===== BENEFICIARIES INLINE ===== */
-.beneficiaries-inline {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 3px;
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--bg-r2);
-  border: 1px solid var(--border-main);
-  border-radius: 3px;
-  padding: 2px 6px;
-  line-height: 1.4;
-}
-.ben-icon { font-size: 13px; }
-.ben-link { font-size: 12px; font-weight: bold; }
-.ben-pct { color: var(--text-muted); font-size: 12px; }
-.ben-sep { color: var(--text-muted); }
-.ben-more { background: var(--bg-r3); border-radius: 2px; padding: 0 4px; font-size: 11px; }
-
+ 
 /* ===== BENEFICIARY FORM ROW (in write forms) ===== */
 .ben-form-row {
   display: grid;
@@ -1608,6 +1590,38 @@ a:hover { color: var(--accent); text-decoration: underline; }
 
 
 /* Media Placeholder Styles (Issue 4) */
+/* ===== PLAYER MARKER TAG ===== */
+forum-media {
+  display: block;
+}
+.forum-media-wrapper {
+  display: inline-flex !important;
+}
+
+.forum-media-card-wrapper {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  margin: 15px 0;
+  box-sizing: border-box;
+  clear: both;
+}
+
+forum-media {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+@media (max-width: 600px) {
+  .forum-media-card-wrapper, forum-media {
+    max-width: calc(100vw - 20px) !important;
+  }
+}
+
 .media-placeholder {
   position: relative;
   width: 100%;
@@ -1617,7 +1631,6 @@ a:hover { color: var(--accent); text-decoration: underline; }
   background-position: center;
   border-radius: 8px;
   overflow: hidden;
-  margin: 15px 0;
   border: 1px solid var(--border-main);
 }
 .media-placeholder-overlay {
@@ -1634,6 +1647,12 @@ a:hover { color: var(--accent); text-decoration: underline; }
 .media-placeholder.is-resolving {
   filter: grayscale(0.5);
   cursor: wait;
+  animation: bfp-resolving-pulse 2s infinite ease-in-out;
+}
+@keyframes bfp-resolving-pulse {
+  0% { opacity: 0.8; }
+  50% { opacity: 0.4; }
+  100% { opacity: 0.8; }
 }
 .media-placeholder.is-resolving .bf-placeholder-play {
   opacity: 0.7;

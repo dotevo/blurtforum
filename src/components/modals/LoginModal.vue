@@ -28,8 +28,8 @@ const emit = defineEmits<{
       <div v-if="loginErr" class="alert alert-error">{{ loginErr }}</div>
  
       <div class="tabs">
-        <button class="tab-btn" :class="{active:loginTab==='key'}" @click="loginTab='key'">{{ t('privateKey') }}</button>
-        <button class="tab-btn" :class="{active:loginTab==='wv'}" @click="loginTab='wv'">WhaleVault</button>
+        <button class="tab-btn" :class="{active:loginTab==='key'}" @click="emit('update:loginTab', 'key')">{{ t('privateKey') }}</button>
+        <button class="tab-btn" :class="{active:loginTab==='wv'}" @click="emit('update:loginTab', 'wv')">WhaleVault</button>
       </div>
  
       <template v-if="loginTab==='key'">

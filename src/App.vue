@@ -30,7 +30,6 @@ import OldContentModal from './components/modals/OldContentModal.vue';
 import StructureDocs from './components/modals/StructureDocs.vue';
 import LayoutEditor from './components/modals/LayoutEditor.vue';
 import ImageLightbox from './components/modals/ImageLightbox.vue';
-import PlaylistModal from './components/modals/PlaylistModal.vue';
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -46,7 +45,6 @@ const {
   doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
   nextPage, prevPage,
   submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
-  playlistModal, handlePlaylistConfirm,
   followModal, confirmToggleFollow,
   openProfile, profileUser, profileTab, fetchEarningsHistory, openNotification,
   userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
@@ -55,7 +53,6 @@ const {
   pinModal, handlePinSubmit,
   globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
   editModal, startEdit, submitEdit,
-  oldContentModal, submitSupportComment,
   voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
   feeInfo, postFeeEstimate, replyFeeEstimate, schedulePostFeeUpdate, scheduleReplyFeeUpdate,
   bcWaitQueue, bcQueueExpanded,
@@ -70,17 +67,15 @@ const {
   loadTopicContext,
   isPostInCommunity,
   toggleFollow,
+  topicViewRef,
+  broadcast, waitAndReload, checkLock,
   explorationExpanded,
   explorationForm,
   toggleExploration,
   followingSet,
-  handleMediaAction,
   player,
-  handlePlayerSeek,
-  vw,
   client,
-} = useApp();
-</script>
+  } = useApp();</script>
 
 <template>
 <div
@@ -263,7 +258,6 @@ const {
         @open-profile="openProfile"
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"
-        @handle-media-action="(type, id, host, action, data) => handleMediaAction(type, id, host, action, data)"
         @submit-post="submitPost"
         @save-draft="saveDraft"
         @clear-draft="clearDraft"
@@ -279,6 +273,7 @@ const {
 
       <TopicView
         v-if="view === 'topic' && activeTopic"
+        ref="topicViewRef"
         :active-topic="activeTopic"
         :replies="replies"
         :replies-loading="repliesLoading"
@@ -298,6 +293,10 @@ const {
         :is-nested-reply="isNestedReply"
         :get-parent-body="getParentBody"
         :is-post-in-community="isPostInCommunity"
+        :client="client"
+        :broadcast="broadcast"
+        :wait-and-reload="waitAndReload"
+        :check-lock="checkLock"
         @open-profile="openProfile"
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"
@@ -345,7 +344,6 @@ const {
         @open-topic="openTopic"
         @open-payout-modal="openPayoutModal"
         @toggle-follow="toggleFollow"
-        @handle-media-action="(type, id, host, action, data) => handleMediaAction(type, id, host, action, data)"
         @update:profile-tab="profileTab = $event"
         @fetch-earnings="() => fetchEarningsHistory(profileUser.username, ((profileUser as any).earnings.history[(profileUser as any).earnings.history.length-1]?.seq || 0) - 1)"
       />
@@ -366,12 +364,9 @@ const {
 
   <MediaPlayer
     :player="player"
-    :vw="vw"
     :t="t"
-    @player-seek="(pct: number) => player.seek(pct)"
     @open-profile="openProfile"
     @open-topic="(p) => openTopic(p as any)"
-    @open-playlist-modal="(track) => { playlistModal.track = track; playlistModal.show = true; }"
     @submit-vote="(p) => submitVote(p as any)"
     @open-payout-modal="(p) => openPayoutModal(p as any)"
   />
@@ -442,14 +437,6 @@ const {
     @submit="handlePinSubmit"
   />
 
-  <OldContentModal
-    v-if="oldContentModal.show"
-    :old-content-modal="oldContentModal"
-    :t="t"
-    @close="oldContentModal.show = false"
-    @submit="submitSupportComment"
-  />
-
   <ImageLightbox
     v-if="imgModal.show"
     :img-modal="imgModal"
@@ -472,14 +459,6 @@ const {
     :t="t"
     @close="followModal.show = false"
     @confirm="confirmToggleFollow"
-  />
-
-  <PlaylistModal
-    :show="playlistModal.show"
-    :track="playlistModal.track"
-    :t="t"
-    @close="playlistModal.show = false"
-    @confirm="handlePlaylistConfirm"
   />
 
   <!-- Status modal -->

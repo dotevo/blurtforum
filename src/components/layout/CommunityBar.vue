@@ -37,3 +37,4 @@ const emit = defineEmits<{
   <span class="gs" style="margin-left:auto; font-weight: bold;">{{ t('currentCommunity') }}: {{ communityAccount }}</span>
 </div>
 </template>
+

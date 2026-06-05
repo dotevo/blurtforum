@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { Post } from '../../types';
 import type { AuthUser } from '../../types';
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUpdated } from 'vue';
+import { dispatchScanView } from '../../modules/player';
+import ForumMedia from '../player/ForumMedia.vue';
 import VueApexCharts from "vue3-apexcharts";
 
 const props = defineProps<{
@@ -51,6 +53,13 @@ const emit = defineEmits<{
 }>();
 
 const showHistoryTable = ref(false);
+
+const triggerScan = () => {
+  const container = document.querySelector('.profile-list-table');
+  if (container) dispatchScanView(container);
+};
+onMounted(triggerScan);
+onUpdated(triggerScan);
 
 // --- Colors ---
 const colors = {
@@ -125,7 +134,7 @@ const barSeries = computed(() => {
               </div>
               <button v-if="auth.user && auth.user.username !== profileUser.username"
                       class="btn btn-follow" :class="followingSet.has(profileUser.username) ? 'btn-ghost' : 'btn-accent'"
-                      @click="emit('toggleFollow', profileUser.username)">
+                      @click="$emit('toggleFollow', profileUser.username)">
                 <i class="fa-solid" :class="followingSet.has(profileUser.username) ? 'fa-user-check' : 'fa-user-plus'"></i>
                 {{ followingSet.has(profileUser.username) ? t('unfollow') : t('follow') }}
               </button>            </div>
@@ -170,9 +179,9 @@ const barSeries = computed(() => {
       </div>
 
       <div class="tabs" style="margin-top: 20px;">
-        <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="emit('update:profileTab', 'posts')">{{ t('posts') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="emit('update:profileTab', 'comments')">{{ t('comments') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='earnings'}" @click="emit('update:profileTab', 'earnings')">💰 {{ t('earnings') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="$emit('update:profileTab', 'posts')">{{ t('posts') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="$emit('update:profileTab', 'comments')">{{ t('comments') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='earnings'}" @click="$emit('update:profileTab', 'earnings')">💰 {{ t('earnings') }}</button>
       </div>
 
       <!-- EARNINGS TAB -->
@@ -181,7 +190,7 @@ const barSeries = computed(() => {
         <div class="earnings-header-row">
           <h3 style="margin:0; color: var(--primary);">📊 {{ t('earningsSummary') }}</h3>
           <div style="display:flex; gap:10px; align-items:center;">
-             <button class="btn btn-sm btn-accent" :disabled="profileUser.earnings.loading" @click="emit('fetchEarnings')">
+             <button class="btn btn-sm btn-accent" :disabled="profileUser.earnings.loading" @click="$emit('fetchEarnings')">
                <i class="fa-solid fa-sync" :class="{ 'fa-spin': profileUser.earnings.loading }"></i> {{ t('loadMoreHistory') }}
              </button>
              <button class="btn btn-sm" @click="showHistoryTable = !showHistoryTable">
@@ -273,15 +282,15 @@ const barSeries = computed(() => {
           <tr v-for="post in profileUser.posts" :key="post.permlink">
             <td class="row1">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <template v-if="player.state.enabled && post.media">
-                  <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'play', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('playNow') || 'Play Now'">
-                    <i :class="post.media.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play'"></i>
-                  </span>
-                  <span class="media-icon" @click.stop="emit('handleMediaAction', post.media.type, post.media.id, post.media.host ?? '', 'queue', {title: post.title, author: post.author, permlink: post.permlink, src: post.media.src, cover: post.media.cover})" :title="t('addToQueue') || 'Add to Queue'">
-                    <i class="fa-solid fa-plus"></i>
-                  </span>
-                </template>
-                <a href="#" @click.stop.prevent="emit('openTopic', post)" 
+                <ForumMedia 
+                  v-if="player.state.enabled && post.media"
+                  :media="post.media"
+                  :title="post.title"
+                  :author="post.author"
+                  :permlink="post.permlink"
+                  :t="t"
+                />
+                <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
                    style="font-size: 12px; font-weight: normal;">{{ post.title }}</a>
               </div>
             </td>
@@ -307,7 +316,7 @@ const barSeries = computed(() => {
         </thead>
         <tbody>
           <tr v-for="c in profileUser.comments" :key="c.permlink" 
-              class="row-hover" @click="emit('openTopic', c)">
+              class="row-hover" @click="$emit('openTopic', c)">
             <td class="row1">
               <span class="gs">RE: @{{ c.parent_author }}</span><br>
               {{ c.body.substring(0, 100) }}...
@@ -332,7 +341,7 @@ const barSeries = computed(() => {
   border: 1px solid var(--border-main); flex: 1; min-width: 140px;
 }
 .stat-box.accent { border-left: 4px solid var(--primary); }
-.stat-box.success { border-left: 4px solid #2ecc71; }
+.stat-box.success { border-left: 4px solid var(--accent-active, #2ecc71); }
 .stat-box.info { border-left: 4px solid var(--accent); }
 
 .stat-label { font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; }
@@ -355,5 +364,38 @@ const barSeries = computed(() => {
 
 @media (max-width: 900px) {
   .chart-row { flex-direction: column; }
+}
+
+@media (max-width: 600px) {
+  .profile-list-table, 
+  .profile-list-table thead, 
+  .profile-list-table tbody, 
+  .profile-list-table tr, 
+  .profile-list-table td {
+    display: block;
+    width: 100% !important;
+    text-align: left !important;
+    box-sizing: border-box;
+  }
+  .profile-list-table thead { display: none; }
+  .profile-list-table tr {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-main);
+  }
+  .profile-list-table td {
+    padding: 2px 0 !important;
+    border: none !important;
+    background: transparent !important;
+  }
+  /* Payout and Date cells on mobile */
+  .profile-list-table td:nth-child(2),
+  .profile-list-table td:nth-child(3) {
+    display: inline-block;
+    width: auto !important;
+    margin-right: 15px;
+    margin-top: 4px;
+    font-size: 11px;
+    opacity: 0.9;
+  }
 }
 </style>

@@ -1,23 +1,35 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import VoteButton from '../layout/VoteButton.vue';
-import type { MediaTrack } from '../../types';
-import type { BFPlayerAPI, Playlist } from '../../modules/player';
+import PlaylistModal from '../modals/PlaylistModal.vue';
+import type { MediaTrack, BFPlayerAPI, Playlist } from '../../types';
 
 const props = defineProps<{
   player: BFPlayerAPI;
-  vw: number;
   t: (k: string) => string;
 }>();
 
+const vw = ref(typeof window !== 'undefined' ? window.innerWidth : 1200);
+const handleResize = () => { vw.value = window.innerWidth; };
+
 const emit = defineEmits<{
-  playerSeek: [pct: number];
   openProfile: [username: string];
   openTopic: [post: { author: string; permlink: string }];
-  openPlaylistModal: [track: MediaTrack | null];
   submitVote: [post: any];
   openPayoutModal: [post: any];
 }>();
+
+// ── Playlists ───────────────────────────────────────────────────────────────
+const playlistModal = reactive({
+  show: false,
+  track: null as MediaTrack | null
+});
+
+const handlePlaylistConfirm = (name: string, color: string, track: MediaTrack | null) => {
+  const pl = props.player.createPlaylist(name, color);
+  if (pl && track) props.player.addTrackToPlaylist(pl.id, track);
+  playlistModal.show = false;
+};
 
 // ── Hover progress ──────────────────────────────────────────────────────────
 const hoverProgressPct = ref<number | null>(null);
@@ -26,8 +38,9 @@ const hoverProgressTime = ref<number | null>(null);
 function handleProgressClick(e: MouseEvent): void {
   const el = e.currentTarget as HTMLElement;
   const pct = (e.offsetX / el.offsetWidth) * 100;
-  emit('playerSeek', pct);
+  props.player.seek(pct);
 }
+
 function handleProgressHover(e: MouseEvent): void {
   const el = e.currentTarget as HTMLElement;
   hoverProgressPct.value = (e.offsetX / el.offsetWidth) * 100;
@@ -35,11 +48,7 @@ function handleProgressHover(e: MouseEvent): void {
 }
 
 const displayedAutoQueue = computed(() => {
-  const historyIds = new Set(props.player.state.history.map(t => t.id));
-  return props.player.state.autoQueue.filter(t => 
-    t.id !== props.player.state.currentTrack?.id && 
-    !historyIds.has(t.id)
-  );
+  return props.player.state.autoQueue
 });
 
 const hasNext = computed(() => {
@@ -141,7 +150,8 @@ function addToPlaylistFromDropdown(playlistId: string): void {
 
 function createAndAddFromDropdown(): void {
   if (!dropdownTrack.value) return;
-  emit('openPlaylistModal', dropdownTrack.value);
+  playlistModal.track = dropdownTrack.value;
+  playlistModal.show = true;
   closePlaylistDropdown();
 }
 
@@ -150,8 +160,14 @@ function handleDocumentClick(): void { closePlaylistDropdown(); }
 function confirmDeletePlaylist(id: string, name: string): void {
   if (window.confirm(`Delete playlist "${name}"?`)) props.player.deletePlaylist(id);
 }
-onMounted(() => document.addEventListener('click', handleDocumentClick));
-onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick);
+  window.addEventListener('resize', handleResize);
+});
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick);
+  window.removeEventListener('resize', handleResize);
+});
 </script>
 
 <template>
@@ -322,7 +338,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
        @touchstart.prevent="player.initResize($event)"
        title="Drag to resize"></div>
 
-  <div class="bfp-panel-content">
+  <div class="bfp-panel-content" :class="'bfp-panel-content--' + player.state.expandedTab">
     
     <div class="bfp-panel-video" :class="{ 'bfp-media-hidden': vw <= 900 && player.state.expandedTab !== 'video' }">
       
@@ -526,7 +542,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
       <template v-if="!activePlaylistId">
         <div class="pl-header">
           <span class="pl-header-title"><i class="fa-solid fa-list"></i> {{ t('playlists') || 'Playlists' }}</span>
-          <button class="pl-new-btn" @click="emit('openPlaylistModal', player.state.currentTrack || null)">
+          <button class="pl-new-btn" @click="playlistModal.track = player.state.currentTrack || null; playlistModal.show = true;">
             <i class="fa-solid fa-plus"></i> {{ t('new') || 'New' }}
           </button>
         </div>
@@ -612,6 +628,14 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
     <i class="fa-solid fa-plus"></i> <span>New playlist</span>
   </div>
 </div>
+
+<PlaylistModal
+  :show="playlistModal.show"
+  :track="playlistModal.track"
+  :t="t"
+  @close="playlistModal.show = false"
+  @confirm="handlePlaylistConfirm"
+/>
 </template>
 
 <style>
@@ -854,7 +878,7 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
 /* ── Panel ───────────────────────────────────────────────────────────────── */
 .bfp-panel {
   position: fixed;
-  bottom: calc(var(--bfp-h) + var(--bfp-prog-h));
+  bottom: 0; /* Seal the gap by starting from the bottom */
   left: 0; right: 0;
   z-index: 999;
   background: var(--bfp-bg);
@@ -862,6 +886,9 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
   display: flex; flex-direction: column;
   box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
   transition: background 0.3s, transform 0.3s ease, opacity 0.3s ease;
+  /* Use padding to account for the bar height, bar will sit on top (higher z-index) */
+  padding-bottom: calc(var(--bfp-h) + var(--bfp-prog-h));
+  box-sizing: border-box;
 }
 /* Ensure panel stays in DOM but hidden visually to keep iframes playing */
 .bfp-panel--hidden {
@@ -1304,7 +1331,11 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
 @media (max-width: 900px) {
   .bfp-panel-content { flex-direction: column-reverse; height: 100%; min-height: 0; }
   .bfp-panel-tabs { border-left: none; min-width: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .bfp-panel-video { flex: 0 0 250px; min-height: 250px; z-index: 1; position: relative; }
+  .bfp-panel-video { flex: 1; min-height: 0; z-index: 1; position: relative; }
+  
+  /* When video tab is active, the tabs container should shrink to header height */
+  .bfp-panel-content--video .bfp-panel-tabs { flex: 0 0 auto; }
+  /* When other tabs are active, video is already hidden via .bfp-media-hidden */
   
   .bfp-panel-header { z-index: 10; position: relative; background: var(--bfp-bg); }
   
@@ -1314,9 +1345,18 @@ onUnmounted(() => document.removeEventListener('click', handleDocumentClick));
 }
 
 @media (max-width: 600px) {
-  .bfp-bar { --bfp-h: 64px; }
-  .bfp-vol { display: none; }
-  .bfp-info { max-width: 180px; }
+  .bfp-bar { --bfp-h: 60px; }
+  .bfp-vol, .bfp-ctrl-sep { display: none; }
+  .bfp-info { flex: 1; margin-right: 5px; }
+  .bfp-track-title { font-size: 12px; }
+  .bfp-track-meta { font-size: 9px; gap: 4px; }
+  .bfp-time { font-size: 9px; white-space: nowrap; }
+  
+  .bfp-controls { gap: 2px; }
+  .bfp-btn { padding: 4px 6px; font-size: 14px; }
+  .bfp-btn--play { width: 32px; height: 32px; font-size: 12px; }
+  .bfp-expand-btn { padding: 4px 6px; font-size: 14px; }
+  
   .bfp-cover { width: 44px; height: 44px; }
 }
 

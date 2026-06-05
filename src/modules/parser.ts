@@ -10,9 +10,6 @@ interface ParseContext {
   author?: string;
   permlink?: string;
   body?: string;
-  payout?: number;
-  voteCount?: number;
-  voted?: boolean;
 }
 
 export const Parser = {
@@ -37,11 +34,11 @@ export const Parser = {
       );
 
       return DOMPurify.sanitize(html, {
-        ADD_TAGS: ['iframe', 'button', 'img'],
+        ADD_TAGS: ['iframe', 'button', 'img', 'forum-media'],
         ADD_ATTR: [
           'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox',
           'data-type', 'data-id', 'data-host', 'data-title', 'data-author',
-          'data-src', 'data-cover', 'data-pending', 'src', 'alt'
+          'data-src', 'data-cover', 'src', 'alt', 'data-permlink', 'class'
         ],
       });
     } catch (e) {
@@ -129,93 +126,19 @@ export const Parser = {
     return null;
   },
 
-  async resolveMedia(track: MediaTrack): Promise<MediaTrack> {
-    if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
-      try {
-        const url = `https://suno.com/s/${track.id}`;
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const response = await fetch(proxyUrl);
-        const text = await response.text();
-        const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
-        if (uuidMatch) {
-          const uuid = uuidMatch[1];
-          return { ...track, id: uuid, src: `https://cdn1.suno.ai/${uuid}.mp3`, cover: `https://cdn2.suno.ai/image_large_${uuid}.jpeg` };
-        }
-      } catch (e) { console.error('Parser: Resolution failed', e); }
-    }
-    // Resolution for PeerTube thumbnails (e.g. blurt.media)
-    if (track.type === 'peertube' && !track.cover) {
-      try {
-        const apiUrl = `https://${track.host}/api/v1/videos/${track.id}`;
-        const response = await fetch(apiUrl);
-        const data = await response.json();
-        if (data.thumbnailPath) {
-          track.cover = `https://${track.host}${data.thumbnailPath}`;
-        }
-      } catch (e) { /* ignore */ }
-    }
-    return track;
-  },
-
   getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null): string {
-    let thumb = '';
-    let isPending = false;
-    let src = '';
-    let cover = '';
-
-    if (type === 'youtube') {
-      thumb = `https://img.youtube.com/vi/${id}/0.jpg`;
-    } else if (type === 'audio') {
-      if (id.length >= 36) {
-        thumb = `https://cdn2.suno.ai/image_large_${id}.jpeg`;
-        src = `https://cdn1.suno.ai/${id}.mp3`;
-        cover = thumb;
-      } else if (id.length < 30) {
-        isPending = true;
-      } else {
-        try { src = atob(id); } catch { src = id; }
-      }
-    } else if (type === 'peertube') {
-      if (cover) {
-        thumb = cover;
-      } else {
-        // Fallback placeholder while resolving
-        thumb = ''; 
-      }
-    }
-
-    const sourceLabel = isPending ? 'resolving...' : (host || type);
-    const title = (context?.title || 'Media Content').replace(/'/g, '&apos;');
+    const title = (context?.title || 'Media Content').replace(/"/g, '&quot;');
     const author = context?.author || 'post';
     const permlink = context?.permlink || '';
-    const payout = context?.payout || 0;
-    const voteCount = context?.voteCount || 0;
-    const voted = context?.voted || false;
 
-    return `<div class="media-placeholder ${isPending ? 'is-resolving' : ''}" 
-                 style="${thumb ? 'background-image:url(' + thumb + ')' : ''}" 
-                 data-type="${type}" data-id="${id}" data-host="${host}" 
-                 data-src="${src}" data-cover="${cover}" data-pending="${isPending}">
-<div class="media-placeholder-overlay">
-<div class="media-placeholder-actions">
-<button class="btn btn-primary bf-placeholder-play" 
-        data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" 
-        data-permlink="${permlink}" data-payout="${payout}" data-votecount="${voteCount}" data-voted="${voted}"
-        data-src="${src}" data-cover="${cover}">
-<i class="fa-solid fa-play"></i> Play
-</button>
-<button class="btn btn-ghost bf-placeholder-queue" 
-        data-type="${type}" data-id="${id}" data-host="${host}" data-title="${title}" data-author="${author}" 
-        data-permlink="${permlink}" data-payout="${payout}" data-votecount="${voteCount}" data-voted="${voted}"
-        data-src="${src}" data-cover="${cover}">
-<i class="fa-solid fa-plus"></i> Queue
-</button>
-<button class="btn btn-ghost bf-placeholder-embed" data-type="${type}" data-id="${id}" data-host="${host}">
-<i class="fa-solid fa-code"></i> Embed
-</button>
-</div>
-<div class="gs" style="color:#fff; font-size:10px; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">${sourceLabel}</div>
-</div>
-</div>`;
+    // Audio tracks with short IDs (Suno share) and PeerTube tracks without covers require resolution.
+    const isPending = (type === 'audio' && id.length < 30) || (type === 'peertube');
+
+    return `<div class="forum-media-card-wrapper">
+              <forum-media data-type="${type}" data-id="${id}" data-host="${host}" 
+                 data-title="${title}" data-author="${author}" data-permlink="${permlink}"
+                 data-pending="${isPending}"
+                 mode="card"></forum-media>
+            </div>`;
   },
 };

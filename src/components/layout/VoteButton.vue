@@ -20,28 +20,24 @@ const emit = defineEmits<{
   </span>
 </template>
 
-<style>
-.vote-btn {
-  display: inline-flex;
-  align-items: center;
+<style scoped>
+.vote-btn { 
+  cursor: pointer; 
+  color: var(--text-muted); 
+  font-size: 14px; 
+  user-select: none; 
+  transition: all 0.2s ease; 
+  display: inline-flex; 
+  align-items: center; 
+  justify-content: center; 
   gap: 4px;
-  cursor: pointer;
+  line-height: 1; 
   padding: 2px 6px;
   border-radius: 4px;
-  transition: all 0.2s;
-  color: var(--text-muted);
-  font-size: 14px;
 }
-
-.vote-btn:hover {
-  background: var(--bg-r3);
-  opacity: 0.8;
-}
-
-.vote-btn.active {
-  color: var(--success-text);
-  font-weight: bold;
-}
+.vote-btn:hover { color: var(--primary); transform: scale(1.1); background: var(--bg-r3); }
+.vote-btn.active { color: var(--accent-active); filter: drop-shadow(0 0 3px var(--accent-active)); transform: scale(1.1); font-weight: bold; }
+.vote-btn i { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)); }
 
 .vote-count {
   font-size: 10px;

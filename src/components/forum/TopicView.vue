@@ -1,7 +1,63 @@
 <script setup lang="ts">
-import type { Post, AuthUser } from '../../types';
+import { ref, reactive, onMounted, onUpdated } from 'vue';
+import { BFPlayer, dispatchScanView } from '../../modules/player';
+import { Blockchain } from '../../modules/blockchain';
+import { BFUtils } from '../../modules/utils';
+import OldContentModal from '../modals/OldContentModal.vue';
+import VoteButton from '../layout/VoteButton.vue';
+import PostBeneficiaries from '../layout/PostBeneficiaries.vue';
+import ForumMedia from '../player/ForumMedia.vue';
+import { createApp, h } from 'vue';
+import type { Post, AuthUser, RawPost, Beneficiary } from '../../types';
 
-defineProps<{
+// ... (props remains same) ...
+
+// ... (emits remains same) ...
+
+const hydrateMedia = (container: HTMLElement | null) => {
+  if (!container) return;
+  const placeholders = container.querySelectorAll('forum-media');
+  placeholders.forEach(el => {
+    // If already hydrated, skip
+    if (el.getAttribute('data-hydrated')) return;
+    
+    const props: any = {
+      dataType: el.getAttribute('data-type'),
+      dataId: el.getAttribute('data-id'),
+      dataSrc: el.getAttribute('data-src'),
+      dataCover: el.getAttribute('data-cover'),
+      dataHost: el.getAttribute('data-host'),
+      dataTitle: el.getAttribute('data-title'),
+      dataAuthor: el.getAttribute('data-author'),
+      dataPermlink: el.getAttribute('data-permlink'),
+      dataPending: el.getAttribute('data-pending'),
+      mode: el.getAttribute('mode') || 'card'
+    };
+    
+    const app = createApp({
+      render: () => h(ForumMedia, props)
+    });
+    
+    // Clear the element and mount the Vue app
+    el.innerHTML = '';
+    app.mount(el);
+    el.setAttribute('data-hydrated', 'true');
+  });
+};
+
+onUpdated(() => {
+  hydrateMedia(document.querySelector('.post-body'));
+  hydrateMedia(document.querySelector('.replies-container'));
+});
+
+onMounted(() => {
+  hydrateMedia(document.querySelector('.post-body'));
+  hydrateMedia(document.querySelector('.replies-container'));
+});
+
+// ... (logic remains same) ...
+
+const props = defineProps<{
   activeTopic: Post;
   replies: Post[];
   repliesLoading: boolean;
@@ -25,7 +81,71 @@ defineProps<{
   isNestedReply: (r: Post) => boolean;
   getParentBody: (r: Post) => string;
   isPostInCommunity: (p: Post) => boolean;
+  client: any;
+  broadcast: (ops: any[]) => Promise<void>;
+  waitAndReload: (isTopic: boolean, author?: string, permlink?: string, pollFn?: any, label?: string) => Promise<void>;
+  checkLock: (fn: any) => boolean;
 }>();
+
+// ... (emits remains same) ...
+
+// ── Support Old Content ───────────────────────────────────────────────────
+const oldContentModal = reactive({
+  show: false,
+  author: '',
+  permlink: '',
+  beneficiaries: [] as Beneficiary[],
+  originalPost: null as RawPost | null,
+  weight: 0,
+  body: '',
+  status: '',
+  loading: false
+});
+
+const triggerSupportLogic = async (post: Post, weight: number): Promise<void> => {
+  let fullPost: RawPost = post as unknown as RawPost;
+  if (!post.beneficiaries?.length) {
+    try { fullPost = await props.client.condenser.getContent(post.author, post.permlink); } catch { /* ignore */ }
+  }
+  const beneficiaries = (fullPost.beneficiaries || []) as Beneficiary[];
+  let existingSupport: RawPost | undefined;
+  try {
+    const reps = await props.client.condenser.getContentReplies(post.author, post.permlink);
+    existingSupport = reps.find((r: any) => {
+      if (!r.body?.trim().startsWith('Supporting original content by @')) return false;
+      const rBens = (r.beneficiaries || []) as Beneficiary[];
+      return rBens.length === beneficiaries.length && beneficiaries.every(b => rBens.some(rb => rb.account === b.account && rb.weight === b.weight));
+    });
+  } catch { /* ignore */ }
+  if (existingSupport) {
+    try { await props.broadcast([['vote', { voter: props.auth.user!.username, author: existingSupport.author, permlink: existingSupport.permlink, weight }]]); } catch { /* ignore */ }
+  } else {
+    oldContentModal.author = post.author; oldContentModal.permlink = post.permlink; oldContentModal.beneficiaries = beneficiaries; oldContentModal.originalPost = fullPost; oldContentModal.weight = weight; oldContentModal.body = 'Supporting original content by @' + post.author; oldContentModal.status = ''; oldContentModal.loading = false; oldContentModal.show = true;
+  }
+};
+
+const submitSupportComment = async (): Promise<void> => {
+  if (props.checkLock(submitSupportComment)) return;
+  if (!props.auth.user || !oldContentModal.author) return;
+  oldContentModal.loading = true; oldContentModal.status = props.t('supporting');
+  const permlink = BFUtils.genPermlink('support-' + oldContentModal.author);
+  const beneficiaries = oldContentModal.beneficiaries.length ? [...oldContentModal.beneficiaries].sort((a, b) => a.account.localeCompare(b.account)) : [{ account: oldContentModal.author, weight: 10000 }];
+  const op = ['comment', { parent_author: oldContentModal.author, parent_permlink: oldContentModal.permlink, author: props.auth.user.username, permlink, title: '', body: oldContentModal.body, json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: ['blurt-140455'] }) }];
+  const options = ['comment_options', { author: props.auth.user.username, permlink, max_accepted_payout: '1000000.000 BLURT', percent_steem_dollars: 10000, allow_votes: true, allow_curation_rewards: true, extensions: [[0, { beneficiaries }]] }];
+  try {
+    await props.broadcast([op, options]);
+    oldContentModal.status = props.t('waitingForBlock');
+    await new Promise(r => setTimeout(r, 5000));
+    oldContentModal.status = props.t('votingOnSupport');
+    await props.broadcast([['vote', { voter: props.auth.user.username, author: props.auth.user.username, permlink, weight: oldContentModal.weight || 10000 }]]);
+    oldContentModal.status = props.t('supportSuccess');
+    setTimeout(() => { oldContentModal.show = false; }, 1500);
+  } catch (err) { console.error('Support error:', err); oldContentModal.status = 'Error: ' + (err as Error).message; }
+  oldContentModal.loading = false;
+};
+
+// ... (rest of logic) ...
+
 
 const emit = defineEmits<{
   openProfile: [username: string];
@@ -37,6 +157,7 @@ const emit = defineEmits<{
   mutePost: [post: Post, mute: boolean];
   switchCommunity: [account: string];
   loadTopicContext: [];
+  handleMediaAction: [type: string, id: string, host: string, action: string, data: any];
   submitReply: [];
   onReplyImagePick: [event: Event];
   onReplyPaste: [event: ClipboardEvent];
@@ -44,12 +165,21 @@ const emit = defineEmits<{
   'update:replyPreview': [value: boolean];
   'update:replyTarget': [value: Post | null];
 }>();
+
+// Po każdym render-passie player skanuje ten widok.
+// nextTick gwarantuje, że forum-media są już w DOM.
+const triggerScan = () => {
+  // Przekazujemy konkretny kontener — player nie musi skanować całego dokumentu.
+  const container = document.querySelector('.topic-view-root');
+  console.log("aaaa", container);
+  dispatchScanView(container);
+};
+onMounted(triggerScan);
+onUpdated(triggerScan);
 </script>
 
 <template>
-    
- 
-      <!-- EXTERNAL POST WARNING -->
+    <div class="topic-view-root">
       <div v-if="!isPostInCommunity(activeTopic)" class="alert alert-info" style="margin-bottom:15px">
         🌐 {{ t('externalPostWarning') || 'This post is outside the currently selected community.' }} 
         (Category: 
@@ -77,19 +207,15 @@ const emit = defineEmits<{
                   <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="emit('openPayoutModal', activeTopic)">
                     {{ (activeTopic.payout || 0).toFixed(2) }} BLURT
                   </span>
-                  <template v-if="activeTopic.beneficiaries && activeTopic.beneficiaries.length">
-                    <div class="beneficiaries-inline">
-                      <span class="ben-icon">👥</span>
-                      <template v-for="(b, bi) in activeTopic.beneficiaries.slice(0,3)" :key="b.account">
-                        <a href="#" @click.prevent="emit('openProfile', b.account)" class="ben-link">@{{ b.account }}</a>
-                        <span class="ben-pct">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
-                        <span v-if="bi < activeTopic.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
-                      </template>
-                      <span v-if="activeTopic.beneficiaries.length > 3" class="ben-more">+{{ activeTopic.beneficiaries.length - 3 }}</span>
-                    </div>
-                  </template>
-                  <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="emit('submitVote', activeTopic)" style="font-size: 16px;"><i class="fa-solid fa-caret-up"></i></span>
-                  <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
+                  
+                  <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
+
+                  <VoteButton 
+                    :voted="hasVoted(activeTopic)" 
+                    :count="activeTopic.vote_count" 
+                    @vote="emit('submitVote', activeTopic)" 
+                    style="font-size: 16px;"
+                  />
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
@@ -123,8 +249,7 @@ const emit = defineEmits<{
                         style="width:auto; margin:0; padding:2px 6px !important;">
                   <i class="fa-solid" :class="followingSet.has(activeTopic.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                 </button>
-                <span class="vote-btn" :class="{active: hasVoted(activeTopic)}" @click="emit('submitVote', activeTopic)"><i class="fa-solid fa-caret-up"></i></span>
-                <span class="gs" style="font-weight: bold;">{{ activeTopic.vote_count }}</span>
+                <VoteButton :voted="hasVoted(activeTopic)" :count="activeTopic.vote_count" @vote="emit('submitVote', activeTopic)" />
               </div>
 
               <!-- Mobile Header Stats (OP) -->
@@ -135,15 +260,7 @@ const emit = defineEmits<{
                   </span>
                   
                   
-                  <template v-if="activeTopic.beneficiaries && activeTopic.beneficiaries.length">
-                    <div class="beneficiaries-inline" style="margin:0">
-                      <span class="ben-icon">👥</span>
-                      <template v-for="(b, bi) in activeTopic.beneficiaries.slice(0,2)" :key="b.account">
-                        <span class="ben-link" style="font-size:11px">@{{ b.account }}</span>
-                        <span class="ben-pct" style="font-size:10px">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
-                      </template>
-                    </div>
-                  </template>
+                  <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
                   
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
@@ -152,7 +269,18 @@ const emit = defineEmits<{
                 </div>
               </div>
 
-              <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
+              <ForumMedia 
+                v-if="activeTopic.media"
+                :hideButtons="true"
+                :media="activeTopic.media"
+                :title="activeTopic.title || ''"
+                :author="activeTopic.author"
+                :permlink="activeTopic.permlink"
+                :t="t"
+              >
+                <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
+              </ForumMedia>
+              <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
               <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
                 <template v-if="auth.user">
                   <button class="btn btn-sm" @click="emit('startReply', activeTopic)">{{ t('reply') }}</button>
@@ -247,19 +375,9 @@ const emit = defineEmits<{
                       <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="emit('openPayoutModal', r)">
                         {{ (r.payout || 0).toFixed(3) }} B
                       </span>
-                      <template v-if="r.beneficiaries && r.beneficiaries.length">
-                        <div class="beneficiaries-inline">
-                          <span class="ben-icon">👥</span>
-                          <template v-for="(b, bi) in r.beneficiaries.slice(0,3)" :key="b.account">
-                            <a href="#" @click.prevent="emit('openProfile', b.account)" class="ben-link">@{{ b.account }}</a>
-                            <span class="ben-pct">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
-                            <span v-if="bi < r.beneficiaries.slice(0,3).length-1" class="ben-sep">,</span>
-                          </template>
-                          <span v-if="r.beneficiaries.length > 3" class="ben-more">+{{ r.beneficiaries.length - 3 }}</span>
-                        </div>
-                      </template>
-                      <span class="vote-btn" :class="{active: hasVoted(r)}" @click="emit('submitVote', r)"><i class="fa-solid fa-caret-up"></i></span>
-                      <span class="gs" style="font-weight: bold;">{{ r.vote_count }}</span>
+                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
+                      <VoteButton :voted="hasVoted(r)" :count="r.vote_count" @vote="emit('submitVote', r)" />
+
                       <template v-if="canMute && isPostInCommunity(r)">
                         <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
                         <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
@@ -308,15 +426,7 @@ const emit = defineEmits<{
                       </span>
                       
 
-                      <template v-if="r.beneficiaries && r.beneficiaries.length">
-                        <div class="beneficiaries-inline" style="margin:0">
-                          <span class="ben-icon">👥</span>
-                          <template v-for="(b, bi) in r.beneficiaries.slice(0,2)" :key="b.account">
-                            <span class="ben-link" style="font-size:11px">@{{ b.account }}</span>
-                            <span class="ben-pct" style="font-size:10px">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
-                          </template>
-                        </div>
-                      </template>
+                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
                       
                       <template v-if="canMute && isPostInCommunity(r)">
                         <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
@@ -336,7 +446,18 @@ const emit = defineEmits<{
                     <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))"></div>
                   </div>
     
-                  <div class="post-body" v-html="renderMD(r.body, r)"></div>
+                  <ForumMedia 
+                    v-if="r.media"
+                    :hideButtons="true"
+                    :media="r.media"
+                    :title="r.title || ''"
+                    :author="r.author"
+                    :permlink="r.permlink"
+                    :t="t"
+                  >
+                    <div class="post-body" v-html="renderMD(r.body, r)"></div>
+                  </ForumMedia>
+                  <div v-else class="post-body" v-html="renderMD(r.body, r)"></div>
     
                   <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
                     <template v-if="auth.user">
@@ -395,6 +516,13 @@ const emit = defineEmits<{
       </template>
  
     <!-- /topic -->
-
+    <OldContentModal
+      v-if="oldContentModal.show"
+      :old-content-modal="oldContentModal"
+      :t="t"
+      @close="oldContentModal.show = false"
+      @submit="submitSupportComment"
+    />
+  </div>
 </template>
-late>
+

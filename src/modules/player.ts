@@ -2,80 +2,9 @@
  * BlurtForum MediaPlayer Library
  * Handles audio/video playback, queuing, playlists, event emitter and plugin API.
  */
-import { reactive, watch, nextTick } from 'vue';
-import type { MediaTrack } from '../types';
+import { reactive, watch, nextTick, ref } from 'vue';
 import { Parser } from './parser';
-
-// ─── Types ─────────────────────────────────────────────────────────────────
-export type PlayMode = 'sequential' | 'shuffle' | 'repeat-all' | 'repeat-one';
-
-export interface PlayerState {
-  enabled: boolean;
-  active: boolean;
-  playing: boolean;
-  loading: boolean;
-  minimized: boolean;
-  expanded: boolean;
-  expandedHeight: number;
-  expandedTab: 'video' | 'queue' | 'playlists';
-  currentTrack: MediaTrack | null;
-  queue: MediaTrack[];
-  autoQueue: MediaTrack[];
-  history: MediaTrack[];
-  progress: number;
-  duration: number;
-  volume: number;
-  experimental: boolean;
-  isAutoStarting: boolean;
-  playMode: PlayMode;
-}
-export interface Playlist {
-  id: string;
-  name: string;
-  color: string;
-  createdAt: number;
-  updatedAt: number;
-  tracks: (MediaTrack & { addedAt?: number })[];
-}
-
-export interface PlaylistState {
-  playlists: Playlist[];
-}
-
-export type PlayerEvent =
-  | 'trackChange' | 'play' | 'pause' | 'next' | 'prev'
-  | 'ended' | 'volumeChange' | 'error';
-
-export interface PlayerPlugin {
-  name: string;
-  install?: (player: BFPlayerAPI) => void;
-  onTrackChange?: (track: MediaTrack) => void;
-}
-
-export interface BFPlayerAPI {
-  state: PlayerState;
-  playlistState: PlaylistState;
-  playTrack: (track: MediaTrack, isManual?: boolean, manualIdx?: number, fromHistory?: boolean) => Promise<void>;
-  playNext: (isAuto?: boolean) => void;
-  playPrev: () => void;
-  togglePlay: () => void;
-  seek: (pct: number) => void;
-  addToQueue: (track: MediaTrack) => void;
-  setAutoQueue: (tracks: MediaTrack[]) => void;
-  initResize: (e: MouseEvent | TouchEvent) => void;
-  scrollToCurrent: () => void;
-  toggleExperimental: (val: boolean) => void;
-  togglePlayMode: () => void;
-  on: (event: PlayerEvent, fn: (data: unknown) => void) => void;
-  off: (event: PlayerEvent, fn: (data: unknown) => void) => void;
-  registerPlugin: (plugin: PlayerPlugin) => void;
-  createPlaylist: (name: string, color?: string) => Playlist | null;
-  deletePlaylist: (id: string) => void;
-  renamePlaylist: (id: string, newName: string) => void;
-  addTrackToPlaylist: (playlistId: string, track: MediaTrack) => boolean;
-  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
-  playPlaylist: (playlistId: string, startIndex?: number) => void;
-}
+import type { MediaTrack, PlayerState, Playlist, PlaylistState, PlayerEvent, PlayerPlugin, BFPlayerAPI, PlayMode } from '../types';
 
 // Minimal YouTube IFrame API typings
 export interface YTPlayer {
@@ -116,7 +45,7 @@ declare global {
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
-const state = reactive<PlayerState>({
+export const state = reactive<PlayerState>({
   enabled: true,
   active: true,
   playing: false,
@@ -394,16 +323,6 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   // Singleton: stop everything else before starting new track
   stopAll();
 
-  if (track.type === 'audio' && !track.src && track.id && track.id.length < 30) {
-    const originalId = track.id;
-    const resolved = await Parser.resolveMedia(track);
-    if (resolved?.src) {
-      track = resolved;
-      const aqIdx = state.autoQueue.findIndex(t => t.id === originalId);
-      if (aqIdx !== -1) Object.assign(state.autoQueue[aqIdx], resolved);
-    } else { handleError('Could not resolve audio source'); return; }
-  }
-
   // Save to history if we were playing something AND it's a different track
   if (state.currentTrack && state.currentTrack.id !== track.id && !fromHistory) {
     const historyEntry = { ...state.currentTrack };
@@ -555,6 +474,120 @@ export const seek = (pct: number): void => {
 export const addToQueue = (track: MediaTrack): void => { state.queue.push(track); };
 export const setAutoQueue = (tracks: MediaTrack[]): void => { state.autoQueue = tracks; };
 
+// ─── DOM-aware Auto-queue ───────────────────────────────────────────────────
+//
+// Views emit a CustomEvent 'bf:scan-view' instead of passing data.
+// The player scans the DOM for <forum-media> elements and builds the
+// autoQueue. It can also modify these elements (e.g., add 'is-playing' class).
+//
+// <forum-media> attributes:
+//   data-type     — 'audio' | 'youtube' | 'peertube'
+//   data-id       — media identifier
+//   data-src      | direct audio URL (optional)
+//   data-cover    | thumbnail URL (optional)
+//   data-host     | PeerTube host (optional)
+//   data-title    | post title
+//   data-author   | post author
+//   data-permlink | post permlink
+//   data-payout   | payout (float, optional)
+//   data-votecount| vote count (int, optional)
+//   data-voted    | is voted ('true'/'false', optional)
+//   data-pending  | requires resolution ('true'/'false', optional)
+
+// ─── Track Registration (Vue-centric) ──────────────────────────────────────
+
+const visibleTracks = ref<MediaTrack[]>([]);
+
+/**
+ * Registers a track as currently visible/available in the view.
+ * Components call this onMounted.
+ */
+export const registerTrack = (track: MediaTrack): void => {
+  const idx = visibleTracks.value.findIndex((t: MediaTrack) => t.id === track.id && t.type === track.type);
+  if (idx === -1) {
+    visibleTracks.value.push(track);
+  } else {
+    // Update existing track metadata (useful when pending tracks resolve)
+    visibleTracks.value[idx] = { ...track };
+  }
+  state.autoQueue = [...visibleTracks.value];
+
+  // Also propagate updates to currentTrack if IDs match
+  if (state.currentTrack && state.currentTrack.id === track.id && state.currentTrack.type === track.type) {
+    // Merge new metadata into currentTrack
+    Object.assign(state.currentTrack, track);
+  }
+
+  // And to the manual queue
+  state.queue.forEach(t => {
+    if (t.id === track.id && t.type === track.type) {
+      Object.assign(t, track);
+    }
+  });
+};
+
+/**
+ * Unregisters a track when it's no longer in the view.
+ * Components call this onUnmounted.
+ */
+export const unregisterTrack = (trackId: string, type: string): void => {
+  visibleTracks.value = visibleTracks.value.filter((t: MediaTrack) => !(t.id === trackId && t.type === type));
+  state.autoQueue = [...visibleTracks.value];
+};
+
+/**
+ * Clears all registered tracks. Useful for page transitions if needed.
+ */
+export const clearTracks = (): void => {
+  visibleTracks.value = [];
+  state.autoQueue = [];
+};
+
+// Aktualizuje atrybuty/klasy <forum-media> na podstawie stanu playera.
+// Wywoływane przy każdej zmianie currentTrack.
+const _syncForumMediaDOM = (): void => {
+  document.querySelectorAll<HTMLElement>('forum-media').forEach(el => {
+    const id   = el.getAttribute('data-id');
+    const type = el.getAttribute('data-type');
+    const isActive =
+      state.currentTrack?.id   === id &&
+      state.currentTrack?.type === type;
+    el.classList.toggle('is-playing', isActive && state.playing);
+    el.classList.toggle('is-active',  isActive);
+  });
+};
+
+export const scanView = (container?: Element | null): void => {
+  // scanView is now mostly a no-op or a bridge for non-Vue content.
+  // For Vue content, registration is automatic.
+  console.log('[Player] scanView called (registration is now component-based)');
+};
+
+// Eksport dla wstecznej kompatybilności lub ręcznego użycia spoza Vue.
+export const dispatchScanView = (container?: Element | null): void => {
+  window.dispatchEvent(new CustomEvent('bf:scan-view', {
+    detail: { container: container ?? null },
+  }));
+};
+
+// Zachowaj starą nazwę jako alias — ułatwia migrację miejsc, które
+// jeszcze nie zostały przepisane.
+export const dispatchPageChange = dispatchScanView;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('bf:scan-view', (e: Event) => {
+    const container = (e as CustomEvent<{ container: Element | null }>).detail?.container;
+    console.log(container);
+    scanView(container);
+  });
+}
+
+// Synchronizuj DOM przy każdej zmianie currentTrack i stanu playing.
+watch(
+  () => [state.currentTrack?.id, state.playing] as const,
+  () => { nextTick(_syncForumMediaDOM); },
+);
+
 export const toggleExperimental = (val: boolean): void => {
   state.experimental = val;
   localStorage.setItem('bf-player-experimental', String(val));
@@ -636,7 +669,8 @@ export const BFPlayer: BFPlayerAPI = {
   state,
   playlistState,
   playTrack, playNext, playPrev, togglePlay, seek,
-  addToQueue, setAutoQueue,
+  addToQueue, setAutoQueue, scanView,
+  registerTrack, unregisterTrack, clearTracks,
   initResize, scrollToCurrent, toggleExperimental,
   togglePlayMode,
   on, off, registerPlugin,
