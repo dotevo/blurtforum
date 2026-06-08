@@ -123,11 +123,20 @@ export interface Moderator {
   title?: string;
 }
 
+export interface Delegation {
+  delegator: string;
+  delegatee: string;
+  vesting_shares: string;
+  min_delegation_time: string;
+  bp?: string;
+}
+
 export interface AuthUser {
   username: string;
   type: 'key' | 'whalevault';
   key: string | null;
   vp: string;
+  balance?: string;
   locked?: boolean;
   hasRewards?: boolean;
   rewardBlurt?: string;

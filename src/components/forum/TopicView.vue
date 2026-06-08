@@ -6,54 +6,14 @@ import { BFUtils } from '../../modules/utils';
 import OldContentModal from '../modals/OldContentModal.vue';
 import VoteButton from '../layout/VoteButton.vue';
 import PostBeneficiaries from '../layout/PostBeneficiaries.vue';
-import ForumMedia from '../player/ForumMedia.vue';
-import { createApp, h } from 'vue';
+import ForumMedia from '../player/ForumMedia.ce.vue';
+import PayoutBadge from '../layout/PayoutBadge.vue';
+import UserAvatar from '../layout/UserAvatar.vue';
 import type { Post, AuthUser, RawPost, Beneficiary } from '../../types';
 
 // ... (props remains same) ...
 
 // ... (emits remains same) ...
-
-const hydrateMedia = (container: HTMLElement | null) => {
-  if (!container) return;
-  const placeholders = container.querySelectorAll('forum-media');
-  placeholders.forEach(el => {
-    // If already hydrated, skip
-    if (el.getAttribute('data-hydrated')) return;
-    
-    const props: any = {
-      dataType: el.getAttribute('data-type'),
-      dataId: el.getAttribute('data-id'),
-      dataSrc: el.getAttribute('data-src'),
-      dataCover: el.getAttribute('data-cover'),
-      dataHost: el.getAttribute('data-host'),
-      dataTitle: el.getAttribute('data-title'),
-      dataAuthor: el.getAttribute('data-author'),
-      dataPermlink: el.getAttribute('data-permlink'),
-      dataPending: el.getAttribute('data-pending'),
-      mode: el.getAttribute('mode') || 'card'
-    };
-    
-    const app = createApp({
-      render: () => h(ForumMedia, props)
-    });
-    
-    // Clear the element and mount the Vue app
-    el.innerHTML = '';
-    app.mount(el);
-    el.setAttribute('data-hydrated', 'true');
-  });
-};
-
-onUpdated(() => {
-  hydrateMedia(document.querySelector('.post-body'));
-  hydrateMedia(document.querySelector('.replies-container'));
-});
-
-onMounted(() => {
-  hydrateMedia(document.querySelector('.post-body'));
-  hydrateMedia(document.querySelector('.replies-container'));
-});
 
 // ... (logic remains same) ...
 
@@ -166,12 +126,11 @@ const emit = defineEmits<{
   'update:replyTarget': [value: Post | null];
 }>();
 
-// Po każdym render-passie player skanuje ten widok.
-// nextTick gwarantuje, że forum-media są już w DOM.
+// After each render-pass, the player scans this view.
+// nextTick ensures that forum-media tags are already in the DOM.
 const triggerScan = () => {
-  // Przekazujemy konkretny kontener — player nie musi skanować całego dokumentu.
+  // We pass a specific container — the player doesn't have to scan the entire document.
   const container = document.querySelector('.topic-view-root');
-  console.log("aaaa", container);
   dispatchScanView(container);
 };
 onMounted(triggerScan);
@@ -204,9 +163,7 @@ onUpdated(triggerScan);
                 <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                   <span v-if="activeTopic.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                  <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="emit('openPayoutModal', activeTopic)">
-                    {{ (activeTopic.payout || 0).toFixed(2) }} BLURT
-                  </span>
+                  <PayoutBadge :post="activeTopic" :show-currency="true" @click="emit('openPayoutModal', activeTopic)" />
                   
                   <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
 
@@ -227,7 +184,7 @@ onUpdated(triggerScan);
         <tbody>
           <tr>
             <td class="row1 post-profile hide-mobile">
-              <div class="avatar" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/128x128)'}"></div>
+              <UserAvatar :username="activeTopic.author" size="lg" @click="emit('openProfile', activeTopic.author)" />
               <div v-if="auth.user && auth.user.username !== activeTopic.author" style="margin-top:8px;">
                 <button class="btn btn-sm btn-follow" :class="followingSet.has(activeTopic.author) ? 'btn-ghost' : 'btn-accent'" @click="emit('toggleFollow', activeTopic.author)">
                   <i class="fa-solid" :class="followingSet.has(activeTopic.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
@@ -239,7 +196,7 @@ onUpdated(triggerScan);
             <td class="row1 post-body-cell">
               <!-- Mobile Header (OP) -->
               <div class="comment-mobile-header show-mobile">
-                <div class="avatar avatar-xs" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+activeTopic.author+'/64x64)'}"></div>
+                <UserAvatar :username="activeTopic.author" size="xs" @click="emit('openProfile', activeTopic.author)" />
                 <div style="flex:1">
                   <div style="font-weight:bold; font-size:14px;"><a href="#" @click.prevent="emit('openProfile', activeTopic.author)">@{{ activeTopic.author }}</a></div>
                   <div class="gs" style="font-size:10px;">{{ fmtDate(activeTopic.created) }}</div>
@@ -255,9 +212,7 @@ onUpdated(triggerScan);
               <!-- Mobile Header Stats (OP) -->
               <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <span class="badge payout-link" :class="activeTopic.isPaid?'badge-green':'badge-blue'" @click="emit('openPayoutModal', activeTopic)">
-                    {{ (activeTopic.payout || 0).toFixed(2) }} B
-                  </span>
+                  <PayoutBadge :post="activeTopic" @click="emit('openPayoutModal', activeTopic)" />
                   
                   
                   <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
@@ -372,9 +327,7 @@ onUpdated(triggerScan);
                     </span>
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                       <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                      <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="emit('openPayoutModal', r)">
-                        {{ (r.payout || 0).toFixed(3) }} B
-                      </span>
+                      <PayoutBadge :post="r" :precision="3" @click="emit('openPayoutModal', r)" />
                       <PostBeneficiaries :beneficiaries="r.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
                       <VoteButton :voted="hasVoted(r)" :count="r.vote_count" @vote="emit('submitVote', r)" />
 
@@ -389,7 +342,7 @@ onUpdated(triggerScan);
             <tbody>
               <tr>
                 <td :class="i%2===0?'row1':'row2'" class="post-profile hide-mobile">
-                  <div class="avatar avatar-sm" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/128x128)'}"></div>
+                  <UserAvatar :username="r.author" size="sm" @click="emit('openProfile', r.author)" />
                   <div v-if="auth.user && auth.user.username !== r.author" style="margin-top:6px; margin-bottom:6px;">
                     <button class="btn btn-sm btn-follow" :class="followingSet.has(r.author) ? 'btn-ghost' : 'btn-accent'" @click="emit('toggleFollow', r.author)">
                       <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
@@ -400,7 +353,7 @@ onUpdated(triggerScan);
                 <td :class="i%2===0?'row1':'row2'" class="post-body-cell">
                   <!-- Mobile Header -->
                   <div class="comment-mobile-header show-mobile">
-                    <div class="avatar avatar-xs" :style="{backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+r.author+'/64x64)'}"></div>
+                    <UserAvatar :username="r.author" size="xs" @click="emit('openProfile', r.author)" />
                     <div style="flex:1">
                       <div style="font-weight:bold; font-size:13px;"><a href="#" @click.prevent="emit('openProfile', r.author)">@{{ r.author }}</a></div>
                       <div class="gs" style="font-size:10px;">#{{ i+1 }} · {{ fmtDate(r.created) }}</div>
@@ -421,9 +374,7 @@ onUpdated(triggerScan);
                   <!-- Mobile Header Stats (payout/votes) -->
                   <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                      <span class="badge payout-link" :class="r.totalPayout>0?'badge-green':'badge-blue'" @click="emit('openPayoutModal', r)">
-                        {{ (r.payout || 0).toFixed(3) }} B
-                      </span>
+                      <PayoutBadge :post="r" :precision="3" @click="emit('openPayoutModal', r)" />
                       
 
                       <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />

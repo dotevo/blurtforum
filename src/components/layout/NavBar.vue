@@ -39,3 +39,38 @@ const emit = defineEmits<{
   <template v-if="view==='newpost'"> &raquo; {{ t('newPost') }}</template>
 </div>
 </template>
+
+<style scoped>
+.nav-bar {
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--border-main);
+  padding: 0 10px;
+  display: flex;
+  justify-content: space-between;
+}
+.nav-links { display: flex; }
+.nav-link {
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--accent); background: var(--bg-page); }
+
+.breadcrumb {
+  background: var(--bg-page);
+  padding: 8px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-main);
+  color: var(--text);
+}
+.breadcrumb a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.breadcrumb a:hover {
+  text-decoration: underline;
+}
+</style>

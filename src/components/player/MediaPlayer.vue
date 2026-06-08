@@ -206,8 +206,8 @@ onUnmounted(() => {
           <div v-else class="bfp-cover-placeholder"><i class="fa-solid fa-music"></i></div>
         </div>
         <div class="bfp-minimized-info">
-          <div class="bfp-minimized-title">{{ player.state.currentTrack?.title || 'Brak utworu' }}</div>
-          <div class="bfp-minimized-author">{{ player.state.currentTrack ? '@' + player.state.currentTrack.author : 'Otwórz playlisty' }}</div>
+          <div class="bfp-minimized-title">{{ player.state.currentTrack?.title || t('noTracks') || 'No track' }}</div>
+          <div class="bfp-minimized-author">{{ player.state.currentTrack ? '@' + player.state.currentTrack.author : t('playlists') }}</div>
         </div>
         <i v-if="player.state.currentTrack" class="fa-solid" :class="player.state.playing ? 'fa-pause' : 'fa-play'" style="margin: 0 15px;"></i>
         <i v-else class="fa-solid fa-list" style="margin: 0 15px;"></i>

@@ -3,7 +3,9 @@ import { onMounted, onUpdated } from 'vue';
 import { dispatchScanView } from '../../modules/player';
 import type { Forum, Post, AuthUser } from '../../types';
 import VoteButton from '../layout/VoteButton.vue';
-import ForumMedia from '../player/ForumMedia.vue';
+import ForumMedia from '../player/ForumMedia.ce.vue';
+import PayoutBadge from '../layout/PayoutBadge.vue';
+import UserAvatar from '../layout/UserAvatar.vue';
 
 const props = defineProps<{
   activeForum: Forum;
@@ -42,8 +44,7 @@ const emit = defineEmits<{
   schedulePostFeeUpdate: [];
   'update:postPreview': [value: boolean];
   'update:showNewPostForm': [value: boolean];
-  nextPage: [];
-  prevPage: [];
+  changePage: [dir: 'next' | 'prev'];
   openForum: [forum: Forum];
 }>();
 
@@ -201,14 +202,13 @@ onUpdated(triggerScan);
             </td>
             <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
               <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                <UserAvatar :username="post.author" size="xs" @click="$emit('openProfile', post.author)" />
                 <a href="#" @click.stop.prevent="$emit('openProfile', post.author)">@{{ post.author }}</a>
                 <span v-if="post.isFollowing" class="gs" style="color:var(--accent); font-size:9px;" :title="t('followed')"><i class="fa-solid fa-user-check"></i></span>
               </div>
             </td>
             <td :class="i%2===0?'row2':'row1'" align="center" class="col-payout">
-              <span class="badge payout-link" :class="post.isPaid?'badge-green':'badge-blue'" @click.stop="$emit('openPayoutModal', post)">
-                {{ (post.payout || 0).toFixed(2) }} B
-              </span>
+              <PayoutBadge :post="post" @click="$emit('openPayoutModal', post)" />
             </td>
             <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
               <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br>
@@ -220,14 +220,14 @@ onUpdated(triggerScan);
       </table>
 
       <div  style="display: flex; justify-content: center; gap: 20px; margin-top: 20px; align-items: center;">
-        <button class="btn btn-primary" v-if="activeForum.pageHistory.length" @click="$emit('prevPage')" :disabled="loading">
+        <button class="btn btn-primary" v-if="activeForum.pageHistory.length" @click="emit('changePage', 'prev')" :disabled="loading">
           « {{ t('prev') }}
         </button>
-        <button class="btn btn-ghost" v-if="activeForum.pageHistory.length === 0 && activeForum.start_author" @click="$emit('openForum', activeForum)">
+        <button class="btn btn-ghost" v-if="activeForum.pageHistory.length === 0 && activeForum.start_author" @click="emit('openForum', activeForum)">
           «« {{ t('firstPage') || 'First Page' }}
         </button>
         <span class="gs" style="font-weight: bold;">{{ t('page') }} {{ activeForum.pageHistory.length + 1 }}</span>
-        <button class="btn btn-primary" @click="$emit('nextPage')" :disabled="loading || !activeForum.hasMore">
+        <button class="btn btn-primary" @click="emit('changePage', 'next')" :disabled="loading || !activeForum.hasMore">
           {{ t('next') }} »
         </button>
       </div>

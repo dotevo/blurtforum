@@ -370,6 +370,30 @@ const sourceLabel = computed(() => {
 </template>
 
 <style scoped>
+/* Re-inject essential global styles for Shadow DOM */
+.btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 1px solid var(--input-border, #999);
+  background: var(--input-bg, #fff);
+  color: var(--text, #333);
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.btn:hover { background: var(--bg-white, #fff); border-color: var(--primary, #006699); color: var(--primary, #006699); }
+.btn-primary { background: var(--primary, #006699); color: #fff; border-color: var(--primary-dk, #005580); }
+.btn-primary:hover { background: var(--primary-lt, #0076B1); color: #fff; }
+.btn-ghost { background: transparent; color: var(--primary, #006699); border: 1px solid var(--primary, #006699); }
+.btn-ghost:hover { background: var(--primary, #006699); color: #fff; }
+.btn:disabled { opacity: .5; cursor: default; }
+
 .forum-media-container {
   display: block;
   width: 100%;
@@ -383,7 +407,20 @@ const sourceLabel = computed(() => {
   width: auto;
 }
 
-/* ... micro styles ... */
+.forum-media-micro {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.media-icon {
+  cursor: pointer;
+  color: var(--primary, #006699);
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  font-size: 14px;
+}
+.media-icon:hover { opacity: 1; }
 
 .forum-media-container.mode-card {
   display: block;
@@ -401,8 +438,20 @@ const sourceLabel = computed(() => {
   background-position: center;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--border-main);
+  border: 1px solid var(--border-main, #98AAB1);
   box-sizing: border-box;
+}
+
+.media-placeholder-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+  transition: opacity 0.3s;
 }
 
 .media-placeholder-actions {
@@ -414,8 +463,28 @@ const sourceLabel = computed(() => {
   box-sizing: border-box;
 }
 
-.btn {
-  white-space: nowrap;
+.source-label {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0.8;
+  background: rgba(0,0,0,0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.media-placeholder.is-resolving {
+  filter: grayscale(0.5);
+  cursor: wait;
+  animation: bfp-resolving-pulse 2s infinite ease-in-out;
+}
+@keyframes bfp-resolving-pulse {
+  0% { opacity: 0.8; }
+  50% { opacity: 0.4; }
+  100% { opacity: 0.8; }
 }
 
 @media (max-width: 800px) {
@@ -427,8 +496,8 @@ const sourceLabel = computed(() => {
   .btn {
     width: 100%;
     max-width: 160px;
-    justify-content: center;
   }
+  .btn-text { display: inline; }
 }
 
 @media (max-width: 480px) {

@@ -543,8 +543,8 @@ export const clearTracks = (): void => {
   state.autoQueue = [];
 };
 
-// Aktualizuje atrybuty/klasy <forum-media> na podstawie stanu playera.
-// Wywoływane przy każdej zmianie currentTrack.
+// Updates <forum-media> attributes/classes based on player state.
+// Called on every currentTrack change.
 const _syncForumMediaDOM = (): void => {
   document.querySelectorAll<HTMLElement>('forum-media').forEach(el => {
     const id   = el.getAttribute('data-id');
@@ -563,26 +563,25 @@ export const scanView = (container?: Element | null): void => {
   console.log('[Player] scanView called (registration is now component-based)');
 };
 
-// Eksport dla wstecznej kompatybilności lub ręcznego użycia spoza Vue.
+// Export for backward compatibility or manual use from outside Vue.
 export const dispatchScanView = (container?: Element | null): void => {
   window.dispatchEvent(new CustomEvent('bf:scan-view', {
     detail: { container: container ?? null },
   }));
 };
 
-// Zachowaj starą nazwę jako alias — ułatwia migrację miejsc, które
-// jeszcze nie zostały przepisane.
+// Keep the old name as an alias — simplifies migration of places that
+// haven't been rewritten yet.
 export const dispatchPageChange = dispatchScanView;
 
 if (typeof window !== 'undefined') {
   window.addEventListener('bf:scan-view', (e: Event) => {
     const container = (e as CustomEvent<{ container: Element | null }>).detail?.container;
-    console.log(container);
     scanView(container);
   });
 }
 
-// Synchronizuj DOM przy każdej zmianie currentTrack i stanu playing.
+// Sync DOM on every currentTrack and playing state change.
 watch(
   () => [state.currentTrack?.id, state.playing] as const,
   () => { nextTick(_syncForumMediaDOM); },

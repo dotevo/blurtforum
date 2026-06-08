@@ -12,6 +12,7 @@ defineProps<{
   canEditStructure: boolean;
   explorationExpanded: boolean;
   explorationForm: { forums: Forum[]; loading: boolean };
+  communityRewards: { blurt: string; vesting: string; hasRewards: boolean };
   t: (k: string) => string;
   timeAgo: (s: string) => string;
   forumHasUnread: (f: Forum) => boolean;
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   startEditStructure: [];
   toggleExploration: [];
   'update:showStructureDocs': [value: boolean];
+  claimCommunityRewards: [];
 }>();
 </script>
 
@@ -80,7 +82,18 @@ const emit = defineEmits<{
       <div v-if="moderators.length>0" class="mods-section">
         <div class="mods-header" style="display:flex; justify-content:space-between; align-items:center;">
           <span>{{ t('communityTeam') }}: {{ communityAccount }}</span>
-          <button v-if="canEditStructure" class="btn btn-accent btn-sm" @click="emit('startEditStructure')">{{ t('editStructure') }}</button>
+          
+          <div style="display:flex; gap:10px; align-items:center;">
+            <!-- COMMUNITY REWARDS -->
+            <div v-if="canEditStructure && communityRewards.hasRewards" 
+                 class="community-reward-badge" 
+                 @click="emit('claimCommunityRewards')"
+                 :title="t('claimRewards')">
+              🎁 {{ communityRewards.blurt }} / {{ communityRewards.vesting }}
+            </div>
+
+            <button v-if="canEditStructure" class="btn btn-accent btn-sm" @click="emit('startEditStructure')">{{ t('editStructure') }}</button>
+          </div>
         </div>
         <div class="mods-body">
           <div v-for="m in moderators" :key="m.account" class="mod-badge">
@@ -135,3 +148,31 @@ const emit = defineEmits<{
  
     </div>
 </template>
+
+<style scoped>
+.mods-section { margin-top: 25px; }
+.mods-header { background: var(--bg-r3); padding: 8px 12px; border: 1px solid var(--border-main); border-bottom: none; border-radius: 6px 6px 0 0; font-weight: bold; color: var(--primary); font-size: 13px; }
+.mods-body { background: var(--bg-r1); border: 1px solid var(--border-main); padding: 12px; border-radius: 0 0 6px 6px; display: flex; flex-wrap: wrap; gap: 15px; }
+.mod-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.mod-badge a { color: var(--primary); font-weight: bold; text-decoration: none; font-size: 12px; }
+.mod-role { font-size: 10px; text-transform: uppercase; opacity: 0.8; font-weight: bold; }
+
+.community-reward-badge {
+  background: var(--primary);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  transition: transform 0.2s, background 0.2s;
+}
+.community-reward-badge:hover {
+  background: var(--accent-active);
+  transform: scale(1.05);
+}
+
+.index-table { width: 100%; margin-top: 15px; border-collapse: collapse; }
+.row-hover:hover { background: var(--bg-r2); cursor: pointer; }
+</style>

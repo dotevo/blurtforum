@@ -2,7 +2,20 @@
  * BlurtForum Community Discovery & Subscription Library
  */
 import { reactive } from 'vue';
-import type { Community, AuthUser } from '../types';
+import type { Community, AuthUser, Forum, UserSubscription } from '../types';
+
+export const VIRTUAL_FORUMS: Forum[] = [
+  { id: 'user-feed',       nameKey: 'myFeed',         targetTags: [], type: 'feed',     auth: true,  posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
+  { id: 'global-trending', nameKey: 'trending',       targetTags: [], type: 'trending',              posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
+  { id: 'global-new',      nameKey: 'newPosts',       targetTags: [], type: 'new',                   posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
+  { id: 'global-activity', nameKey: 'globalActivity', targetTags: [], type: 'activity',              posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
+] as unknown as Forum[];
+
+export const DEFAULT_COMMUNITIES: UserSubscription[] = [
+  { account: 'blurt-140455', title: 'General Forum' },
+  { account: 'blurt-179874', title: 'Blurt Polska' },
+  { account: 'blurt-129105', title: 'Blurt Market' },
+];
 
 interface CommunityState {
   list: Community[];

@@ -3,7 +3,10 @@ import type { Post } from '../../types';
 import type { AuthUser } from '../../types';
 import { ref, computed, onMounted, onUpdated } from 'vue';
 import { dispatchScanView } from '../../modules/player';
-import ForumMedia from '../player/ForumMedia.vue';
+import ForumMedia from '../player/ForumMedia.ce.vue';
+import PayoutBadge from '../layout/PayoutBadge.vue';
+import UserAvatar from '../layout/UserAvatar.vue';
+import VoteButton from '../layout/VoteButton.vue';
 import VueApexCharts from "vue3-apexcharts";
 
 const props = defineProps<{
@@ -12,6 +15,10 @@ const props = defineProps<{
     data: Record<string, unknown> | null;
     posts: Post[];
     comments: Post[];
+    replies: Post[];
+    postsHasMore: boolean;
+    commentsHasMore: boolean;
+    repliesHasMore: boolean;
     earnings: {
       rawHistory: any[];
       history: any[];
@@ -30,6 +37,13 @@ const props = defineProps<{
       };
       loading: boolean;
     };
+    wallet: {
+      delegations: any[];
+      incomingDelegations: any[];
+      history: any[];
+      powerDown: { total: string, rate: string, next: string, percent: number };
+      loading: boolean;
+    };
     loading: boolean;
   };
   profileTab: string;
@@ -40,6 +54,7 @@ const props = defineProps<{
   timeAgo: (s: string) => string;
   renderMD: (s: string) => string;
   player: { state: { enabled: boolean } };
+  hasVoted: (p: Post) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +65,11 @@ const emit = defineEmits<{
   handleMediaAction: [type: string, id: string, host: string, action: string, data: Record<string, unknown>];
   'update:profileTab': [value: string];
   fetchEarnings: [];
+  openWalletModal: [mode: 'transfer' | 'power_up' | 'power_down', balance: string, targetUser?: string];
+  claimRewards: [];
+  cancelDelegation: [target: string];
+  loadMoreProfileContent: [sort: 'posts' | 'comments' | 'replies'];
+  submitVote: [post: Post];
 }>();
 
 const showHistoryTable = ref(false);
@@ -125,7 +145,7 @@ const barSeries = computed(() => {
     
       <div class="forumline" style="padding: 20px;">
         <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
-          <div class="avatar" :style="{width: '120px', height: '120px', backgroundImage:'url(https://imgp.blurt.blog/profileimage/'+profileUser.username+'/128x128)'}"></div>
+          <UserAvatar :username="profileUser.username" size="lg" style="width: 120px; height: 120px;" />
           <div style="flex: 1; min-width: 250px;">
             <div style="display:flex; justify-content:space-between; align-items:flex-start;">
               <div>
@@ -181,7 +201,242 @@ const barSeries = computed(() => {
       <div class="tabs" style="margin-top: 20px;">
         <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="$emit('update:profileTab', 'posts')">{{ t('posts') }}</button>
         <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="$emit('update:profileTab', 'comments')">{{ t('comments') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='replies'}" @click="$emit('update:profileTab', 'replies')">{{ t('replies') }}</button>
+        <button class="tab-btn" :class="{active: profileTab==='wallet'}" @click="$emit('update:profileTab', 'wallet')">💳 {{ t('wallet') }}</button>
         <button class="tab-btn" :class="{active: profileTab==='earnings'}" @click="$emit('update:profileTab', 'earnings')">💰 {{ t('earnings') }}</button>
+      </div>
+
+      <!-- WALLET TAB -->
+      <div v-if="profileTab==='wallet'" class="wallet-tab">
+        <div class="forumline" style="padding: 20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+             <h3 style="margin: 0; color: var(--primary);">💳 {{ t('walletBalances') }}</h3>
+             <div v-if="profileUser.wallet.loading" class="gs"><i class="fa-solid fa-sync fa-spin"></i> {{ t('loading') }}</div>
+          </div>
+          
+          <div class="wallet-grid">
+            <!-- TOTAL VALUE -->
+            <div class="wallet-card forumline total-card">
+               <div class="stat-label">{{ t('estimatedAccountValue') || 'Estimated Account Value' }}</div>
+               <div class="stat-val main-amt highlight">~{{ (profileUser.data as any)?.walletValue }} <span class="unit">BLURT</span></div>
+               <div class="gs" style="font-size:10px; margin-top:5px; opacity:0.8">
+                 {{ t('totalValueDesc') || 'Sum of liquid BLURT and BP (excluding incoming delegations).' }}
+               </div>
+            </div>
+
+            <!-- BLURT -->
+            <div class="wallet-card forumline highlight-card">
+              <div class="wallet-card-header">
+                <div class="stat-label">BLURT (Liquid)</div>
+                <div class="stat-val main-amt">{{ (profileUser.data as any)?.balance || '0.000 BLURT' }}</div>
+              </div>
+              <div class="wallet-card-desc gs">
+                {{ t('blurtDesc') }}
+              </div>
+              <div v-if="auth.user?.username === profileUser.username" class="wallet-actions">
+                <button class="btn btn-sm btn-primary" @click="$emit('openWalletModal', 'transfer', (profileUser.data as any)?.balance)">
+                  <i class="fa-solid fa-paper-plane"></i> {{ t('transfer') }}
+                </button>
+                <button class="btn btn-sm btn-accent" @click="$emit('openWalletModal', 'power_up', (profileUser.data as any)?.balance)">
+                  <i class="fa-solid fa-bolt"></i> {{ t('powerUp') }}
+                </button>
+              </div>
+              <div v-else-if="auth.user" class="wallet-actions">
+                <button class="btn btn-sm btn-primary" @click="$emit('openWalletModal', 'transfer', (auth.user as any)?.balance, profileUser.username)">
+                  <i class="fa-solid fa-gift"></i> {{ t('sendBlurt') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- BLURT POWER -->
+            <div class="wallet-card forumline highlight-card-bp">
+              <div class="wallet-card-header">
+                <div class="stat-label">BLURT POWER</div>
+                <div class="stat-val main-amt">{{ (profileUser.data as any)?.totalBP }} BP</div>
+              </div>
+              <div class="wallet-card-desc gs">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                   <span>{{ t('own') }}:</span> <b>{{ (profileUser.data as any)?.bp }} BP</b>
+                </div>
+                <div style="display:flex; justify-content:space-between; color: var(--success-text);">
+                   <span>{{ t('received') }}:</span> <b>+ {{ (profileUser.data as any)?.delegatedIn }} BP</b>
+                </div>
+                <div style="display:flex; justify-content:space-between; color: var(--error-text);">
+                   <span>{{ t('delegated') }}:</span> <b>- {{ (profileUser.data as any)?.delegatedOut }} BP</b>
+                </div>
+              </div>
+              <div v-if="auth.user?.username === profileUser.username" class="wallet-actions">
+                <button class="btn btn-sm btn-ghost" @click="$emit('openWalletModal', 'power_down', (profileUser.data as any)?.bp)">
+                  <i class="fa-solid fa-arrow-down-wide-short"></i> {{ t('powerDown') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rewards Box -->
+          <div v-if="auth.user?.username === profileUser.username && auth.user.hasRewards" 
+               class="reward-claim-box">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div class="reward-icon">🎁</div>
+              <div>
+                <div style="font-weight: bold; color: #fff;">{{ t('unclaimedRewards') }}</div>
+                <div style="color: rgba(255,255,255,0.8); font-size: 11px;">{{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
+              </div>
+            </div>
+            <button class="btn btn-light" @click="$emit('claimRewards')">
+              {{ t('claimRewards') }}
+            </button>
+          </div>
+
+          <!-- Power Down Monitor -->
+          <div v-if="profileUser.wallet.powerDown.rate !== '0.000'" class="forumline pd-monitor">
+            <div style="font-weight: bold; color: var(--primary); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-clock-rotate-left"></i> {{ t('powerDownActive') }}
+            </div>
+            <div class="pd-grid">
+              <div class="pd-stat">
+                <div class="stat-label">{{ t('weeklyRate') }}</div>
+                <div class="stat-val small">{{ profileUser.wallet.powerDown.rate }} <span class="unit">BP</span></div>
+              </div>
+              <div class="pd-stat">
+                <div class="stat-label">{{ t('remainingTotal') }}</div>
+                <div class="stat-val small">{{ profileUser.wallet.powerDown.total }} <span class="unit">BP</span></div>
+              </div>
+              <div class="pd-stat">
+                <div class="stat-label">{{ t('nextWithdrawal') }}</div>
+                <div class="stat-val small" style="color: var(--accent);">{{ timeAgo(profileUser.wallet.powerDown.next) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Delegations Section -->
+          <div class="delegations-row">
+            <div class="delegation-half">
+              <h4 style="color: var(--primary); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> {{ t('outgoingDelegations') }}
+              </h4>
+              <table class="forumline profile-list-table tight">
+                <thead>
+                  <tr>
+                    <td class="thHead" style="text-align:left;padding-left:10px">{{ t('delegatee') }}</td>
+                    <td class="thHead" align="right">BP</td>
+                    <td class="thHead" align="center" width="50" v-if="auth.user?.username === profileUser.username"></td>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="del in profileUser.wallet.delegations" :key="del.delegatee">
+                    <td class="row1"><b>@{{ del.delegatee }}</b></td>
+                    <td class="row2" align="right" style="font-weight:bold;">{{ del.bp }}</td>
+                    <td class="row1" align="center" v-if="auth.user?.username === profileUser.username">
+                      <button class="btn-icon-only" @click="$emit('cancelDelegation', del.delegatee)" title="Cancel">
+                        <i class="fa-solid fa-trash-can"></i>
+                      </button>
+                    </td>
+                  </tr>
+                  <tr v-if="profileUser.wallet.delegations.length === 0">
+                    <td colspan="3" class="row1 gs" style="text-align:center; padding: 15px; opacity: 0.7;">
+                      {{ t('noOutgoingDelegations') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="delegation-half">
+              <h4 style="color: var(--primary); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-arrow-down-left-and-arrow-up-right-to-center"></i> {{ t('incomingDelegations') }}
+              </h4>
+              <table class="forumline profile-list-table tight">
+                <thead>
+                  <tr>
+                    <td class="thHead" style="text-align:left;padding-left:10px">{{ t('delegator') }}</td>
+                    <td class="thHead" align="right">BP</td>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="del in profileUser.wallet.incomingDelegations" :key="del.delegator">
+                    <td class="row1"><b>@{{ del.delegator }}</b></td>
+                    <td class="row2" align="right" style="font-weight:bold;">{{ del.bp }}</td>
+                  </tr>
+                  <tr v-if="profileUser.wallet.incomingDelegations.length === 0">
+                    <td colspan="2" class="row1 gs" style="text-align:center; padding: 15px; opacity: 0.7;">
+                      {{ t('noIncomingDelegations') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Wallet History -->
+          <div style="margin-top: 30px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+              <h4 style="color: var(--primary); margin:0; display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-clock-rotate-left"></i> {{ t('recentWalletTransactions') }}
+              </h4>
+              <div class="gs" style="font-size:10px;">{{ t('last') || 'Last' }} 500</div>
+            </div>
+            
+            <div class="forumline" style="overflow: hidden; border-radius: 4px;">
+              <table class="profile-list-table tight-history">
+                <thead>
+                  <tr style="background: var(--bg-r3);">
+                    <td class="thHead" style="text-align:left;padding-left:10px; width:130px">{{ t('date') }}</td>
+                    <td class="thHead">{{ t('description') }}</td>
+                    <td class="thHead" align="right" style="padding-right:15px">{{ t('amount') }}</td>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="tx in profileUser.wallet.history" :key="tx.seq" class="row-hover history-row">
+                    <td class="row1 gs ts-cell">{{ tx.timestamp.replace('T', ' ').slice(0,16) }}</td>
+                    <td class="row2 desc-cell">
+                      <div class="tx-flex">
+                        <div class="tx-icon-v2" :class="'tx-'+tx.op[0]">
+                          <i v-if="tx.op[0]==='transfer'" class="fa-solid" :class="tx.op[1].from === profileUser.username ? 'fa-arrow-up' : 'fa-arrow-down'"></i>
+                          <i v-else-if="tx.op[0]==='transfer_to_vesting'" class="fa-solid fa-bolt"></i>
+                          <i v-else-if="tx.op[0]==='withdraw_vesting'" class="fa-solid fa-circle-minus"></i>
+                          <i v-else-if="tx.op[0]==='delegate_vesting_shares'" class="fa-solid fa-share-from-square"></i>
+                        </div>
+                        <div class="tx-details">
+                          <template v-if="tx.op[0] === 'transfer'">
+                            <span class="tx-label">{{ tx.op[1].from === profileUser.username ? t('sentTo') : t('receivedFrom') }}</span>
+                            <b class="interactive-username" @click="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</b>
+                            <div v-if="tx.op[1].memo" class="tx-memo-v2">"{{ tx.op[1].memo }}"</div>
+                          </template>
+                          <template v-else-if="tx.op[0] === 'transfer_to_vesting'">
+                            <span class="tx-label">{{ t('powerUp') }}</span>
+                            <span v-if="tx.op[1].to !== tx.op[1].from">to <b>@{{ tx.op[1].to }}</b></span>
+                          </template>
+                          <template v-else-if="tx.op[0] === 'withdraw_vesting'">
+                            <span class="tx-label">{{ tx.op[1].vesting_shares === '0.000000 VESTS' ? t('stopPowerDown') : t('startPowerDown') }}</span>
+                          </template>
+                          <template v-else-if="tx.op[0] === 'delegate_vesting_shares'">
+                             <span class="tx-label">{{ t('delegateTo') }}</span> <b>@{{ tx.op[1].delegatee }}</b>
+                          </template>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="row1 amt-cell" align="right">
+                      <div class="amt-container">
+                        <span class="amt-val" :class="tx.op[1].from === profileUser.username ? 'minus' : (tx.op[1].to === profileUser.username ? 'plus' : '')">
+                          {{ tx.op[1].from === profileUser.username ? '-' : (tx.op[1].to === profileUser.username ? '+' : '') }}
+                          {{ (tx.op[1].amount || tx.op[1].vesting_shares).split(' ')[0] }}
+                        </span>
+                        <span class="amt-unit">{{ (tx.op[1].amount || tx.op[1].vesting_shares).split(' ')[1] }}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="profileUser.wallet.history.length === 0">
+                    <td colspan="3" class="row1 gs" style="text-align:center; padding: 40px; opacity: 0.5;">
+                      <i class="fa-solid fa-ghost" style="font-size:24px; display:block; margin-bottom:10px"></i>
+                      {{ t('noWalletHistory') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- EARNINGS TAB -->
@@ -269,68 +524,129 @@ const barSeries = computed(() => {
 
       </div>
 
-      <!-- POSTS TAB -->
-      <table class="forumline profile-list-table" v-if="profileTab==='posts'">
-        <thead>
-          <tr>
-            <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
-            <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
-            <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="post in profileUser.posts" :key="post.permlink">
-            <td class="row1">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <ForumMedia 
-                  v-if="player.state.enabled && post.media"
-                  :media="post.media"
-                  :title="post.title"
-                  :author="post.author"
-                  :permlink="post.permlink"
-                  :t="t"
-                />
-                <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
-                   style="font-size: 12px; font-weight: normal;">{{ post.title }}</a>
-              </div>
-            </td>
-            <td class="row2" align="center">
-              <span class="badge" :class="(post.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (post.payout || 0).toFixed(2) }} B</span>
-            </td>
-            <td class="row1" align="center">
-              <span class="gs">{{ fmtDate(post.created) }}</span>
-            </td>
-          </tr>
-          <tr v-if="profileUser.posts.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
-        </tbody>
-      </table>
+      <div v-if="profileTab==='posts'">
+        <table class="forumline profile-list-table">
+          <thead>
+            <tr>
+              <td class="thHead" width="40"></td>
+              <td class="thHead" style="text-align:left;padding-left:10px">{{ t('topic') }}</td>
+              <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+              <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="post in profileUser.posts" :key="post.permlink">
+              <td class="row1" align="center">
+                <VoteButton :voted="hasVoted(post)" :count="post.vote_count" @vote="$emit('submitVote', post)" />
+              </td>
+              <td class="row1">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <ForumMedia 
+                    v-if="player.state.enabled && post.media"
+                    :media="post.media"
+                    :title="post.title"
+                    :author="post.author"
+                    :permlink="post.permlink"
+                    :t="t"
+                  />
+                  <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
+                     style="font-size: 12px; font-weight: normal;">{{ post.title }}</a>
+                </div>
+              </td>
+              <td class="row2" align="center">
+                <PayoutBadge :post="post" @click="$emit('openPayoutModal', post)" />
+              </td>
+              <td class="row1" align="center">
+                <span class="gs">{{ fmtDate(post.created) }}</span>
+              </td>
+            </tr>
+            <tr v-if="profileUser.posts.length===0"><td colspan="4" class="row1" style="text-align:center; padding: 20px;">{{ t('noPosts') }}</td></tr>
+          </tbody>
+        </table>
+        <div v-if="profileUser.postsHasMore" style="text-align:center; margin-top: 10px;">
+          <button class="btn btn-primary" @click="$emit('loadMoreProfileContent', 'posts')" :disabled="profileUser.loading">
+            <span v-if="profileUser.loading" class="spin"></span> {{ t('loadMore') }}
+          </button>
+        </div>
+      </div>
 
-      <!-- COMMENTS TAB -->
-      <table class="forumline profile-list-table" v-if="profileTab==='comments'">
-        <thead>
-          <tr>
-            <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
-            <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
-            <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in profileUser.comments" :key="c.permlink" 
-              class="row-hover" @click="$emit('openTopic', c)">
-            <td class="row1">
-              <span class="gs">RE: @{{ c.parent_author }}</span><br>
-              {{ c.body.substring(0, 100) }}...
-            </td>
-            <td class="row2" align="center">
-              <span class="badge" :class="(c.totalPayout || 0)>0?'badge-green':'badge-blue'">{{ (c.payout || 0).toFixed(2) }} B</span>
-            </td>
-            <td class="row1" align="center">
-              <span class="gs">{{ fmtDate(c.created) }}</span>
-            </td>
-          </tr>
-          <tr v-if="profileUser.comments.length===0"><td colspan="3" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
-        </tbody>
-      </table>
+      <div v-if="profileTab==='comments'">
+        <table class="forumline profile-list-table">
+          <thead>
+            <tr>
+              <td class="thHead" width="40"></td>
+              <td class="thHead" style="text-align:left;padding-left:10px">{{ t('replyTo') }}</td>
+              <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+              <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in profileUser.comments" :key="c.permlink">
+              <td class="row1" align="center">
+                <VoteButton :voted="hasVoted(c)" :count="c.vote_count" @vote="$emit('submitVote', c)" />
+              </td>
+              <td class="row1 row-hover" @click="$emit('openTopic', c)">
+                <span class="gs">RE: @{{ c.parent_author }}</span><br>
+                {{ c.body.substring(0, 100) }}...
+              </td>
+              <td class="row2" align="center">
+                <PayoutBadge :post="c" @click="$emit('openPayoutModal', c)" />
+              </td>
+              <td class="row1" align="center">
+                <span class="gs">{{ fmtDate(c.created) }}</span>
+              </td>
+            </tr>
+            <tr v-if="profileUser.comments.length===0"><td colspan="4" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
+          </tbody>
+        </table>
+        <div v-if="profileUser.commentsHasMore" style="text-align:center; margin-top: 10px;">
+          <button class="btn btn-primary" @click="$emit('loadMoreProfileContent', 'comments')" :disabled="profileUser.loading">
+            <span v-if="profileUser.loading" class="spin"></span> {{ t('loadMore') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- REPLIES TAB -->
+      <div v-if="profileTab==='replies'">
+        <table class="forumline profile-list-table">
+          <thead>
+            <tr>
+              <td class="thHead" width="40"></td>
+              <td class="thHead" width="90" align="center">{{ t('author') }}</td>
+              <td class="thHead">{{ t('topic') }}</td>
+              <td class="thHead" width="100" align="center">{{ t('payout') }}</td>
+              <td class="thHead" width="180" align="center">{{ t('posted') }}</td>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in profileUser.replies" :key="r.permlink">
+              <td class="row1" align="center">
+                <VoteButton :voted="hasVoted(r)" :count="r.vote_count" @vote="$emit('submitVote', r)" />
+              </td>
+              <td class="row1" align="center">
+                <UserAvatar :username="r.author" size="xs" @click="$emit('openProfile', r.author)" />
+                <a href="#" @click.stop.prevent="$emit('openProfile', r.author)" style="font-size:11px;">@{{ r.author }}</a>
+              </td>
+              <td class="row1 row-hover" @click="$emit('openTopic', r)">
+                <div class="gs" style="font-size:10px; margin-bottom:4px;">RE: {{ r.title || r.parent_permlink }}</div>
+                {{ r.body.substring(0, 100) }}...
+              </td>
+              <td class="row2" align="center">
+                <PayoutBadge :post="r" @click="$emit('openPayoutModal', r)" />
+              </td>
+              <td class="row1" align="center">
+                <span class="gs">{{ fmtDate(r.created) }}</span>
+              </td>
+            </tr>
+            <tr v-if="profileUser.replies.length===0"><td colspan="5" class="row1" style="text-align:center; padding: 20px;">{{ t('noComments') }}</td></tr>
+          </tbody>
+        </table>
+        <div v-if="profileUser.repliesHasMore" style="text-align:center; margin-top: 10px;">
+          <button class="btn btn-primary" @click="$emit('loadMoreProfileContent', 'replies')" :disabled="profileUser.loading">
+            <span v-if="profileUser.loading" class="spin"></span> {{ t('loadMore') }}
+          </button>
+        </div>
+      </div>
     <!-- /profile -->
 </template>
 
@@ -362,8 +678,98 @@ const barSeries = computed(() => {
 
 .badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: bold; }
 
+.wallet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-top: 10px;
+}
+.wallet-card {
+  padding: 15px;
+  background: var(--bg-r1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wallet-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-main);
+  padding-bottom: 8px;
+}
+.wallet-card-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  flex: 1;
+}
+.highlight-card { border-top: 3px solid var(--primary); }
+.highlight-card-bp { border-top: 3px solid var(--accent); }
+.total-card { border-top: 3px solid var(--success-border); background: var(--bg-r3); }
+.main-amt { color: var(--primary); font-size: 22px; }
+.main-amt.highlight { color: var(--success-text); }
+
+.reward-claim-box {
+  margin-top: 20px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  padding: 15px 20px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 15px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+.reward-icon { font-size: 24px; }
+.btn-light { background: #fff; color: var(--primary); border: none; font-weight: bold; }
+
+.pd-monitor { margin-top: 20px; padding: 15px; background: var(--bg-r2); border-left: 4px solid var(--accent); }
+.pd-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pd-stat .stat-val.small { font-size: 14px; }
+
+.delegations-row { display: flex; gap: 20px; margin-top: 30px; }
+.delegation-half { flex: 1; min-width: 300px; }
+
+.tight td { padding: 6px 10px !important; }
+
+.tx-icon {
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0;
+}
+.tx-in { background: rgba(46, 204, 113, 0.15); color: #2ecc71; }
+.tx-out { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
+.tx-up { background: rgba(52, 152, 219, 0.15); color: #3498db; }
+.tx-down { background: rgba(243, 156, 18, 0.15); color: #f39c12; }
+.tx-del { background: rgba(155, 89, 182, 0.15); color: #9b59b6; }
+
+.amt-in { color: #2ecc71; }
+.amt-out { color: #e74c3c; }
+.tx-memo { font-style: italic; opacity: 0.8; margin-top: 2px; border-left: 2px solid var(--border-main); padding-left: 6px; }
+
+.btn-icon-only { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 5px; transition: color 0.2s; }
+.btn-icon-only:hover { color: var(--error-text, #e74c3c); }
+
+.tx-icon-v2 { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+.tx-transfer { background: var(--bg-r3); color: var(--primary); }
+.tx-transfer_to_vesting { background: rgba(52, 152, 219, 0.2); color: #3498db; }
+.tx-withdraw_vesting { background: rgba(243, 156, 18, 0.2); color: #f39c12; }
+.tx-delegate_vesting_shares { background: rgba(155, 89, 182, 0.2); color: #9b59b6; }
+
+.tx-flex { display: flex; align-items: center; gap: 10px; }
+.tx-label { font-size: 10px; text-transform: uppercase; opacity: 0.7; margin-right: 4px; }
+.tx-memo-v2 { font-size: 10px; font-style: italic; opacity: 0.6; margin-top: 2px; }
+
+.amt-container { display: flex; flex-direction: column; line-height: 1.1; }
+.amt-val { font-weight: 800; font-size: 12px; }
+.amt-val.plus { color: #2ecc71; }
+.amt-val.minus { color: #e74c3c; }
+.amt-unit { font-size: 9px; opacity: 0.5; font-weight: bold; }
+
+.tight-history td { padding: 10px !important; border-bottom: 1px solid var(--bg-r2) !important; }
+.history-row:last-child td { border-bottom: none !important; }
+
 @media (max-width: 900px) {
-  .chart-row { flex-direction: column; }
+  .chart-row, .delegations-row { flex-direction: column; }
 }
 
 @media (max-width: 600px) {

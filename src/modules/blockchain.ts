@@ -41,11 +41,43 @@ export const Blockchain = {
   },
 
   /** Normalizes a raw blockchain post into the application's Post format */
-  normalizePost(p: RawPost): Post {
+  normalizePost(p: RawPost, context?: { 
+    currentUser?: string | null, 
+    followingSet?: Set<string>, 
+    readStatusMap?: Record<string, number>,
+    canMute?: boolean 
+  }): Post {
+    let tags: string[] = [];
+    try {
+      const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata || '{}') : p.json_metadata;
+      if (meta && (meta as Record<string, unknown>).tags) {
+        tags = (meta as Record<string, string[]>).tags;
+      }
+    } catch { /* ignore */ }
+
+    const pending = BFUtils.parsePayout(p.pending_payout_value);
+    const total = BFUtils.parsePayout(p.total_payout_value) + BFUtils.parsePayout((p as any).curator_payout_value);
+    const bridgePayout = typeof p.payout === 'number' ? p.payout : BFUtils.parsePayout(p.payout);
+    
+    const lastActAuthor = p.last_activity_author || p.author;
+    const activityTs = new Date((p.last_activity || p.created).endsWith('Z') ? (p.last_activity || p.created) : (p.last_activity || p.created) + 'Z').getTime();
+    
+    // Read status
+    let isRead = false;
+    if (context?.readStatusMap) {
+      const lastReadTs = context.readStatusMap[`${p.author}/${p.permlink}`] || 0;
+      isRead = !!(lastReadTs >= activityTs || (context.currentUser && lastActAuthor === context.currentUser));
+    }
+
+    const createdDate = new Date((p.created.endsWith('Z') ? p.created : p.created + 'Z'));
+    const ageDays = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+    let isPaid = total > 0 || ageDays > 7.5;
+    if (p.cashout_time?.startsWith('1970')) isPaid = true;
+
     const post: Post = {
       author: p.author,
       permlink: p.permlink,
-      title: p.title,
+      title: p.title || '(no title)',
       body: p.body,
       created: p.created,
       url: p.url,
@@ -53,36 +85,32 @@ export const Blockchain = {
       parent_author: p.parent_author || '',
       parent_permlink: p.parent_permlink || '',
       lastActivity: p.last_activity || p.created,
-      lastAuthor: p.last_activity_author || p.author,
-      pendingPayout: BFUtils.parsePayout(p.pending_payout_value),
-      totalPayout: BFUtils.parsePayout(p.total_payout_value) + BFUtils.parsePayout((p as any).curator_payout_value),
-      payout: 0,
-      vote_count: p.active_votes?.length || 0,
+      lastAuthor: lastActAuthor,
+      pendingPayout: pending,
+      totalPayout: total,
+      payout: bridgePayout || (pending + total),
+      vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
       active_votes: p.active_votes || [],
-      net_rshares: p.net_rshares || 0,
+      net_rshares: parseFloat(String(p.net_rshares || 0)),
       beneficiaries: (p.beneficiaries || []) as Beneficiary[],
       json_metadata: p.json_metadata,
       media: Parser.detectMedia(p.body),
-      isUnread: false,
-      isRead: false,
-      isFollowing: false,
-      isMuted: !!(p.stats?.is_muted),
-      isPaid: false, // Will be determined by payout value if needed
-      isCollapsed: false,
+      isUnread: !isRead,
+      isRead: isRead,
+      isFollowing: !!(context?.currentUser && context?.followingSet?.has(p.author)),
+      isMuted: !!(p.stats?.is_muted || p.stats?.hide),
+      isPaid,
+      isCollapsed: !!(p.body && p.body.startsWith('Supporting original content by @')),
       replyCount: p.children || p.reply_count || 0,
-      tags: [],
+      tags,
+      lastActivityTs: activityTs,
     };
-    post.payout = post.pendingPayout + post.totalPayout;
-    
-    // Extract tags and images from json_metadata
-    if (p.json_metadata) {
+
+    // If we detected media but it has no cover, try to use the first image from metadata
+    if (post.media && !post.media.cover && p.json_metadata) {
       try {
         const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata) : p.json_metadata;
-        if (meta.tags && Array.isArray(meta.tags)) {
-          post.tags = meta.tags;
-        }
-        // If we detected media but it has no cover, try to use the first image from metadata
-        if (post.media && !post.media.cover && meta.image && Array.isArray(meta.image) && meta.image.length > 0) {
+        if (meta.image && Array.isArray(meta.image) && meta.image.length > 0) {
           post.media.cover = meta.image[0];
         }
       } catch { /* ignore */ }

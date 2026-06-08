@@ -7,6 +7,8 @@ import SiteHeader from './components/layout/SiteHeader.vue';
 import CommunityBar from './components/layout/CommunityBar.vue';
 import GlobalActivity from './components/layout/GlobalActivity.vue';
 import NavBar from './components/layout/NavBar.vue';
+import MobileTopBar from './components/layout/MobileTopBar.vue';
+import MobileContext from './components/layout/MobileContext.vue';
 
 // Views
 import ForumIndex from './components/forum/ForumIndex.vue';
@@ -30,6 +32,8 @@ import OldContentModal from './components/modals/OldContentModal.vue';
 import StructureDocs from './components/modals/StructureDocs.vue';
 import LayoutEditor from './components/modals/LayoutEditor.vue';
 import ImageLightbox from './components/modals/ImageLightbox.vue';
+import WalletModal from './components/modals/WalletModal.vue';
+import RpcModal from './components/modals/RpcModal.vue';
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -41,28 +45,29 @@ const {
   renderMD, isNestedReply, getParentBody,
   goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities,
   toggleCommunitySub, openLoginModal,
-  community,
+  syncUrl,
+  community, communityRewards,
   doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
-  nextPage, prevPage,
+  changePage,
   submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+  walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
   followModal, confirmToggleFollow,
-  openProfile, profileUser, profileTab, fetchEarningsHistory, openNotification,
-  userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
+  openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
+  canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
   forumPagination, loadMorePosts,
   pinModal, handlePinSubmit,
   globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
   editModal, startEdit, submitEdit,
   voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
-  feeInfo, postFeeEstimate, replyFeeEstimate, schedulePostFeeUpdate, scheduleReplyFeeUpdate,
+  feeInfo, feeEstimates, scheduleFeeUpdate,
   bcWaitQueue, bcQueueExpanded,
   imgModal, openImgModal,
   statusModal, showStatus,
   claimRewards,
   postPreview, replyPreview, saveDraft, clearDraft,
-  postImgUpload, replyImgUpload, onPostImagePick, onReplyImagePick, onPostPaste, onReplyPaste,
+  imgUploads, onImagePick, onPaste,
   rpcMenuOpen, rpcDataNode, rpcForumNode, rpcDataCustom, rpcForumCustom, applyRpcSettings,
-  checkNewNotifications,
   getNotifIcon,
   loadTopicContext,
   isPostInCommunity,
@@ -88,14 +93,50 @@ const {
 
   <!-- ── Layout ─────────────────────────────────────────────────── -->
 
+  <MobileTopBar
+    class="show-mobile"
+    :auth="auth"
+    :global-activity="globalActivity"
+    :activity-tab="activityTab"
+    :expanded="mobileActivityExpanded"
+    :t="t"
+    :time-ago="timeAgo"
+    :has-new-notif="notifModal.hasNew"
+    :vp="auth.user?.vp || '…'"
+    :theme="theme"
+    :themes="themes"
+    :lang="lang"
+    :langs="langs"
+    :rpc-menu-open="rpcMenuOpen"
+    @update:expanded="mobileActivityExpanded = $event"
+    @update:activity-tab="activityTab = $event"
+    @update:rpc-menu-open="rpcMenuOpen = $event"
+    @open-activity="openActivity"
+    @open-login-modal="openLoginModal"
+    @open-notif-modal="openNotifModal"
+    @open-profile="openProfile"
+    @go-home="goHome"
+    @set-theme="setTheme"
+    @set-lang="(v: string) => setLang(v as 'en'|'pl'|'eo')"
+  />
+
   <LangBar
+    class="hide-mobile"
     :theme="theme" :themes="themes" :lang="lang" :langs="langs"
     :rpc-menu-open="rpcMenuOpen"
-    :rpc-data-node="rpcDataNode" :rpc-forum-node="rpcForumNode"
-    :rpc-data-custom="rpcDataCustom" :rpc-forum-custom="rpcForumCustom"
     :t="t"
     @set-theme="setTheme" @set-lang="(v: string) => setLang(v as 'en'|'pl'|'eo')"
     @update:rpc-menu-open="rpcMenuOpen = $event"
+  />
+
+  <RpcModal
+    :show="rpcMenuOpen"
+    :rpc-data-node="rpcDataNode"
+    :rpc-forum-node="rpcForumNode"
+    :rpc-data-custom="rpcDataCustom"
+    :rpc-forum-custom="rpcForumCustom"
+    :t="t"
+    @close="rpcMenuOpen = false"
     @update:rpc-data-node="rpcDataNode = $event"
     @update:rpc-forum-node="rpcForumNode = $event"
     @update:rpc-data-custom="rpcDataCustom = $event"
@@ -104,6 +145,7 @@ const {
   />
 
   <SiteHeader
+    class="hide-mobile"
     :community-title="communityInfo.title || ''"
     :community-account="config.communityAccount"
     :head-block-number="globalProps.head_block_number || '…'"
@@ -130,6 +172,7 @@ const {
   />
 
   <GlobalActivity
+    class="hide-mobile"
     :auth="auth"
     :global-activity="globalActivity"
     :activity-tab="activityTab"
@@ -144,6 +187,7 @@ const {
   />
 
   <NavBar
+    class="hide-mobile"
     :view="view"
     :community-account="config.communityAccount"
     :auth="auth"
@@ -160,11 +204,21 @@ const {
 
   <div class="content">
 
+    <MobileContext
+      class="show-mobile"
+      :view="view"
+      :active-forum="activeForum"
+      :active-topic="activeTopic"
+      :t="t"
+      @go-home="goHome"
+      @open-forum="openForum"
+    />
+
     <!-- Reward notification -->
     <div v-if="auth.user && auth.user.hasRewards"
          style="background:var(--accent); color:var(--bg-page); padding:10px 15px; margin-bottom:15px; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
       <div style="flex:1"><i class="fa-solid fa-gift"></i> {{ t('rewardsAvailable') }}: {{ auth.user.rewardBlurt }} / {{ auth.user.rewardVesting }}</div>
-      <button class="btn btn-sm" @click="claimRewards" style="background:var(--bg-white); color:var(--accent); border:none">{{ t('claimRewards') }}</button>
+      <button class="btn btn-sm" @click="() => claimRewards()" style="background:var(--bg-white); color:var(--accent); border:none">{{ t('claimRewards') }}</button>
     </div>
 
     <div v-if="loading" class="loader"><span class="spin"></span>{{ t('loading') }} {{ config.communityAccount }}…</div>
@@ -226,6 +280,7 @@ const {
         :can-edit-structure="canEditStructure"
         :exploration-expanded="explorationExpanded"
         :exploration-form="explorationForm"
+        :community-rewards="communityRewards"
         :t="t"
         :time-ago="timeAgo"
         :forum-has-unread="forumHasUnread"
@@ -234,6 +289,7 @@ const {
         @start-edit-structure="startEditStructure"
         @toggle-exploration="toggleExploration"
         @update:show-structure-docs="showStructureDocs = $event"
+        @claim-community-rewards="claimRewards(config.communityAccount)"
       />
 
       <ForumView
@@ -243,8 +299,8 @@ const {
         :show-new-post-form="showNewPostForm"
         :post-form="postForm"
         :post-preview="postPreview"
-        :post-img-upload="postImgUpload"
-        :post-fee-estimate="postFeeEstimate"
+        :post-img-upload="imgUploads.post"
+        :post-fee-estimate="feeEstimates.post"
         :forum-pagination="forumPagination"
         :loading="loading"
         :player="player"
@@ -261,13 +317,12 @@ const {
         @submit-post="submitPost"
         @save-draft="saveDraft"
         @clear-draft="clearDraft"
-        @on-post-image-pick="onPostImagePick"
-        @on-post-paste="onPostPaste"
-        @schedule-post-fee-update="schedulePostFeeUpdate"
+        @on-post-image-pick="onImagePick('post', $event)"
+        @on-post-paste="onPaste('post', $event)"
+        @schedule-post-fee-update="scheduleFeeUpdate('post')"
         @update:post-preview="postPreview = $event"
         @update:show-new-post-form="showNewPostForm = $event"
-        @next-page="nextPage"
-        @prev-page="prevPage"
+        @change-page="changePage"
         @open-forum="openForum"
       />
 
@@ -281,8 +336,8 @@ const {
         :reply-target="replyTarget"
         :reply-form="replyForm"
         :reply-preview="replyPreview"
-        :reply-img-upload="replyImgUpload"
-        :reply-fee-estimate="replyFeeEstimate"
+        :reply-img-upload="imgUploads.reply"
+        :reply-fee-estimate="feeEstimates.reply"
         :following-set="followingSet"
         :can-mute="canMute"
         :t="t"
@@ -307,9 +362,9 @@ const {
         @switch-community="switchCommunity"
         @load-topic-context="loadTopicContext"
         @submit-reply="submitReply"
-        @on-reply-image-pick="onReplyImagePick"
-        @on-reply-paste="onReplyPaste"
-        @schedule-reply-fee-update="scheduleReplyFeeUpdate"
+        @on-reply-image-pick="onImagePick('reply', $event)"
+        @on-reply-paste="onPaste('reply', $event)"
+        @schedule-reply-fee-update="scheduleFeeUpdate('reply')"
         @update:reply-preview="replyPreview = $event"
         @update:reply-target="replyTarget = $event"
       />
@@ -340,12 +395,18 @@ const {
         :time-ago="timeAgo"
         :render-m-d="(s: string, ctx?: unknown) => renderMD(s, ctx as Record<string,unknown> | null)"
         :player="player"
+        :has-voted="hasVoted"
         @open-profile="openProfile"
         @open-topic="openTopic"
         @open-payout-modal="openPayoutModal"
         @toggle-follow="toggleFollow"
-        @update:profile-tab="profileTab = $event"
+        @update:profile-tab="profileTab = $event; syncUrl()"
+        @open-wallet-modal="openWalletModal"
+        @claim-rewards="claimRewards"
+        @cancel-delegation="cancelDelegation"
         @fetch-earnings="() => fetchEarningsHistory(profileUser.username, ((profileUser as any).earnings.history[(profileUser as any).earnings.history.length-1]?.seq || 0) - 1)"
+        @load-more-profile-content="loadMoreProfileContent"
+        @submit-vote="submitVote"
       />
 
     </template>
@@ -459,6 +520,17 @@ const {
     :t="t"
     @close="followModal.show = false"
     @confirm="confirmToggleFollow"
+  />
+
+  <WalletModal
+    :show="walletModal.show"
+    :mode="walletModal.mode"
+    :balance="walletModal.balance"
+    :username="auth.user?.username || ''"
+    :target-user="walletModal.targetUser"
+    :t="t"
+    @close="walletModal.show = false"
+    @submit="handleWalletSubmit"
   />
 
   <!-- Status modal -->

@@ -12,16 +12,16 @@ import { Blockchain } from '../modules/blockchain';
 import { useVote } from './useVote';
 import { BlurtPlayerPlugin } from '../modules/blurt-player-plugin';
 import { AuthService } from '../modules/auth';
-import { BFCommunity } from '../modules/community';
+import { BFCommunity, VIRTUAL_FORUMS, DEFAULT_COMMUNITIES } from '../modules/community';
 import { BFPlayer } from '../modules/player';
 import { Parser } from '../modules/parser';
 
-import { TR } from '../modules/translations';
+import { TR, loadLanguage, type Lang, LANGS as langs } from '../modules/translations';
 import '../modules/whalevault';
 import type {
   Post, Forum, ForumCategory, RawPost, AuthUser, ActivityItem,
   Beneficiary, BcQueueEntry, GlobalProps, Moderator, CommunityInfo,
-  UserSubscription, Notification, MediaTrack,
+  UserSubscription, Notification, MediaTrack, Delegation,
 } from '../types';
 
 // dblurt is loaded from unpkg CDN via index.html
@@ -35,7 +35,7 @@ declare const dblurt: {
       getDiscussions: (type: string, params: Record<string, unknown>) => Promise<RawPost[]>;
       call: (namespace: string, method: string, params: unknown[]) => Promise<unknown>;
     };
-    call: (namespace: string, method: string, params: Record<string, unknown>) => Promise<unknown>;
+    call: (namespace: string, method: string, params: any) => Promise<unknown>;
     broadcast: {
       sendOperations: (ops: unknown[], key: ReturnType<typeof dblurt.PrivateKey.from>) => Promise<void>;
     };
@@ -52,17 +52,18 @@ declare const dblurt: {
   Signature: { fromString: (s: string) => { toString: () => string } };
 };
 
-type Lang = 'en' | 'pl' | 'eo';
-
 export function useApp() {
   const urlParams = new URLSearchParams(window.location.search);
-  const langs: Lang[] = ['en', 'pl', 'eo'];
   const browserLang = navigator.language.slice(0, 2).toLowerCase() as Lang;
   const lang = ref<Lang>(langs.includes(browserLang) ? browserLang : 'en');
-  const setLang = (l: Lang) => { lang.value = l; document.documentElement.lang = l; };
+  const setLang = (l: Lang) => {
+    lang.value = l;
+    document.documentElement.lang = l;
+    loadLanguage(l);
+  };
   const t = (k: string): string => {
-    const val = (TR[lang.value] || TR.en)[k];
-    if (!val) console.warn(`Translation missing for key: "${k}" in lang: "${lang.value}"`);
+    const val = TR[k];
+    if (!val && Object.keys(TR).length > 0) console.warn(`Translation missing for key: "${k}" in lang: "${lang.value}"`);
     return val || k;
   };
 
@@ -131,6 +132,7 @@ export function useApp() {
   const replies      = ref<Post[]>([]);
   const moderators   = ref<Moderator[]>([]);
   const communityInfo = ref<CommunityInfo>({});
+  const communityRewards = reactive({ blurt: '0.000', vesting: '0.000', hasRewards: false });
   const structureNote = ref(false);
   const showStructureDocs = ref(false);
   const editStructureMode = ref(false);
@@ -154,20 +156,8 @@ export function useApp() {
   const userSubscriptions = ref<UserSubscription[]>([]);
   const followingSet = ref<Set<string>>(new Set());
 
-  const VIRTUAL_FORUMS: Forum[] = [
-    { id: 'user-feed',       nameKey: 'myFeed',         targetTags: [], type: 'feed',     auth: true,  posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
-    { id: 'global-trending', nameKey: 'trending',       targetTags: [], type: 'trending',              posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
-    { id: 'global-new',      nameKey: 'newPosts',       targetTags: [], type: 'new',                   posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
-    { id: 'global-activity', nameKey: 'globalActivity', targetTags: [], type: 'activity',              posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
-  ] as unknown as Forum[];
-
   const allCommunities = computed(() => {
-    const defaults: UserSubscription[] = [
-      { account: 'blurt-140455', title: 'General Forum' },
-      { account: 'blurt-179874', title: 'Blurt Polska' },
-      { account: 'blurt-129105', title: 'Blurt Market' },
-    ];
-    const combined = [...defaults];
+    const combined = [...DEFAULT_COMMUNITIES];
     userSubscriptions.value.forEach(s => {
       if (!combined.find(c => c.account === s.account)) combined.push(s);
     });
@@ -182,6 +172,10 @@ export function useApp() {
     data: Record<string, unknown> | null;
     posts: Post[];
     comments: Post[];
+    replies: Post[];
+    postsHasMore: boolean;
+    commentsHasMore: boolean;
+    repliesHasMore: boolean;
     earnings: {
       rawHistory: any[];
       history: any[];
@@ -200,12 +194,23 @@ export function useApp() {
       };
       loading: boolean;
     };
+    wallet: {
+      delegations: Delegation[];
+      incomingDelegations: Delegation[];
+      history: any[];
+      powerDown: { total: string, rate: string, next: string, percent: number };
+      loading: boolean;
+    };
     loading: boolean;
   }>({
     username: '',
     data: null,
     posts: [],
     comments: [],
+    replies: [],
+    postsHasMore: true,
+    commentsHasMore: true,
+    repliesHasMore: true,
     earnings: {
       rawHistory: [],
       history: [],
@@ -213,6 +218,7 @@ export function useApp() {
       chartData: { daily: [], distribution: { author: 0, curation: 0, benefactor: 0 } },
       loading: false
     },
+    wallet: { delegations: [] as Delegation[], incomingDelegations: [] as Delegation[], history: [] as any[], powerDown: { total: '0.000', rate: '0.000', next: '', percent: 0 }, loading: false },
     loading: false
   });
   const profileTab = ref('posts');
@@ -312,6 +318,7 @@ export function useApp() {
 
   const payoutModal = reactive<{ show: boolean; post: Partial<Post & { payoutDate?: string }>; beneficiaries: Beneficiary[] }>({ show: false, post: {}, beneficiaries: [] });
   const followModal = reactive({ show: false, user: '', isFollowing: false });
+  const walletModal = reactive({ show: false, mode: 'transfer' as 'transfer' | 'power_up' | 'power_down', balance: '0.000', targetUser: '' });
   const notifModal = reactive({
     show: false, loading: false, list: [] as Notification[],
     lastReadId: parseInt(localStorage.getItem('bf_last_notif_id') || '0'),
@@ -352,49 +359,18 @@ export function useApp() {
   };
   const getParentBody = (r: Post): string => bodyCache[`${r.parent_author}/${r.parent_permlink}`] || '';
 
-  const normalizePost = (p: RawPost): Post => {
-    let tags: string[] = [];
-    try {
-      const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata || '{}') : p.json_metadata;
-      if (meta && (meta as Record<string, unknown>).tags) tags = (meta as Record<string, string[]>).tags;
-    } catch { /* ignore */ }
-
-    const pending   = BFUtils.parsePayout(p.pending_payout_value);
-    const total     = BFUtils.parsePayout(p.total_payout_value);
-    const bridgePayout = typeof p.payout === 'number' ? p.payout : BFUtils.parsePayout(p.payout);
-    const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
-    const lastReadTs = readStatus[`${p.author}/${p.permlink}`] || 0;
-    const activityTs = new Date((p.last_activity || p.created).endsWith('Z') ? (p.last_activity || p.created) : (p.last_activity || p.created) + 'Z').getTime();
-    const lastActAuthor = p.last_activity_author || p.author;
-    const currentUsername = auth.user?.username ?? null;
-    const isRead   = !!(lastReadTs >= activityTs || (currentUsername && lastActAuthor === currentUsername));
-    const isUnread = !isRead;
-    const isFollowing = !!(currentUsername && followingSet.value.has(p.author));
-    const isMuted  = p.stats?.is_muted || p.stats?.hide || false;
-    const createdDate = new Date((p.created.endsWith('Z') ? p.created : p.created + 'Z'));
-    const ageDays  = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
-    let isPaid = total > 0 || ageDays > 7.5;
-    if (p.cashout_time?.startsWith('1970')) isPaid = true;
-    const isCollapsed = !!(p.body && p.body.startsWith('Supporting original content by @'));
-    const media = Parser.detectMedia(p.body);
-
-    return {
-      author: p.author, permlink: p.permlink, media, title: p.title || '(no title)',
-      body: p.body, created: p.created, url: p.url, category: p.category,
-      lastActivity: p.last_activity || p.created, lastAuthor: lastActAuthor,
-      isUnread, isRead, isFollowing, isMuted, isPaid, isCollapsed,
-      replyCount: p.children || p.reply_count || 0,
-      parent_author: p.parent_author || '', parent_permlink: p.parent_permlink || '',
-      pendingPayout: pending, totalPayout: total, payout: bridgePayout || (pending + total),
-      vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
-      active_votes: p.active_votes || [], net_rshares: parseFloat(String(p.net_rshares || 0)),
-      beneficiaries: p.beneficiaries || [], json_metadata: p.json_metadata, tags,
-    };
-  };
+  const getReadStatusMap = () => JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
+  
+  const normalizePost = (p: RawPost): Post => Blockchain.normalizePost(p, {
+    currentUser: auth.user?.username,
+    followingSet: followingSet.value,
+    readStatusMap: getReadStatusMap(),
+    canMute: canMute.value
+  });
 
   const updateGlobalActivity = async (): Promise<void> => {
     if (!auth.user) return;
-    const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
+    const readStatus = getReadStatusMap();
     const allActivity: ActivityItem[] = [];
     const currentUsername = auth.user.username;
     
@@ -409,31 +385,27 @@ export function useApp() {
         const posts = await client.call('bridge', 'get_forum_posts', { community: sub.account, limit: 5, sort: 'activity' }) as RawPost[];
         if (Array.isArray(posts)) {
           posts.forEach(p => {
-            const activityTs = new Date((p.last_activity || p.created).endsWith('Z') ? (p.last_activity || p.created) : (p.last_activity || p.created) + 'Z').getTime();
-            if (activityTs < sevenDaysAgo) return;
-            const key = `${p.author}/${p.permlink}`;
-            const lastReadTs = readStatus[key] || 0;
-            const lastActAuthor = p.last_activity_author || p.author;
-            const isRead = !!(lastReadTs >= activityTs || (currentUsername && lastActAuthor === currentUsername));
+            const normalized = normalizePost(p);
+            if (normalized.lastActivityTs! < sevenDaysAgo) return;
             allActivity.push({
-              id: p.post_id ?? 0, author: lastActAuthor, title: p.title,
-              created: p.last_activity || p.created, community: sub.account, community_title: sub.title,
-              permlink: p.permlink, root_author: p.author, root_permlink: p.permlink,
-              is_post: p.author === lastActAuthor && p.created === p.last_activity,
-              isRead, lastActivityTs: activityTs,
+              id: p.post_id ?? 0, author: normalized.lastAuthor, title: normalized.title,
+              created: normalized.lastActivity, community: sub.account, community_title: sub.title,
+              permlink: normalized.permlink, root_author: normalized.author, root_permlink: normalized.permlink,
+              is_post: normalized.author === normalized.lastAuthor && normalized.created === normalized.lastActivity,
+              isRead: normalized.isRead, lastActivityTs: normalized.lastActivityTs!,
             });
           });
         }
       } catch { /* silent fail */ }
     }
-    allActivity.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+    allActivity.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
     const seen = new Set<number>();
     globalActivity.value = allActivity.filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; }).slice(0, 30);
   };
 
   const markTopicAsRead = (topic: { author: string; permlink: string; lastActivityTs?: number; lastActivity?: string }): void => {
     if (!topic) return;
-    const readStatus = JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
+    const readStatus = getReadStatusMap();
     const key = `${topic.author}/${topic.permlink}`;
     const currentStored = readStatus[key] || 0;
     const incomingTs = topic.lastActivityTs || (topic.lastActivity ? new Date(topic.lastActivity).getTime() : Date.now());
@@ -517,16 +489,22 @@ export function useApp() {
           structureNote.value = true;
         }
 
-        try {
           const accounts = await client.condenser.getAccounts([config.communityAccount]) as Record<string, unknown>[];
           const acc = accounts?.[0];
-          if (acc && !communityInfo.value?.title) {
-            let meta: Record<string, unknown> = {};
-            try { meta = JSON.parse((acc.posting_json_metadata as string) || (acc.json_metadata as string) || '{}'); } catch { /* ignore */ }
-            const profile = (meta.profile as Record<string, string>) || {};
-            communityInfo.value = { title: profile.name || acc.name as string, about: profile.about || '' };
+          if (acc) {
+            const rb = acc.reward_blurt_balance as string;
+            const rv = acc.reward_vesting_balance as string;
+            communityRewards.blurt = rb ? rb.split(' ')[0] : '0.000';
+            communityRewards.vesting = rv ? rv.split(' ')[0] : '0.000';
+            communityRewards.hasRewards = parseFloat(communityRewards.blurt) > 0 || parseFloat(communityRewards.vesting) > 0;
+            
+            if (!communityInfo.value?.title) {
+              let meta: Record<string, unknown> = {};
+              try { meta = JSON.parse((acc.posting_json_metadata as string) || (acc.json_metadata as string) || '{}'); } catch { /* ignore */ }
+              const profile = (meta.profile as Record<string, string>) || {};
+              communityInfo.value = { title: profile.name || acc.name as string, about: profile.about || '' };
+            }
           }
-        } catch (e) { console.warn('Condenser getAccounts error:', (e as Error).message); }
 
         try {
           if (!moderators.value.length) {
@@ -650,10 +628,9 @@ export function useApp() {
     });
   };
 
-  const nextPage = async () => { if (activeForum.value) { await loadData('next', activeForum.value); syncUrl(); } };
-  const prevPage = async () => { if (activeForum.value) { await loadData('prev', activeForum.value); syncUrl(); } };
-
+  const changePage = async (dir: 'next' | 'prev') => { if (activeForum.value) { await loadData(dir, activeForum.value); syncUrl(); } };
   const loadMorePosts = async (): Promise<void> => {
+
     if (!activeForum.value) return;
     let attempts = 0;
     while (attempts < 5) {
@@ -735,6 +712,7 @@ export function useApp() {
       params.set('permlink', activeTopic.value.permlink);
     } else if (view.value === 'profile' && profileUser.username) {
       params.set('user', profileUser.username);
+      if (profileTab.value !== 'posts') params.set('tab', profileTab.value);
     }
     window.history.pushState({ path: window.location.pathname + '?' + params.toString() }, '', window.location.pathname + '?' + params.toString());
   };
@@ -797,12 +775,17 @@ export function useApp() {
     profileUser.data = null;
     profileUser.posts = [];
     profileUser.comments = [];
+    profileUser.replies = [];
+    profileUser.postsHasMore = profileUser.commentsHasMore = profileUser.repliesHasMore = true;
     view.value = 'profile';
     syncUrl();
     try {
-      const [accounts, followCount] = await Promise.all([
+      const [accounts, followCount, posts, comments, replies] = await Promise.all([
         client.condenser.getAccounts([username]),
         client.call('condenser_api', 'get_follow_count', { account: username }) as Promise<{ follower_count: number; following_count: number }>,
+        client.call('bridge', 'get_account_posts', { account: username, sort: 'posts', limit: 20 }) as Promise<RawPost[]>,
+        client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 }) as Promise<RawPost[]>,
+        client.call('bridge', 'get_account_posts', { account: username, sort: 'replies', limit: 20 }) as Promise<RawPost[]>,
       ]);
       if (accounts?.[0]) {
         const acc = accounts[0] as Record<string, unknown>;
@@ -823,16 +806,140 @@ export function useApp() {
           Object.assign(profileUser.data, { about: p.about || '', website: p.website || '', location: p.location || '', displayName: p.name || acc.name });
         } catch { /* ignore */ }
       }
-      const posts = await client.call('bridge', 'get_account_posts', { account: username, sort: 'posts', limit: 20 }) as RawPost[];
-      if (posts) profileUser.posts = posts.map(normalizePost);
-
-      const comments = await client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 }) as RawPost[];
-      if (comments) profileUser.comments = comments.map(normalizePost);
+      
+      if (posts) {
+        profileUser.posts = posts.map(normalizePost);
+        profileUser.postsHasMore = posts.length === 20;
+      }
+      if (comments) {
+        profileUser.comments = comments.map(normalizePost);
+        profileUser.commentsHasMore = comments.length === 20;
+      }
+      if (replies) {
+        profileUser.replies = replies.map(normalizePost);
+        profileUser.repliesHasMore = replies.length === 20;
+      }
 
       // Fetch earnings
       _fetchEarningsHistory(username);
+      _fetchWalletData(username);
     } catch (err) { console.error('Profile error:', err); }
     profileUser.loading = false;
+  };
+
+  const loadMoreProfileContent = async (sort: 'posts' | 'comments' | 'replies'): Promise<void> => {
+    if (profileUser.loading) return;
+    const list = profileUser[sort];
+    if (list.length === 0) return;
+    const last = list[list.length - 1];
+    profileUser.loading = true;
+    try {
+      const more = await client.call('bridge', 'get_account_posts', {
+        account: profileUser.username,
+        sort,
+        limit: 20,
+        start_author: last.author,
+        start_permlink: last.permlink
+      }) as RawPost[];
+      
+      if (more && more.length > 0) {
+        // Skip the first one as it's the 'last' from previous batch
+        const filtered = more.slice(1).map(normalizePost);
+        profileUser[sort] = [...profileUser[sort], ...filtered];
+        profileUser[`${sort}HasMore`] = more.length === 20;
+      } else {
+        profileUser[`${sort}HasMore`] = false;
+      }
+    } catch (e) { console.error('Load more profile error:', e); }
+    finally { profileUser.loading = false; }
+  };
+
+  const _fetchWalletData = async (username: string): Promise<void> => {
+    profileUser.wallet.loading = true;
+    try {
+      if (!globalProps.value.total_vesting_fund_blurt) {
+        const props = await client.condenser.getDynamicGlobalProperties();
+        globalProps.value = props;
+      }
+
+      const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
+      
+      const [delegations, expiringDel, history] = await Promise.all([
+        client.call('condenser_api', 'get_vesting_delegations', [username, '', 100]) as Promise<Delegation[]>,
+        client.call('condenser_api', 'get_expiring_vesting_delegations', [username, '2000-01-01T00:00:00', 100])
+          .catch(() => [] as any[]),
+        client.call('condenser_api', 'get_account_history', [username, -1, 1000]) as Promise<Array<[number, any]>>
+      ]);
+
+      // 1. Process Outgoing
+      if (Array.isArray(delegations)) {
+        profileUser.wallet.delegations = delegations.map(d => ({ ...d, bp: (parseFloat(d.vesting_shares) * ratio).toFixed(3) }));
+      }
+
+      // 2. Process History & Extract Incoming Delegations (Fallback)
+      const incomingMap: Record<string, Delegation> = {};
+      if (Array.isArray(history)) {
+        profileUser.wallet.history = history
+          .map(item => ({ seq: item[0], ...item[1] }))
+          .filter(item => {
+             const op = item.op;
+             if (!op || !Array.isArray(op)) return false;
+             
+             // Extract incoming delegations from history while filtering
+             if (op[0] === 'delegate_vesting_shares' && op[1].delegatee === username && op[1].delegator !== username) {
+               const val = parseFloat(op[1].vesting_shares);
+               if (val > 0) {
+                 incomingMap[op[1].delegator] = {
+                   delegator: op[1].delegator,
+                   delegatee: username,
+                   vesting_shares: op[1].vesting_shares,
+                   min_delegation_time: '',
+                   bp: (val * ratio).toFixed(3)
+                 };
+               } else { delete incomingMap[op[1].delegator]; }
+             }
+
+             return ['transfer', 'transfer_to_vesting', 'withdraw_vesting', 'delegate_vesting_shares'].includes(op[0]);
+          })
+          .reverse();
+        
+        profileUser.wallet.incomingDelegations = Object.values(incomingMap);
+      }
+
+      // 3. Try to get more Incoming via database_api (if supported)
+      try {
+        const dbIncoming = await client.call('database_api', 'list_vesting_delegations', { start: [username, ''], limit: 100, order: 'by_delegation' }) as any;
+        const delList = (dbIncoming.delegations || dbIncoming) as any[];
+        if (Array.isArray(delList)) {
+          delList.forEach(d => {
+            if (d.delegatee === username && d.delegator !== username) {
+               const vs = typeof d.vesting_shares === 'string' ? d.vesting_shares : `${(parseFloat(d.vesting_shares.amount) / 1000000).toFixed(6)} VESTS`;
+               incomingMap[d.delegator] = { 
+                 delegator: d.delegator, delegatee: d.delegatee, vesting_shares: vs, min_delegation_time: d.min_delegation_time,
+                 bp: (parseFloat(vs) * ratio).toFixed(3)
+               };
+            }
+          });
+          profileUser.wallet.incomingDelegations = Object.values(incomingMap);
+        }
+      } catch (e) { /* ignore, we have history fallback */ }
+
+      if (profileUser.data) {
+        const acc = profileUser.data as any;
+        const withdrawRate = parseFloat(acc.vesting_withdraw_rate || '0');
+        const toWithdraw = parseFloat(acc.to_withdraw || '0');
+        const withdrawn = parseFloat(acc.withdrawn || '0');
+        if (withdrawRate > 0) {
+          profileUser.wallet.powerDown = {
+            total: ((toWithdraw - withdrawn) / 1000000 * ratio).toFixed(3),
+            rate: (withdrawRate / 1000000 * ratio).toFixed(3),
+            next: acc.next_vesting_withdrawal,
+            percent: Math.round((withdrawn / toWithdraw) * 100) || 0
+          };
+        } else { profileUser.wallet.powerDown = { total: '0.000', rate: '0.000', next: '', percent: 0 }; }
+      }
+    } catch (err) { console.warn('Wallet fetch error:', err); }
+    profileUser.wallet.loading = false;
   };
 
   const switchCommunity = (account: string): void => {
@@ -964,12 +1071,27 @@ export function useApp() {
     }
   };
 
-  const postImgUpload = ref(false);
-  const replyImgUpload = ref(false);
-  const onPostImagePick  = async (e: Event) => { const f = (e.target as HTMLInputElement).files?.[0]; (e.target as HTMLInputElement).value = ''; if (!f) return; postImgUpload.value = true; try { await handleImageUpload(f, 'post'); } finally { postImgUpload.value = false; } };
-  const onReplyImagePick = async (e: Event) => { const f = (e.target as HTMLInputElement).files?.[0]; (e.target as HTMLInputElement).value = ''; if (!f) return; replyImgUpload.value = true; try { await handleImageUpload(f, 'reply'); } finally { replyImgUpload.value = false; } };
-  const onPostPaste  = async (e: ClipboardEvent) => { for (const item of Array.from(e.clipboardData?.items ?? [])) { if (item.type.startsWith('image/')) { e.preventDefault(); const f = item.getAsFile()!; postImgUpload.value = true; try { await handleImageUpload(f, 'post'); } finally { postImgUpload.value = false; } break; } } };
-  const onReplyPaste = async (e: ClipboardEvent) => { for (const item of Array.from(e.clipboardData?.items ?? [])) { if (item.type.startsWith('image/')) { e.preventDefault(); const f = item.getAsFile()!; replyImgUpload.value = true; try { await handleImageUpload(f, 'reply'); } finally { replyImgUpload.value = false; } break; } } };
+  const imgUploads = reactive({ post: false, reply: false });
+  const onImagePick = async (target: 'post' | 'reply', e: Event) => {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    (e.target as HTMLInputElement).value = '';
+    if (!f) return;
+    imgUploads[target] = true;
+    try { await handleImageUpload(f, target); }
+    finally { imgUploads[target] = false; }
+  };
+  const onPaste = async (target: 'post' | 'reply', e: ClipboardEvent) => {
+    for (const item of Array.from(e.clipboardData?.items ?? [])) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const f = item.getAsFile()!;
+        imgUploads[target] = true;
+        try { await handleImageUpload(f, target); }
+        finally { imgUploads[target] = false; }
+        break;
+      }
+    }
+  };
 
   // ── Blockchain wait queue ─────────────────────────────────────────────────
   const bcWaitQueue = ref<BcQueueEntry[]>([]);
@@ -1188,17 +1310,15 @@ export function useApp() {
   const feeInfo = Blockchain.feeInfo;
   const fetchFeeInfo = () => Blockchain.fetchFeeInfo(client);
   const estimateTxFee = (numOps: number, payloadBytes: number) => Blockchain.estimateTxFee(numOps, payloadBytes);
-  const postFeeEstimate  = ref<string | null>(null);
-  const replyFeeEstimate = ref<string | null>(null);
-  let _postFeeTimer: ReturnType<typeof setTimeout> | null = null;
-  let _replyFeeTimer: ReturnType<typeof setTimeout> | null = null;
-  const schedulePostFeeUpdate = () => {
-    clearTimeout(_postFeeTimer!);
-    _postFeeTimer = setTimeout(() => { const bodyBytes = new TextEncoder().encode((postForm.title || '') + (postForm.body || '')).length; postFeeEstimate.value = estimateTxFee(2, bodyBytes); }, 2000);
-  };
-  const scheduleReplyFeeUpdate = () => {
-    clearTimeout(_replyFeeTimer!);
-    _replyFeeTimer = setTimeout(() => { const bodyBytes = new TextEncoder().encode(replyForm.body || '').length; replyFeeEstimate.value = estimateTxFee(2, bodyBytes); }, 2000);
+  const feeEstimates = reactive({ post: null as string | null, reply: null as string | null });
+  const feeTimers = { post: null as ReturnType<typeof setTimeout> | null, reply: null as ReturnType<typeof setTimeout> | null };
+  const scheduleFeeUpdate = (target: 'post' | 'reply') => {
+    if (feeTimers[target]) clearTimeout(feeTimers[target]!);
+    feeTimers[target] = setTimeout(() => {
+      const content = target === 'post' ? (postForm.title || '') + (postForm.body || '') : (replyForm.body || '');
+      const bodyBytes = new TextEncoder().encode(content).length;
+      feeEstimates[target] = estimateTxFee(2, bodyBytes);
+    }, 2000);
   };
 
   const openNewPostForm = (): void => {
@@ -1206,12 +1326,12 @@ export function useApp() {
     postForm.customTags = postForm.title = postForm.body = postForm.error = postForm.success = '';
     postForm.hasDraft = false; postPreview.value = false; showNewPostForm.value = true;
     loadDraft();
-    fetchFeeInfo().then(() => { postFeeEstimate.value = estimateTxFee(2, 0); });
+    fetchFeeInfo().then(() => { feeEstimates.post = estimateTxFee(2, 0); });
   };
 
   const startReply = (target: Post): void => {
     replyTarget.value = target; replyForm.body = replyForm.error = replyForm.success = '';
-    fetchFeeInfo().then(() => { replyFeeEstimate.value = estimateTxFee(2, 0); });
+    fetchFeeInfo().then(() => { feeEstimates.reply = estimateTxFee(2, 0); });
   };
 
   const mutePost = async (post: Post, mute = true): Promise<void> => {
@@ -1267,6 +1387,58 @@ export function useApp() {
   const getNotifIcon = (type: string): string => {
     const icons: Record<string, string> = { reply: '💬', reply_comment: '💬', vote: '👍', mention: '🔔', follow: '👤', reblog: '🔄', transfer: '💰', witness_vote: '🗳️' };
     return icons[type] || '🔵';
+  };
+
+  const openWalletModal = (mode: 'transfer' | 'power_up' | 'power_down', balance: string, targetUser = ''): void => {
+    walletModal.mode = mode;
+    walletModal.balance = balance;
+    walletModal.targetUser = targetUser;
+    walletModal.show = true;
+  };
+
+  const handleWalletSubmit = async (data: { mode: string, to: string, amount: string, memo: string }): Promise<void> => {
+    if (!auth.user) return;
+    walletModal.show = false;
+    if (checkLock(() => handleWalletSubmit(data))) return;
+
+    try {
+      const amount = parseFloat(data.amount).toFixed(3);
+      let ops: any[] = [];
+      let label = '';
+
+      if (data.mode === 'transfer') {
+        ops = [['transfer', { from: auth.user.username, to: data.to.trim().toLowerCase(), amount: `${amount} BLURT`, memo: data.memo || '' }]];
+        label = `Transferring ${amount} BLURT to ${data.to}...`;
+      } else if (data.mode === 'power_up') {
+        ops = [['transfer_to_vesting', { from: auth.user.username, to: data.to.trim().toLowerCase() || auth.user.username, amount: `${amount} BLURT` }]];
+        label = `Powering up ${amount} BLURT...`;
+      } else if (data.mode === 'power_down') {
+        const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
+        const vests = (parseFloat(data.amount) / ratio).toFixed(6);
+        ops = [['withdraw_vesting', { account: auth.user.username, vesting_shares: `${vests} VESTS` }]];
+        label = `Starting power down of ${amount} BP...`;
+      }
+
+      await broadcast(ops);
+      showStatus('Wallet', 'Transaction broadcasted successfully!', 'success');
+      waitAndReload(false, null, null, null, label);
+    } catch (err) {
+      console.error('Wallet error:', err);
+      showStatus('Wallet', 'Transaction failed: ' + ((err as Error).message || err), 'error');
+    }
+  };
+
+  const cancelDelegation = async (target: string): Promise<void> => {
+    if (!auth.user || !confirm(`Cancel delegation to @${target}?`)) return;
+    if (checkLock(() => cancelDelegation(target))) return;
+    const op = ['delegate_vesting_shares', { delegator: auth.user.username, delegatee: target, vesting_shares: '0.000000 VESTS' }];
+    try {
+      await broadcast([op]);
+      showStatus('Wallet', 'Delegation cancel requested', 'success');
+      waitAndReload(false, null, null, null, `Cancelling delegation to @${target}...`);
+    } catch (err) {
+      showStatus('Wallet', 'Error: ' + ((err as Error).message || err), 'error');
+    }
   };
 
   const openNotifModal = async (): Promise<void> => {
@@ -1438,21 +1610,29 @@ export function useApp() {
 
   const logout = (): void => { auth.user = null; replyTarget.value = null; localStorage.removeItem('blurtforum_session'); };
 
-  const claimRewards = async (): Promise<void> => {
-    if (checkLock(claimRewards)) return;
-    if (!auth.user) return;
+  const claimRewards = async (targetAccount?: string): Promise<void> => {
+    const username = targetAccount || auth.user?.username;
+    if (!username) return;
+    if (checkLock(() => claimRewards(targetAccount))) return;
     try {
-      const accounts = await client.condenser.getAccounts([auth.user.username]);
+      const accounts = await client.condenser.getAccounts([username]);
       const acc = accounts?.[0] as Record<string, unknown>;
       if (!acc) return;
-      if (BFUtils.parsePayout(acc.reward_blurt_balance as string) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance as string) === 0) { showStatus(t('claimRewards'), t('noRewardsToClaim'), 'info'); return; }
+      if (BFUtils.parsePayout(acc.reward_blurt_balance as string) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance as string) === 0) { 
+        if (!targetAccount) showStatus(t('claimRewards'), t('noRewardsToClaim'), 'info'); 
+        return; 
+      }
       const fmtAsset = (val: string, unit: string): string => {
         if (!val) return unit === 'BLURT' ? '0.000 BLURT' : '0.000000 VESTS';
         if (val.includes(' ')) return val;
         const num = parseFloat(val) || 0;
         return unit === 'BLURT' ? num.toFixed(3) + ' BLURT' : num.toFixed(6) + ' VESTS';
       };
-      const ops = [['claim_reward_balance', { account: auth.user.username, reward_blurt: fmtAsset(acc.reward_blurt_balance as string, 'BLURT'), reward_vests: fmtAsset(acc.reward_vesting_balance as string, 'VESTS') }]];
+      const ops = [['claim_reward_balance', { 
+        account: username, 
+        reward_blurt: fmtAsset(acc.reward_blurt_balance as string, 'BLURT'), 
+        reward_vests: fmtAsset(acc.reward_vesting_balance as string, 'VESTS') 
+      }]];
       await broadcast(ops);
       if (auth.user) {
         auth.user.hasRewards = false;
@@ -1499,6 +1679,7 @@ export function useApp() {
     const requestedAuthor = params.get('author');
     const requestedPermlink = params.get('permlink');
     const requestedUser = params.get('user');
+    const requestedTab = params.get('tab');
 
     if (tagChanged && view.value !== 'topic' && view.value !== 'profile') loadData('current', activeForum.value);
 
@@ -1542,6 +1723,7 @@ export function useApp() {
         if (content?.author) { activeTopic.value = { ...normalizePost(content), beneficiaries: (content.beneficiaries || []) as Beneficiary[] }; view.value = 'topic'; loadReplies(content.author, content.permlink); }
       });
     } else if (requestedView === 'profile' && requestedUser) {
+      if (requestedTab) profileTab.value = requestedTab;
       if (view.value === 'profile' && profileUser.username === requestedUser) return;
       openProfile(requestedUser);
     } else if (requestedView === 'communities') {
@@ -1606,6 +1788,7 @@ export function useApp() {
   const player = BFPlayer;
 
   onMounted(() => {
+    loadLanguage(lang.value);
     BFPlayer.registerPlugin(BlurtPlayerPlugin(client, auth));
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
@@ -1699,28 +1882,29 @@ export function useApp() {
     loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
     showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
     goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,
-    community: BFCommunity,
+    syncUrl,
+    community: BFCommunity, communityRewards,
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
-    nextPage, prevPage,
+    changePage,
     submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+    walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
     followModal, confirmToggleFollow,
-    openProfile, profileUser, profileTab, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
-    userRole, canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
+    openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
+    canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
     pinModal, handlePinSubmit,
     globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
     editModal, startEdit, submitEdit,
     voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
-    feeInfo, postFeeEstimate, replyFeeEstimate, schedulePostFeeUpdate, scheduleReplyFeeUpdate,
+    feeInfo, feeEstimates, scheduleFeeUpdate,
     bcWaitQueue, bcQueueExpanded,
     imgModal, openImgModal,
     statusModal, showStatus,
     claimRewards,
     postPreview, replyPreview, saveDraft, clearDraft,
-    postImgUpload, replyImgUpload, onPostImagePick, onReplyImagePick, onPostPaste, onReplyPaste,
+    imgUploads, onImagePick, onPaste,
     rpcMenuOpen, rpcDataNode, rpcForumNode, rpcDataCustom, rpcForumCustom, applyRpcSettings,
-    checkNewNotifications,
     getNotifIcon,
     loadTopicContext,
     isPostInCommunity,
@@ -1733,5 +1917,5 @@ export function useApp() {
     followingSet,
     player: BFPlayer,
     client: forumClient,
-  };
-}
+    };
+    }

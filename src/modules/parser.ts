@@ -17,28 +17,82 @@ export const Parser = {
   render(text: string, context: ParseContext | null = null): string {
     if (!text) return '';
     try {
-      // Fix for nested image URLs like ![](https://imgp.blurt.blog/.../https://...)
-      let processedText = text.replace(/!\[(.*?)\]\((https?:\/\/.*?\/)(https?:\/\/.*?)\)/g, (match, alt, proxy, nested) => {
+      const tokens: Record<string, string> = {};
+      let tokenCounter = 0;
+
+      // Helper to store a component and return a safe token
+      // Alphanumeric tokens are ignored by Markdown's formatting and auto-linkers
+      const tokenize = (content: string) => {
+        const id = `XBFMEDIATKNX${tokenCounter++}X`;
+        tokens[id] = content;
+        return id;
+      };
+
+      let processedText = text;
+
+      // 1. Extract explicit <iframe> tags FIRST
+      // This hides the URLs inside src from both marked and autoEmbed
+      processedText = processedText.replace(/<iframe[^>]+src=["']([^"']+)["'][^>]*>.*?<\/iframe>/gi, (match, src) => {
+        const media = this.detectMedia(src);
+        if (media) {
+          // If it's a known media source, we can skip the iframe gate and show card immediately
+          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
+        }
+        return tokenize(this.getIframePlaceholder(src));
+      });
+
+      // 2. Extract raw media links (line-based detection)
+      const lines = processedText.split('\n');
+      const processedLines = lines.map(line => {
+        const trimmed = line.trim();
+        // Skip if line is already a token or looks like a markdown image/link start
+        if (trimmed.startsWith('XBFMEDIATKNX') || trimmed.startsWith('![') || (trimmed.startsWith('[') && !trimmed.startsWith('[['))) return line;
+        
+        const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+        return line.replace(urlRegex, (url) => {
+          const cleanUrl = url.replace(/[).,;]$/, '');
+          const media = this.detectMedia(cleanUrl);
+          if (media) {
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
+          }
+          return url;
+        });
+      });
+      processedText = processedLines.join('\n');
+
+      // 3. Handle explicit [[MEDIA:...]] syntax if any
+      processedText = processedText.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (_match, type, id, host) => {
+        return tokenize(this.getExperimentalPlaceholder(type, id, host, context));
+      });
+
+      // 4. Fix for nested image URLs
+      processedText = processedText.replace(/!\[(.*?)\]\((https?:\/\/.*?\/)(https?:\/\/.*?)\)/g, (match, alt, proxy, nested) => {
         return `![${alt}](${nested})`;
       });
-      
-      processedText = this.autoEmbed(processedText);
+
+      // 5. Render Markdown
       let html = marked.parse(processedText, { breaks: true, gfm: true }) as string;
 
-      html = html.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (_match, type, id, host) =>
-        this.getExperimentalPlaceholder(type, id, host, context)
-      );
+      // 6. Restore Tokens (inject Custom Elements back into HTML)
+      Object.entries(tokens).forEach(([token, replacement]) => {
+        // Use split/join for global string replacement
+        html = html.split(token).join(replacement);
+      });
+
+      // 7. Mentions
       html = html.replace(
         /(^|[^a-zA-Z0-9_!#$%&*@/])@([a-z0-9.-]+[a-z0-9])/g,
         '$1<a href="#" class="mention" data-user="$2">@$2</a>'
       );
 
+      // 8. Sanitize
       return DOMPurify.sanitize(html, {
-        ADD_TAGS: ['iframe', 'button', 'img', 'forum-media'],
+        ADD_TAGS: ['button', 'img', 'forum-media', 'forum-iframe'],
         ADD_ATTR: [
           'allow', 'allowfullscreen', 'frameborder', 'scrolling', 'style', 'sandbox',
           'data-type', 'data-id', 'data-host', 'data-title', 'data-author',
-          'data-src', 'data-cover', 'src', 'alt', 'data-permlink', 'class'
+          'data-src', 'data-cover', 'src', 'alt', 'data-permlink', 'class',
+          'data-pending', 'mode'
         ],
       });
     } catch (e) {
@@ -47,25 +101,10 @@ export const Parser = {
     }
   },
 
-  autoEmbed(text: string): string {
-    const lines = text.split('\n');
-    const embeddedUrls = new Set<string>();
-    const processedLines = lines.map(line => {
-      if (line.trim().startsWith('<') || line.trim().startsWith('[[')) return line;
-      const urlRegex = /(https?:\/\/[^\s\)]+)/g;
-      const matches = line.match(urlRegex);
-      if (!matches) return line;
-      let embedsForThisLine = '';
-      for (const rawUrl of matches) {
-        const cleanUrl = rawUrl.replace(/[).,;]$/, '');
-        if (!embeddedUrls.has(cleanUrl)) {
-          const embed = this.getEmbedCode(cleanUrl);
-          if (embed) { embedsForThisLine += embed + '\n\n'; embeddedUrls.add(cleanUrl); }
-        }
-      }
-      return embedsForThisLine + line;
-    });
-    return processedLines.join('\n');
+  getIframePlaceholder(url: string): string {
+    return `<div class="forum-media-card-wrapper">
+              <forum-iframe data-src="${url}"></forum-iframe>
+            </div>`;
   },
 
   /** Detects media type from text — returns generic: 'audio', 'youtube', 'peertube' */
@@ -74,7 +113,7 @@ export const Parser = {
 
     // YouTube
     const ytMatch = text.match(
-      /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/
+      /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|v\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/
     );
     if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
 
@@ -92,7 +131,7 @@ export const Parser = {
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
 
     // PeerTube (including blurt.media)
-    const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch)\/([a-zA-Z0-9-]+)/);
+    const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch|videos\/embed)\/([a-zA-Z0-9-]+)/);
     if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
 
     // Direct audio files
@@ -102,27 +141,6 @@ export const Parser = {
       return { type: 'audio', id: btoa(url), src: url };
     }
 
-    return null;
-  },
-
-  getEmbedCode(url: string): string | null {
-    const media = this.detectMedia(url);
-    if (!media) return null;
-
-    // Check if BFPlayer is enabled (window global injected by player module)
-    if ((window as Record<string, unknown>)['__bfPlayerEnabled']) {
-      return `[[MEDIA:${media.type}:${media.id}:${media.host || ''}]]`;
-    }
-
-    if (media.type === 'youtube') {
-      return `<div class="embed-container"><iframe src="https://www.youtube.com/embed/${media.id}" frameborder="0" allowfullscreen></iframe></div>`;
-    }
-    if (media.type === 'audio' && media.src) {
-      return `<div class="embed-audio"><audio controls src="${media.src}"></audio></div>`;
-    }
-    if (media.type === 'peertube') {
-      return `<div class="embed-container"><iframe src="https://${media.host}/videos/embed/${media.id}" frameborder="0" allowfullscreen sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe></div>`;
-    }
     return null;
   },
 
