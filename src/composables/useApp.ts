@@ -455,6 +455,8 @@ export function useApp() {
         forumPagination.lastPermlink = '';
         forumPagination.hasMore = true;
         forumPagination.pageHistory = [];
+        // Refresh exploration data too
+        if (explorationExpanded.value) await loadExplorationData();
       }
 
       if (direction === 'current' && !targetForum) {
@@ -728,6 +730,7 @@ export function useApp() {
     showNewPostForm.value = false;
     currentTagFilter.value = '';
     syncUrl();
+    loadData('current');
   };
 
   const openForum = (forum: Forum): void => {

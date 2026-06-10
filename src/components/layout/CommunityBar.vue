@@ -27,9 +27,10 @@ const emit = defineEmits<{
   <div class="cb-selectors">
     <div class="cb-main-row">
       <select :value="selectedCommunity" @change="emit('update:selectedCommunity', ($event.target as HTMLSelectElement).value); emit('handleCommunityChange')">
-        <option v-for="c in allCommunities" :key="c.account" :value="c.account">{{ c.title }} <span class="hide-on-mobile">({{ c.account }})</span></option>
+        <option v-for="c in allCommunities" :key="c.account" :value="c.account">{{ c.title }} ({{ c.account }})</option>
         <option value="custom">— {{ t('custom') }} —</option>
       </select>
+
       <button class="btn btn-sm btn-ghost cb-search-btn" @click="emit('openCommunities')" :title="t('exploreCommunities')">
         <i class="fa-solid fa-magnifying-glass"></i>
       </button>
