@@ -15,7 +15,7 @@ export const TR = reactive<Record<string, string>>({});
  */
 export async function loadLanguage(lang: Lang): Promise<boolean> {
   try {
-    const response = await fetch(`/locales/${lang}.json`);
+    const response = await fetch(`locales/${lang}.json`);
     if (!response.ok) throw new Error(`Failed to load locale: ${lang}`);
     
     const data = await response.json();
