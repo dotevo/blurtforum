@@ -187,7 +187,6 @@ const {
   />
 
   <NavBar
-    class="hide-mobile"
     :view="view"
     :community-account="config.communityAccount"
     :auth="auth"
