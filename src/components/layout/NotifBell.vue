@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineProps<{
   hasNew: boolean;
+  loading?: boolean;
   size?: 'sm' | 'md' | 'lg';
 }>();
 
@@ -10,8 +11,9 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="notif-bell" :class="[size || 'md', { 'has-new': hasNew }]" @click="emit('click')">
-    <i class="fa-solid fa-bell"></i>
+  <div class="notif-bell" :class="[size || 'md', { 'has-new': hasNew, 'is-loading': loading }]" @click="emit('click')">
+    <i v-if="loading" class="fa-solid fa-circle-notch spin"></i>
+    <i v-else class="fa-solid fa-bell"></i>
   </div>
 </template>
 

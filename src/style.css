@@ -874,7 +874,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
 
   /* Responsive Post List - Only for the main list */
   .post-list-table { border-collapse: collapse; width: 100% !important; }
-  .post-list-table tr:first-child { display: none; } /* Hide headers on mobile */
+  .post-list-table thead { display: none; } /* Hide headers on mobile */
   
   .post-list-table tr {
     display: block;

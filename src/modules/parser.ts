@@ -10,6 +10,7 @@ interface ParseContext {
   author?: string;
   permlink?: string;
   body?: string;
+  cover?: string;
 }
 
 export const Parser = {
@@ -36,7 +37,7 @@ export const Parser = {
         const media = this.detectMedia(src);
         if (media) {
           // If it's a known media source, we can skip the iframe gate and show card immediately
-          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
+          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, media.cover));
         }
         return tokenize(this.getIframePlaceholder(src));
       });
@@ -53,7 +54,7 @@ export const Parser = {
           const cleanUrl = url.replace(/[).,;]$/, '');
           const media = this.detectMedia(cleanUrl);
           if (media) {
-            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, media.cover));
           }
           return url;
         });
@@ -144,10 +145,11 @@ export const Parser = {
     return null;
   },
 
-  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null): string {
+  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null, cover?: string): string {
     const title = (context?.title || 'Media Content').replace(/"/g, '&quot;');
     const author = context?.author || 'post';
     const permlink = context?.permlink || '';
+    const finalCover = cover || context?.cover || '';
 
     // Audio tracks with short IDs (Suno share) and PeerTube tracks without covers require resolution.
     const isPending = (type === 'audio' && id.length < 30) || (type === 'peertube');
@@ -155,6 +157,7 @@ export const Parser = {
     return `<div class="forum-media-card-wrapper">
               <forum-media data-type="${type}" data-id="${id}" data-host="${host}" 
                  data-title="${title}" data-author="${author}" data-permlink="${permlink}"
+                 data-cover="${finalCover}"
                  data-pending="${isPending}"
                  mode="card"></forum-media>
             </div>`;

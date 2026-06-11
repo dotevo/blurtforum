@@ -34,7 +34,14 @@ src/
 │   ├── translations.raw.ts  # Raw translation strings (en / pl / eo)
 │   └── whalevault.ts        # WhaleVault extension interface + polyfill
 └── composables/
-    └── useApp.ts            # Main app logic (all of app.js, typed)
+    ├── useApp.ts            # Main app logic (orchestration)
+    ├── useAuth.ts           # Authentication and multi-account logic
+    ├── useGlobalActivity.ts # Global activity feed management
+    ├── useNotifications.ts  # Notifications management logic
+    ├── useProfile.ts        # User profile and earnings logic
+    ├── useTitle.ts          # Document title management logic
+    ├── useVote.ts           # Voting logic and modal state
+    └── useWallet.ts         # Wallet operations (transfers, power)
 ```
 
 ## Local development

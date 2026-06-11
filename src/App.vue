@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { watch } from 'vue';
 import { useApp } from './composables/useApp';
+import { useTitle } from './composables/useTitle';
 
 // Layout
 import LangBar from './components/layout/LangBar.vue';
@@ -34,17 +36,19 @@ import LayoutEditor from './components/modals/LayoutEditor.vue';
 import ImageLightbox from './components/modals/ImageLightbox.vue';
 import WalletModal from './components/modals/WalletModal.vue';
 import RpcModal from './components/modals/RpcModal.vue';
+import SwitchAccountModal from './components/modals/SwitchAccountModal.vue';
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
   activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
   structureNote, selectedCommunity, currentTagFilter, applyTagFilter, clearTagFilter,
   customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
-  loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
+  loginForm, loginErr, loginBusy, wvAvailable, loginOptions, replyTarget, replyForm,
   showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread,
   renderMD, isNestedReply, getParentBody,
   goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities,
   toggleCommunitySub, openLoginModal,
+  switchAccount, removeAccount, showSwitchAccountModal, openSwitchAccountModal,
   syncUrl,
   community, communityRewards,
   doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
@@ -80,7 +84,11 @@ const {
   followingSet,
   player,
   client,
-  } = useApp();</script>
+  } = useApp();
+
+  const { initTitleWatcher } = useTitle();
+  initTitleWatcher();
+</script>
 
 <template>
 <div
@@ -118,6 +126,8 @@ const {
     @go-home="goHome"
     @set-theme="setTheme"
     @set-lang="(v: string) => setLang(v as 'en'|'pl'|'eo')"
+    @logout="logout"
+    @open-switch-account-modal="openSwitchAccountModal"
   />
 
   <LangBar
@@ -151,11 +161,13 @@ const {
     :head-block-number="globalProps.head_block_number || '…'"
     :auth="auth"
     :has-new-notif="notifModal.hasNew"
+    :notif-loading="notifModal.initializing"
     :t="t"
     @go-home="goHome"
     @open-login-modal="openLoginModal"
     @open-notif-modal="openNotifModal"
     @open-profile="openProfile"
+    @open-switch-account-modal="openSwitchAccountModal"
     @logout="logout"
   />
 
@@ -437,6 +449,7 @@ const {
     v-if="showLoginModal"
     :login-tab="loginTab"
     :login-form="loginForm"
+    :login-options="loginOptions"
     :login-err="loginErr"
     :login-busy="loginBusy"
     :wv-available="wvAvailable"
@@ -445,6 +458,16 @@ const {
     @do-key-login="doKeyLogin"
     @do-w-v-login="doWVLogin"
     @update:login-tab="loginTab = $event"
+  />
+
+  <SwitchAccountModal
+    v-if="showSwitchAccountModal"
+    :auth="auth"
+    :t="t"
+    @close="showSwitchAccountModal = false"
+    @switch-account="switchAccount($event); showSwitchAccountModal = false"
+    @remove-account="removeAccount"
+    @open-login-modal="openLoginModal(); showSwitchAccountModal = false"
   />
 
   <PayoutModal
@@ -459,7 +482,9 @@ const {
   <NotifModal
     v-if="notifModal.show"
     :notif-modal="notifModal"
+    :auth="auth"
     :t="t"
+
     :time-ago="timeAgo"
     :get-notif-icon="getNotifIcon"
     @close="notifModal.show = false"

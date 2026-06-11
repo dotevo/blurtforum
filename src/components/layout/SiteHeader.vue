@@ -9,6 +9,7 @@ defineProps<{
   headBlockNumber: number | string;
   auth: { user: AuthUser | null };
   hasNewNotif: boolean;
+  notifLoading: boolean;
   t: (k: string) => string;
 }>();
 
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   openLoginModal: [];
   openNotifModal: [];
   openProfile: [username: string];
+  openSwitchAccountModal: [];
   logout: [];
 }>();
 </script>
@@ -51,7 +53,7 @@ const emit = defineEmits<{
            </div>
         </div>
 
-        <NotifBell :has-new="hasNewNotif" size="md" @click="emit('openNotifModal')" style="margin: 0 15px;" />
+        <NotifBell :has-new="hasNewNotif" :loading="notifLoading" size="md" @click="emit('openNotifModal')" style="margin: 0 15px;" />
 
         <div class="header-user-info" @click="emit('openProfile', auth.user.username)">
           <div class="header-user-text">
@@ -61,6 +63,7 @@ const emit = defineEmits<{
           <UserAvatar :username="auth.user.username" size="xs" round style="border: 1px solid var(--primary);" />
         </div>
 
+        <button class="btn-hdr" @click="emit('openSwitchAccountModal')" :title="t('switchAccount')" style="margin-left: 5px;"><i class="fa-solid fa-users-viewfinder"></i></button>
         <button class="btn-hdr logout-btn" @click="emit('logout')" :title="t('logout')"><i class="fa-solid fa-right-from-bracket"></i></button>
       </div>
     </div>

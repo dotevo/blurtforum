@@ -6,10 +6,15 @@ import {
   ref, reactive, computed, onMounted, watch, nextTick,
 } from 'vue';
 import CryptoJS from 'crypto-js';
+import { useNotifications, notifModal } from './useNotifications';
 import { BFUtils } from '../modules/utils';
 import * as Earnings from '../modules/earnings';
 import { Blockchain } from '../modules/blockchain';
 import { useVote } from './useVote';
+import { useWallet } from './useWallet';
+import { useProfile } from './useProfile';
+import { useAuth } from './useAuth';
+import { useGlobalActivity } from './useGlobalActivity';
 import { BlurtPlayerPlugin } from '../modules/blurt-player-plugin';
 import { AuthService } from '../modules/auth';
 import { BFCommunity, VIRTUAL_FORUMS, DEFAULT_COMMUNITIES } from '../modules/community';
@@ -139,16 +144,6 @@ export function useApp() {
   const rawDescription = ref('');
   const structureForm = reactive({ text: '', loading: false, error: '' });
 
-  const auth = reactive<{ user: AuthUser | null }>({ user: null });
-
-  const userRole = computed(() => {
-    if (!auth.user || !moderators.value.length) return null;
-    const entry = moderators.value.find(m => m.account === auth.user!.username);
-    return entry ? entry.role : 'member';
-  });
-  const canEditStructure = computed(() => ['owner', 'admin'].includes(userRole.value ?? ''));
-  const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value ?? ''));
-
   const bodyCache: Record<string, string> = {};
   const selectedCommunity = ref('blurt-140455');
   const currentTagFilter = ref(urlParams.get('tag') || '');
@@ -167,105 +162,11 @@ export function useApp() {
     return combined;
   });
 
-  const profileUser = reactive<{
-    username: string;
-    data: Record<string, unknown> | null;
-    posts: Post[];
-    comments: Post[];
-    replies: Post[];
-    postsHasMore: boolean;
-    commentsHasMore: boolean;
-    repliesHasMore: boolean;
-    earnings: {
-      rawHistory: any[];
-      history: any[];
-      stats: {
-        author: number;
-        curation: number;
-        benefactor: number;
-        claimed: number;
-        total: number;
-        avgPerDay: number;
-        range: string;
-      };
-      chartData: {
-        daily: Array<{ date: string; author: number, curation: number, benefactor: number, total: number }>;
-        distribution: { author: number; curation: number; benefactor: number };
-      };
-      loading: boolean;
-    };
-    wallet: {
-      delegations: Delegation[];
-      incomingDelegations: Delegation[];
-      history: any[];
-      powerDown: { total: string, rate: string, next: string, percent: number };
-      loading: boolean;
-    };
-    loading: boolean;
-  }>({
-    username: '',
-    data: null,
-    posts: [],
-    comments: [],
-    replies: [],
-    postsHasMore: true,
-    commentsHasMore: true,
-    repliesHasMore: true,
-    earnings: {
-      rawHistory: [],
-      history: [],
-      stats: { author: 0, curation: 0, benefactor: 0, claimed: 0, total: 0, avgPerDay: 0, range: '' },
-      chartData: { daily: [], distribution: { author: 0, curation: 0, benefactor: 0 } },
-      loading: false
-    },
-    wallet: { delegations: [] as Delegation[], incomingDelegations: [] as Delegation[], history: [] as any[], powerDown: { total: '0.000', rate: '0.000', next: '', percent: 0 }, loading: false },
-    loading: false
-  });
-  const profileTab = ref('posts');
 
-  const _fetchEarningsHistory = async (username: string, start = -1, limit = 500): Promise<void> => {
-    profileUser.earnings.loading = true;
-    try {
-      const history = await client.call('condenser_api', 'get_account_history', [username, start, limit] as any) as Array<[number, any]>;
-      if (!Array.isArray(history)) return;
-      
-      const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
-      
-      if (start === -1) {
-        profileUser.earnings.rawHistory = history;
-      } else {
-        // Avoid duplicates if any, though sequence numbers should be unique
-        const existingIds = new Set(profileUser.earnings.rawHistory.map((h: any) => h[0]));
-        const newItems = history.filter(h => !existingIds.has(h[0]));
-        profileUser.earnings.rawHistory = [...profileUser.earnings.rawHistory, ...newItems];
-      }
-
-      const { ops, stats, daily } = Earnings.processHistory(profileUser.earnings.rawHistory, ratio);
-
-      profileUser.earnings.history = ops.reverse(); // Newest first for table
-      profileUser.earnings.chartData.daily = daily;
-      profileUser.earnings.stats = stats;
-      profileUser.earnings.chartData.distribution = { author: stats.author, curation: stats.curation, benefactor: stats.benefactor };
-    } catch (e) { console.error('Earnings fetch error:', e); }
-    finally { profileUser.earnings.loading = false; }
-  };
-
-  const pinModal = reactive({ show: false, mode: 'setup', value: '', error: '', tempUser: null as null | { username: string; key: string; acc: Record<string, unknown> }, loading: false });
   const editModal = reactive({ show: false, loading: false, isPost: false, author: '', permlink: '', title: '', body: '', error: '', success: '', target: null as Post | null });
 
   const resumeAction = ref<(() => void) | null>(null);
 
-  const checkLock = (fn: () => void): boolean => {
-    if (auth.user && auth.user.type === 'key' && auth.user.locked) {
-      resumeAction.value = fn;
-      pinModal.mode = 'unlock';
-      pinModal.value = '';
-      pinModal.error = '';
-      pinModal.show = true;
-      return true;
-    }
-    return false;
-  };
 
   const statusModal = reactive({ show: false, title: '', body: '', type: 'info' as 'info' | 'success' | 'error' });
   const showStatus = (title: string, body: string, type: 'info' | 'success' | 'error' = 'info') => {
@@ -274,13 +175,6 @@ export function useApp() {
     statusModal.type = type;
     statusModal.show = true;
   };
-
-  const showLoginModal = ref(false);
-  const loginTab  = ref('key');
-  const loginForm = reactive({ username: '', key: '', remember: false });
-  const loginErr  = ref('');
-  const loginBusy = ref(false);
-  const wvAvailable = computed(() => typeof window.blurt_keychain !== 'undefined');
 
   const replyTarget = ref<Post | null>(null);
   const replyForm   = reactive({ body: '', loading: false, error: '', success: '', beneficiary: { account: '', weight: '' } });
@@ -318,15 +212,7 @@ export function useApp() {
 
   const payoutModal = reactive<{ show: boolean; post: Partial<Post & { payoutDate?: string }>; beneficiaries: Beneficiary[] }>({ show: false, post: {}, beneficiaries: [] });
   const followModal = reactive({ show: false, user: '', isFollowing: false });
-  const walletModal = reactive({ show: false, mode: 'transfer' as 'transfer' | 'power_up' | 'power_down', balance: '0.000', targetUser: '' });
-  const notifModal = reactive({
-    show: false, loading: false, list: [] as Notification[],
-    lastReadId: parseInt(localStorage.getItem('bf_last_notif_id') || '0'),
-    hasNew: false,
-    clickedIds: JSON.parse(localStorage.getItem('bf_clicked_notif_ids') || '[]') as (number | string)[],
-  });
 
-  const globalActivity = ref<ActivityItem[]>([]);
   const activityTab = ref('comments');
   const activityExpanded = ref(true);
   const activityFullList = ref(false);
@@ -347,7 +233,8 @@ export function useApp() {
       ctx = {
         ...context,
         voteCount: context.vote_count,
-        voted: hasVoted(context)
+        voted: hasVoted(context),
+        cover: context.media?.cover
       };
     }
     return Parser.render(text, ctx);
@@ -368,41 +255,6 @@ export function useApp() {
     canMute: canMute.value
   });
 
-  const updateGlobalActivity = async (): Promise<void> => {
-    if (!auth.user) return;
-    const readStatus = getReadStatusMap();
-    const allActivity: ActivityItem[] = [];
-    const currentUsername = auth.user.username;
-    
-    // Fallback: if no subscriptions, check the primary community account
-    const subsToCheck = userSubscriptions.value.length > 0 
-      ? userSubscriptions.value.slice(0, 25) 
-      : [{ account: config.communityAccount, title: 'Blurt' }];
-
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    for (const sub of subsToCheck) {
-      try {
-        const posts = await client.call('bridge', 'get_forum_posts', { community: sub.account, limit: 5, sort: 'activity' }) as RawPost[];
-        if (Array.isArray(posts)) {
-          posts.forEach(p => {
-            const normalized = normalizePost(p);
-            if (normalized.lastActivityTs! < sevenDaysAgo) return;
-            allActivity.push({
-              id: p.post_id ?? 0, author: normalized.lastAuthor, title: normalized.title,
-              created: normalized.lastActivity, community: sub.account, community_title: sub.title,
-              permlink: normalized.permlink, root_author: normalized.author, root_permlink: normalized.permlink,
-              is_post: normalized.author === normalized.lastAuthor && normalized.created === normalized.lastActivity,
-              isRead: normalized.isRead, lastActivityTs: normalized.lastActivityTs!,
-            });
-          });
-        }
-      } catch { /* silent fail */ }
-    }
-    allActivity.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
-    const seen = new Set<number>();
-    globalActivity.value = allActivity.filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; }).slice(0, 30);
-  };
-
   const markTopicAsRead = (topic: { author: string; permlink: string; lastActivityTs?: number; lastActivity?: string }): void => {
     if (!topic) return;
     const readStatus = getReadStatusMap();
@@ -415,9 +267,7 @@ export function useApp() {
       activeTopic.value.isRead = true;
       activeTopic.value.isUnread = false;
     }
-    globalActivity.value.forEach(act => {
-      if (act.root_author === topic.author && act.root_permlink === topic.permlink) act.isRead = true;
-    });
+    markActivityAsRead(topic.author, topic.permlink);
   };
 
   const openActivity = (act: ActivityItem): void => {
@@ -455,7 +305,6 @@ export function useApp() {
         forumPagination.lastPermlink = '';
         forumPagination.hasMore = true;
         forumPagination.pageHistory = [];
-        // Refresh exploration data too
         if (explorationExpanded.value) await loadExplorationData();
       }
 
@@ -544,7 +393,11 @@ export function useApp() {
         else { (pag as Forum).start_author = ''; (pag as Forum).start_permlink = ''; }
       } else if (pag.lastAuthor && direction === true) {
         params.start_author = pag.lastAuthor; params.start_permlink = pag.lastPermlink;
-      } else if ((pag as Forum).start_author && direction === 'current') {
+      } else if (direction === 'current') {
+        // Force fresh load for 'current' view
+        delete params.start_author; delete params.start_permlink;
+        if (targetForum) { targetForum.start_author = ''; targetForum.start_permlink = ''; }
+      } else if ((pag as Forum).start_author) {
         params.start_author = (pag as Forum).start_author; params.start_permlink = (pag as Forum).start_permlink;
       }
 
@@ -734,16 +587,30 @@ export function useApp() {
   };
 
   const openForum = (forum: Forum): void => {
-    forum.lastAuthor = ''; forum.lastPermlink = ''; forum.start_author = ''; forum.start_permlink = '';
-    forum.pageHistory = []; forum.hasMore = true;
-    forumPagination.visibleCount = 20; // Reset visibility limit
+    // Aggressively reset all pagination markers for this forum
+    forum.lastAuthor = ''; 
+    forum.lastPermlink = ''; 
+    forum.start_author = ''; 
+    forum.start_permlink = '';
+    forum.pageHistory = []; 
+    forum.hasMore = true;
+    forum.posts = []; // Clear existing posts immediately to avoid flicker
+
+    forumPagination.visibleCount = 20; 
     currentTagFilter.value = '';
+    
     const isVirtual = VIRTUAL_FORUMS.find(vf => vf.id === forum.id);
-    if (!isVirtual) { localStorage.setItem('bf_last_forum_id', forum.id); localStorage.setItem('bf_last_community', config.communityAccount); }
+    if (!isVirtual) { 
+      localStorage.setItem('bf_last_forum_id', forum.id); 
+      localStorage.setItem('bf_last_community', config.communityAccount); 
+    }
+    
     activeForum.value = forum;
     view.value = 'forum';
     activeTopic.value = null;
     showNewPostForm.value = false;
+    
+    console.log('[DEBUG] Opening forum, pagination reset', forum.id);
     loadData('current', forum);
     syncUrl();
   };
@@ -770,179 +637,6 @@ export function useApp() {
         }
       }).catch(() => {});
     }
-  };
-
-  const openProfile = async (username: string): Promise<void> => {
-    profileUser.username = username;
-    profileUser.loading = true;
-    profileUser.data = null;
-    profileUser.posts = [];
-    profileUser.comments = [];
-    profileUser.replies = [];
-    profileUser.postsHasMore = profileUser.commentsHasMore = profileUser.repliesHasMore = true;
-    view.value = 'profile';
-    syncUrl();
-    try {
-      const [accounts, followCount, posts, comments, replies] = await Promise.all([
-        client.condenser.getAccounts([username]),
-        client.call('condenser_api', 'get_follow_count', { account: username }) as Promise<{ follower_count: number; following_count: number }>,
-        client.call('bridge', 'get_account_posts', { account: username, sort: 'posts', limit: 20 }) as Promise<RawPost[]>,
-        client.call('bridge', 'get_account_posts', { account: username, sort: 'comments', limit: 20 }) as Promise<RawPost[]>,
-        client.call('bridge', 'get_account_posts', { account: username, sort: 'replies', limit: 20 }) as Promise<RawPost[]>,
-      ]);
-      if (accounts?.[0]) {
-        const acc = accounts[0] as Record<string, unknown>;
-        profileUser.data = acc;
-        if (followCount) { (profileUser.data as Record<string, unknown>).followerCount = followCount.follower_count; (profileUser.data as Record<string, unknown>).followingCount = followCount.following_count; }
-        const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
-        const bp = parseFloat(acc.vesting_shares as string || '0') * ratio;
-        const delegatedIn = parseFloat(acc.received_vesting_shares as string || '0') * ratio;
-        const delegatedOut = parseFloat(acc.delegated_vesting_shares as string || '0') * ratio;
-        Object.assign(profileUser.data, {
-          bp: bp.toFixed(3), delegatedIn: delegatedIn.toFixed(3), delegatedOut: delegatedOut.toFixed(3),
-          totalBP: (bp + delegatedIn - delegatedOut).toFixed(3),
-          walletValue: (parseFloat(acc.balance as string || '0') + bp).toFixed(3),
-        });
-        try {
-          const meta = JSON.parse((acc.posting_json_metadata as string) || (acc.json_metadata as string) || '{}');
-          const p = (meta.profile as Record<string, string>) || {};
-          Object.assign(profileUser.data, { about: p.about || '', website: p.website || '', location: p.location || '', displayName: p.name || acc.name });
-        } catch { /* ignore */ }
-      }
-      
-      if (posts) {
-        profileUser.posts = posts.map(normalizePost);
-        profileUser.postsHasMore = posts.length === 20;
-      }
-      if (comments) {
-        profileUser.comments = comments.map(normalizePost);
-        profileUser.commentsHasMore = comments.length === 20;
-      }
-      if (replies) {
-        profileUser.replies = replies.map(normalizePost);
-        profileUser.repliesHasMore = replies.length === 20;
-      }
-
-      // Fetch earnings
-      _fetchEarningsHistory(username);
-      _fetchWalletData(username);
-    } catch (err) { console.error('Profile error:', err); }
-    profileUser.loading = false;
-  };
-
-  const loadMoreProfileContent = async (sort: 'posts' | 'comments' | 'replies'): Promise<void> => {
-    if (profileUser.loading) return;
-    const list = profileUser[sort];
-    if (list.length === 0) return;
-    const last = list[list.length - 1];
-    profileUser.loading = true;
-    try {
-      const more = await client.call('bridge', 'get_account_posts', {
-        account: profileUser.username,
-        sort,
-        limit: 20,
-        start_author: last.author,
-        start_permlink: last.permlink
-      }) as RawPost[];
-      
-      if (more && more.length > 0) {
-        // Skip the first one as it's the 'last' from previous batch
-        const filtered = more.slice(1).map(normalizePost);
-        profileUser[sort] = [...profileUser[sort], ...filtered];
-        profileUser[`${sort}HasMore`] = more.length === 20;
-      } else {
-        profileUser[`${sort}HasMore`] = false;
-      }
-    } catch (e) { console.error('Load more profile error:', e); }
-    finally { profileUser.loading = false; }
-  };
-
-  const _fetchWalletData = async (username: string): Promise<void> => {
-    profileUser.wallet.loading = true;
-    try {
-      if (!globalProps.value.total_vesting_fund_blurt) {
-        const props = await client.condenser.getDynamicGlobalProperties();
-        globalProps.value = props;
-      }
-
-      const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
-      
-      const [delegations, expiringDel, history] = await Promise.all([
-        client.call('condenser_api', 'get_vesting_delegations', [username, '', 100]) as Promise<Delegation[]>,
-        client.call('condenser_api', 'get_expiring_vesting_delegations', [username, '2000-01-01T00:00:00', 100])
-          .catch(() => [] as any[]),
-        client.call('condenser_api', 'get_account_history', [username, -1, 1000]) as Promise<Array<[number, any]>>
-      ]);
-
-      // 1. Process Outgoing
-      if (Array.isArray(delegations)) {
-        profileUser.wallet.delegations = delegations.map(d => ({ ...d, bp: (parseFloat(d.vesting_shares) * ratio).toFixed(3) }));
-      }
-
-      // 2. Process History & Extract Incoming Delegations (Fallback)
-      const incomingMap: Record<string, Delegation> = {};
-      if (Array.isArray(history)) {
-        profileUser.wallet.history = history
-          .map(item => ({ seq: item[0], ...item[1] }))
-          .filter(item => {
-             const op = item.op;
-             if (!op || !Array.isArray(op)) return false;
-             
-             // Extract incoming delegations from history while filtering
-             if (op[0] === 'delegate_vesting_shares' && op[1].delegatee === username && op[1].delegator !== username) {
-               const val = parseFloat(op[1].vesting_shares);
-               if (val > 0) {
-                 incomingMap[op[1].delegator] = {
-                   delegator: op[1].delegator,
-                   delegatee: username,
-                   vesting_shares: op[1].vesting_shares,
-                   min_delegation_time: '',
-                   bp: (val * ratio).toFixed(3)
-                 };
-               } else { delete incomingMap[op[1].delegator]; }
-             }
-
-             return ['transfer', 'transfer_to_vesting', 'withdraw_vesting', 'delegate_vesting_shares'].includes(op[0]);
-          })
-          .reverse();
-        
-        profileUser.wallet.incomingDelegations = Object.values(incomingMap);
-      }
-
-      // 3. Try to get more Incoming via database_api (if supported)
-      try {
-        const dbIncoming = await client.call('database_api', 'list_vesting_delegations', { start: [username, ''], limit: 100, order: 'by_delegation' }) as any;
-        const delList = (dbIncoming.delegations || dbIncoming) as any[];
-        if (Array.isArray(delList)) {
-          delList.forEach(d => {
-            if (d.delegatee === username && d.delegator !== username) {
-               const vs = typeof d.vesting_shares === 'string' ? d.vesting_shares : `${(parseFloat(d.vesting_shares.amount) / 1000000).toFixed(6)} VESTS`;
-               incomingMap[d.delegator] = { 
-                 delegator: d.delegator, delegatee: d.delegatee, vesting_shares: vs, min_delegation_time: d.min_delegation_time,
-                 bp: (parseFloat(vs) * ratio).toFixed(3)
-               };
-            }
-          });
-          profileUser.wallet.incomingDelegations = Object.values(incomingMap);
-        }
-      } catch (e) { /* ignore, we have history fallback */ }
-
-      if (profileUser.data) {
-        const acc = profileUser.data as any;
-        const withdrawRate = parseFloat(acc.vesting_withdraw_rate || '0');
-        const toWithdraw = parseFloat(acc.to_withdraw || '0');
-        const withdrawn = parseFloat(acc.withdrawn || '0');
-        if (withdrawRate > 0) {
-          profileUser.wallet.powerDown = {
-            total: ((toWithdraw - withdrawn) / 1000000 * ratio).toFixed(3),
-            rate: (withdrawRate / 1000000 * ratio).toFixed(3),
-            next: acc.next_vesting_withdrawal,
-            percent: Math.round((withdrawn / toWithdraw) * 100) || 0
-          };
-        } else { profileUser.wallet.powerDown = { total: '0.000', rate: '0.000', next: '', percent: 0 }; }
-      }
-    } catch (err) { console.warn('Wallet fetch error:', err); }
-    profileUser.wallet.loading = false;
   };
 
   const switchCommunity = (account: string): void => {
@@ -981,9 +675,10 @@ export function useApp() {
     } catch (err) { showStatus('Community', 'Error: ' + ((err as Error).message || err), 'error'); }
   };
 
-  const broadcast = (ops: unknown[]) => {
-    if (!auth.user) throw new Error('Not logged in');
-    return Blockchain.broadcast(client, auth.user, ops);
+  const broadcast = (ops: unknown[], targetUser?: AuthUser) => {
+    const user = targetUser || auth.user;
+    if (!user) throw new Error('Not logged in');
+    return Blockchain.broadcast(client, user, ops);
   };
 
   const loadFollowingList = async (username: string): Promise<void> => {
@@ -1264,15 +959,6 @@ export function useApp() {
     postForm.loading = false;
   };
 
-  const {
-    voteModal,
-    estimateVote,
-    openVoteModal,
-    hasVoted,
-    submitVoteConfirmed: _submitVoteConfirmed,
-    submitVote: _submitVote
-  } = useVote(client, auth, broadcast as any, waitAndReload, t);
-
   const getFullPost = async (post: { author: string; permlink: string }): Promise<Post> => {
     const found = [
       activeTopic.value,
@@ -1392,217 +1078,6 @@ export function useApp() {
     return icons[type] || '🔵';
   };
 
-  const openWalletModal = (mode: 'transfer' | 'power_up' | 'power_down', balance: string, targetUser = ''): void => {
-    walletModal.mode = mode;
-    walletModal.balance = balance;
-    walletModal.targetUser = targetUser;
-    walletModal.show = true;
-  };
-
-  const handleWalletSubmit = async (data: { mode: string, to: string, amount: string, memo: string }): Promise<void> => {
-    if (!auth.user) return;
-    walletModal.show = false;
-    if (checkLock(() => handleWalletSubmit(data))) return;
-
-    try {
-      const amount = parseFloat(data.amount).toFixed(3);
-      let ops: any[] = [];
-      let label = '';
-
-      if (data.mode === 'transfer') {
-        ops = [['transfer', { from: auth.user.username, to: data.to.trim().toLowerCase(), amount: `${amount} BLURT`, memo: data.memo || '' }]];
-        label = `Transferring ${amount} BLURT to ${data.to}...`;
-      } else if (data.mode === 'power_up') {
-        ops = [['transfer_to_vesting', { from: auth.user.username, to: data.to.trim().toLowerCase() || auth.user.username, amount: `${amount} BLURT` }]];
-        label = `Powering up ${amount} BLURT...`;
-      } else if (data.mode === 'power_down') {
-        const ratio = parseFloat(String(globalProps.value.total_vesting_fund_blurt || 0)) / parseFloat(String(globalProps.value.total_vesting_shares || 1));
-        const vests = (parseFloat(data.amount) / ratio).toFixed(6);
-        ops = [['withdraw_vesting', { account: auth.user.username, vesting_shares: `${vests} VESTS` }]];
-        label = `Starting power down of ${amount} BP...`;
-      }
-
-      await broadcast(ops);
-      showStatus('Wallet', 'Transaction broadcasted successfully!', 'success');
-      waitAndReload(false, null, null, null, label);
-    } catch (err) {
-      console.error('Wallet error:', err);
-      showStatus('Wallet', 'Transaction failed: ' + ((err as Error).message || err), 'error');
-    }
-  };
-
-  const cancelDelegation = async (target: string): Promise<void> => {
-    if (!auth.user || !confirm(`Cancel delegation to @${target}?`)) return;
-    if (checkLock(() => cancelDelegation(target))) return;
-    const op = ['delegate_vesting_shares', { delegator: auth.user.username, delegatee: target, vesting_shares: '0.000000 VESTS' }];
-    try {
-      await broadcast([op]);
-      showStatus('Wallet', 'Delegation cancel requested', 'success');
-      waitAndReload(false, null, null, null, `Cancelling delegation to @${target}...`);
-    } catch (err) {
-      showStatus('Wallet', 'Error: ' + ((err as Error).message || err), 'error');
-    }
-  };
-
-  const openNotifModal = async (): Promise<void> => {
-    if (!auth.user) return;
-    notifModal.show = true; notifModal.loading = true;
-    try {
-      const list = await client.call('bridge', 'account_notifications', { account: auth.user.username, limit: 50 }) as Notification[];
-      const results = list || [];
-      try {
-        const history = await client.call('condenser_api', 'get_account_history', { account: auth.user.username, start: -1, limit: 50 }) as Array<[number, { op: [string, Record<string, string>]; timestamp: string }]>;
-        if (Array.isArray(history)) {
-          history.forEach(item => {
-            const op = item[1].op;
-            if (op[0] === 'transfer' && op[1].to === auth.user!.username) {
-              const tx = op[1];
-              const notifId = 'tx-' + item[0];
-              if (!results.find(n => n.id === notifId)) {
-                results.push({ id: notifId, type: 'transfer', author: tx.from, date: item[1].timestamp, msg: `Received ${tx.amount} from @${tx.from}` + (tx.memo ? `: ${tx.memo}` : ''), url: `@${tx.from}` });
-              }
-            }
-          });
-        }
-      } catch (e) { console.warn('History fetch error:', e); }
-      results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      notifModal.list = results;
-      if (notifModal.list.length > 0) {
-        const numericIds = notifModal.list.filter(n => typeof n.id === 'number').map(n => n.id as number);
-        if (numericIds.length > 0) { const maxId = Math.max(...numericIds); if (maxId > notifModal.lastReadId) { notifModal.lastReadId = maxId; localStorage.setItem('bf_last_notif_id', String(maxId)); notifModal.hasNew = false; } }
-      }
-    } catch (err) { console.error('Notif error:', err); } finally { notifModal.loading = false; }
-  };
-
-  const openNotification = async (notif: Notification): Promise<void> => {
-    if (!notifModal.clickedIds.includes(notif.id)) {
-      notifModal.clickedIds.push(notif.id);
-      if (notifModal.clickedIds.length > 200) notifModal.clickedIds.shift();
-      localStorage.setItem('bf_clicked_notif_ids', JSON.stringify(notifModal.clickedIds));
-    }
-    notifModal.show = false;
-    if (!notif.url) return;
-    loading.value = true;
-    try {
-      const parts = notif.url.split('/');
-      const author = parts[0].replace('@', '');
-      const permlink = parts[1];
-      if (permlink) {
-        const content = await client.condenser.getContent(author, permlink);
-        if (content?.author) {
-          let root: RawPost = content;
-          if (content.parent_author) {
-            const urlParts = content.url.split('#')[0].split('/');
-            if (urlParts.length >= 4) {
-              const rootAuthor = urlParts[2].replace('@', ''); const rootPermlink = urlParts[3];
-              if (rootAuthor !== author || rootPermlink !== permlink) root = await client.condenser.getContent(rootAuthor, rootPermlink);
-            }
-          }
-          const targetCommunity = root.category;
-          if (targetCommunity?.startsWith('blurt-') && targetCommunity !== config.communityAccount && !config.lockedCommunity) {
-            config.communityAccount = targetCommunity; selectedCommunity.value = targetCommunity;
-            forumClient = new dblurt.Client([getForumUrl()]); client = new dblurt.Client([getDataUrl()]);
-            await loadData();
-          }
-          targetNotifPermlink.value = permlink;
-          openTopic(normalizePost(root));
-        }
-      } else { openProfile(author); }
-    } catch (err) { console.error('Open notification error:', err); }
-    loading.value = false;
-  };
-
-  const openLoginModal = (): void => { loginErr.value = ''; loginForm.username = ''; loginForm.key = ''; showLoginModal.value = true; };
-
-  const completeLogin = (username: string, key: string, acc: Record<string, unknown>): void => {
-    const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
-    const delta = (Date.now() - lastVoteTime) / 1000;
-    let vp = (acc.voting_power as number) + (10000 * delta / 432000);
-    vp = Math.min(vp / 100, 100);
-    const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance as string) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance as string) > 0;
-    auth.user = { username, type: 'key', key, vp: vp.toFixed(2), hasRewards, rewardBlurt: acc.reward_blurt_balance as string, rewardVesting: acc.reward_vesting_balance as string, locked: false };
-    showLoginModal.value = false; loginForm.key = '';
-    loadUserCommunities(username); loadFollowingList(username);
-  };
-
-  const doKeyLogin = async (): Promise<void> => {
-    const username = loginForm.username.trim(); const keyStr = loginForm.key.trim();
-    if (!username || !keyStr) { loginErr.value = 'Both fields are required.'; return; }
-    loginBusy.value = true; loginErr.value = '';
-    try {
-      const privKey = dblurt.PrivateKey.from(keyStr);
-      const pubKey  = privKey.createPublic().toString();
-      const accounts = await client.condenser.getAccounts([username]);
-      const acc = accounts?.[0] as Record<string, unknown>;
-      if (!acc) throw new Error('Account not found');
-      const postingPubs = (acc.posting as { key_auths: [string, number][] }).key_auths.map(k => k[0]);
-      if (!postingPubs.includes(pubKey)) throw new Error('Key mismatch');
-      if (loginForm.remember) { pinModal.tempUser = { username, key: keyStr, acc }; pinModal.mode = 'setup'; pinModal.value = ''; pinModal.error = ''; pinModal.show = true; showLoginModal.value = false; }
-      else completeLogin(username, keyStr, acc);
-    } catch (err) { console.error('Key login error:', err); loginErr.value = t('loginError'); }
-    loginBusy.value = false;
-  };
-
-  const handlePinSubmit = async (): Promise<void> => {
-    if (pinModal.value.length < 4) { pinModal.error = 'Min 4 digits'; return; }
-    pinModal.loading = true; pinModal.error = '';
-    await new Promise(r => setTimeout(r, 50));
-    try {
-      if (pinModal.mode === 'setup') {
-        const encrypted = AuthService.encryptKey(pinModal.tempUser!.key, pinModal.value);
-        localStorage.setItem('blurtforum_session', JSON.stringify({ username: pinModal.tempUser!.username, key: encrypted, expires: Date.now() + 30 * 24 * 60 * 60 * 1000 }));
-        completeLogin(pinModal.tempUser!.username, pinModal.tempUser!.key, pinModal.tempUser!.acc);
-        pinModal.show = false;
-      } else {
-        const sessionStr = localStorage.getItem('blurtforum_session');
-        if (!sessionStr) return;
-        const session = JSON.parse(sessionStr) as { username: string; key: string };
-        let decrypted: string | null = null;
-        if (AuthService.isEncrypted(session.key)) { decrypted = AuthService.decryptKey(session.key, pinModal.value); }
-        else { try { const bytes = CryptoJS.AES.decrypt(session.key, pinModal.value); decrypted = bytes.toString(CryptoJS.enc.Utf8); } catch { /* fallback */ } }
-        if (!decrypted || !decrypted.startsWith('5')) throw new Error('Invalid PIN');
-        const accounts = await client.condenser.getAccounts([session.username]);
-        if (accounts?.[0]) {
-          completeLogin(session.username, decrypted, accounts[0] as Record<string, unknown>);
-          if (!AuthService.isEncrypted(session.key)) { (JSON.parse(sessionStr) as Record<string, unknown>).key = AuthService.encryptKey(decrypted, pinModal.value); localStorage.setItem('blurtforum_session', JSON.stringify({ ...JSON.parse(sessionStr), key: AuthService.encryptKey(decrypted, pinModal.value) })); }
-          if (auth.user) auth.user.locked = false;
-          pinModal.show = false;
-          if (resumeAction.value) { const fn = resumeAction.value; resumeAction.value = null; fn(); }
-        }
-      }
-    } catch { pinModal.error = t('invalidPin'); pinModal.value = ''; }
-    finally { pinModal.loading = false; }
-  };
-
-  const doWVLogin = async (): Promise<void> => {
-    const username = loginForm.username.trim().toLowerCase();
-    if (!username) { loginErr.value = 'Username is required.'; return; }
-    loginBusy.value = true; loginErr.value = '';
-    try {
-      if (!window.blurt_keychain) throw new Error('Polyfill not available');
-      await new Promise<void>((resolve, reject) => {
-        (window.blurt_keychain as Record<string, Function>).requestSignBuffer(username, 'Login to BlurtForum ' + Date.now(), 'Posting', (res: { success: boolean; message?: string }) => {
-          if (res?.success) resolve(); else reject(new Error(res.message || 'WhaleVault sign error'));
-        });
-      });
-      const accounts = await client.condenser.getAccounts([username]);
-      const acc = accounts?.[0] as Record<string, unknown> | undefined;
-      let vp = 100; let hasRewards = false; let rewardBlurt = '0.000 BLURT'; let rewardVesting = '0.000000 VESTS';
-      if (acc) {
-        const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
-        const delta = (Date.now() - lastVoteTime) / 1000;
-        vp = Math.min(((acc.voting_power as number) + (10000 * delta / 432000)) / 100, 100);
-        hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance as string) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance as string) > 0;
-        rewardBlurt = acc.reward_blurt_balance as string; rewardVesting = acc.reward_vesting_balance as string;
-      }
-      auth.user = { username, type: 'whalevault', key: null, vp: vp.toFixed(2), hasRewards, rewardBlurt, rewardVesting };
-      localStorage.setItem('blurtforum_session', JSON.stringify({ username, type: 'whalevault', expires: Date.now() + 24 * 60 * 60 * 1000 }));
-      showLoginModal.value = false;
-      loadUserCommunities(username); loadFollowingList(username);
-    } catch (err) { console.error('WhaleVault login error:', err); loginErr.value = t('loginError') + ' ' + ((err as Error).message || err); }
-    loginBusy.value = false;
-  };
-
   const loadUserCommunities = async (username: string): Promise<void> => {
     try {
       let subs = await client.call('bridge', 'list_all_subscriptions', { account: username }) as Array<[string, string]>;
@@ -1611,11 +1086,18 @@ export function useApp() {
     } catch (err) { console.error('Error loading communities:', err); }
   };
 
-  const logout = (): void => { auth.user = null; replyTarget.value = null; localStorage.removeItem('blurtforum_session'); };
 
   const claimRewards = async (targetAccount?: string): Promise<void> => {
     const username = targetAccount || auth.user?.username;
     if (!username) return;
+
+    const targetUser = auth.accounts.find(a => a.username === username) || (auth.user?.username === username ? auth.user : null);
+    if (targetAccount && (!targetUser || (targetUser.type === 'key' && targetUser.locked))) {
+      openLoginModal({ noSwitch: true, targetAccount: username });
+      resumeAction.value = () => claimRewards(targetAccount);
+      return;
+    }
+
     if (checkLock(() => claimRewards(targetAccount))) return;
     try {
       const accounts = await client.condenser.getAccounts([username]);
@@ -1636,12 +1118,13 @@ export function useApp() {
         reward_blurt: fmtAsset(acc.reward_blurt_balance as string, 'BLURT'), 
         reward_vests: fmtAsset(acc.reward_vesting_balance as string, 'VESTS') 
       }]];
-      await broadcast(ops);
-      if (auth.user) {
+      await broadcast(ops, targetUser || undefined);
+      if (auth.user && auth.user.username === username) {
         auth.user.hasRewards = false;
         auth.user.rewardBlurt = '0.000 BLURT';
         auth.user.rewardVesting = '0.000000 VESTS';
       }
+      if (targetUser) targetUser.hasRewards = false;
       await refreshUser();
       showStatus(t('claimRewards'), t('claimSuccess'), 'success');
     } catch (err) { console.error('Claim rewards error:', err); showStatus(t('claimRewards'), (t('claimError') || 'Error claiming rewards: ') + ((err as Error).message || err), 'error'); }
@@ -1778,15 +1261,87 @@ export function useApp() {
       }
     } catch (err) { console.error('Load context error:', err); }
     loading.value = false;
+
   };
 
-  const checkNewNotifications = async (): Promise<void> => {
-    if (!auth.user || notifModal.show) return;
-    try {
-      const list = await client.call('bridge', 'account_notifications', { account: auth.user.username, limit: 1 }) as Notification[];
-      if (list?.length && Number(list[0].id) > notifModal.lastReadId) notifModal.hasNew = true;
-    } catch { /* ignore */ }
+
+
+  const {
+    auth, loginTab, loginForm, loginErr, loginBusy, wvAvailable, showLoginModal, loginOptions, pinModal,
+    completeLogin: _completeLogin, doKeyLogin: _doKeyLogin, doWVLogin: _doWVLogin, logout, 
+    switchAccount: _switchAccount, removeAccount, openLoginModal, openSwitchAccountModal, showSwitchAccountModal,
+    handlePinSubmit: _handlePinSubmit, saveSessions
+  } = useAuth(client, t);
+
+  const authCallbacks = { 
+    loadUserCommunities, loadFollowingList, loadData,
+    resumeAction: () => { if (resumeAction.value) { const fn = resumeAction.value; resumeAction.value = null; fn(); } }
   };
+  const completeLogin = (u: string, k: string | null, a: any, p?: string) => _completeLogin(u, k, a, p, authCallbacks);
+  const doKeyLogin = () => _doKeyLogin(authCallbacks);
+  const doWVLogin = () => _doWVLogin(authCallbacks);
+  const switchAccount = (u: string) => _switchAccount(u, authCallbacks);
+  const handlePinSubmit = () => _handlePinSubmit(authCallbacks);
+
+  const {
+    globalActivity,
+    updateGlobalActivity,
+    markActivityAsRead
+  } = useGlobalActivity(client, auth, config, userSubscriptions, normalizePost);
+
+  const userRole = computed(() => {
+    if (!auth.user || !moderators.value.length) return null;
+    const entry = moderators.value.find(m => m.account === auth.user!.username);
+    return entry ? entry.role : 'member';
+  });
+  const canEditStructure = computed(() => ['owner', 'admin'].includes(userRole.value ?? ''));
+  const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value ?? ''));
+
+  const checkLock = (fn: () => void): boolean => {
+    if (auth.user && auth.user.type === 'key' && auth.user.locked) {
+      resumeAction.value = fn;
+      pinModal.mode = 'unlock';
+      pinModal.value = '';
+      pinModal.error = '';
+      pinModal.show = true;
+      return true;
+    }
+    return false;
+  };
+
+  const {
+    profileUser,
+    profileTab,
+    openProfile,
+    loadMoreProfileContent,
+    fetchEarningsHistory: _fetchEarningsHistory
+  } = useProfile(client, config, globalProps, view, normalizePost);
+
+  const {
+    voteModal,
+    estimateVote,
+    openVoteModal,
+    hasVoted,
+    submitVoteConfirmed: _submitVoteConfirmed,
+    submitVote: _submitVote
+  } = useVote(client, auth, broadcast as any, waitAndReload, t);
+
+  const {
+    walletModal,
+    openWalletModal,
+    handleWalletSubmit: _handleWalletSubmit,
+    cancelDelegation
+  } = useWallet(auth, broadcast as any, waitAndReload, showStatus, checkLock);
+
+  const handleWalletSubmit = (data: any) => _handleWalletSubmit(data, globalProps);
+
+  const { checkNewNotifications, openNotifModal, openNotification: _openNotification, startPolling: startNotifPolling } = useNotifications(client, auth);
+
+  const openNotification = (notif: Notification) => _openNotification(notif, {
+    openTopic, openProfile, normalizePost, client, config, targetNotifPermlink,
+    selectedCommunity, loading, loadData, forumClient, getForumUrl, getDataUrl,
+    auth, switchAccount
+  });
 
   const player = BFPlayer;
 
@@ -1795,7 +1350,7 @@ export function useApp() {
     BFPlayer.registerPlugin(BlurtPlayerPlugin(client, auth));
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
-    setInterval(checkNewNotifications, 60000);
+    startNotifPolling();
 
     document.addEventListener('click', (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1806,28 +1361,82 @@ export function useApp() {
     // Expose openProfile for DOMPurify-sanitized content
     (window as Record<string, unknown>).app = { openProfile };
 
-    // Restore session
-    const saved = localStorage.getItem('blurtforum_session');
-    if (saved) {
+    // Restore sessions
+    const savedAll = localStorage.getItem('blurtforum_sessions');
+    const savedActive = localStorage.getItem('blurtforum_session');
+    
+    if (savedAll) {
       try {
-        const session = JSON.parse(saved) as { username: string; type: string; key: string };
-        if (session.type === 'whalevault') {
-          auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
-          client.condenser.getAccounts([session.username]).then(accounts => {
-            if (accounts?.[0]) {
-              const acc = accounts[0] as Record<string, unknown>;
-              const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
-              const delta = (Date.now() - lastVoteTime) / 1000;
-              let vp = (acc.voting_power as number) + (10000 * delta / 432000);
-              vp = Math.min(vp / 100, 100);
-              const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance as string) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance as string) > 0;
-              auth.user = { username: session.username, type: 'whalevault', key: null, vp: vp.toFixed(2), hasRewards, rewardBlurt: acc.reward_blurt_balance as string, rewardVesting: acc.reward_vesting_balance as string };
-            }
-          });
-          loadUserCommunities(session.username); loadFollowingList(session.username);
+        const sessions = JSON.parse(savedAll) as any[];
+        sessions.forEach(session => {
+          if (session.type === 'whalevault') {
+            auth.accounts.push({ username: session.username, type: 'whalevault', key: null, vp: '…', hasRewards: false });
+            client.condenser.getAccounts([session.username]).then(accounts => {
+              if (accounts?.[0]) {
+                const acc = accounts[0] as Record<string, unknown>;
+                const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
+                const delta = (Date.now() - lastVoteTime) / 1000;
+                let vp = (acc.voting_power as number) + (10000 * delta / 432000);
+                vp = Math.min(vp / 100, 100);
+                const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance as string) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance as string) > 0;
+                const idx = auth.accounts.findIndex(a => a.username === session.username);
+                if (idx >= 0) {
+                   auth.accounts[idx].vp = vp.toFixed(2);
+                   auth.accounts[idx].hasRewards = hasRewards;
+                   auth.accounts[idx].rewardBlurt = acc.reward_blurt_balance as string;
+                   auth.accounts[idx].rewardVesting = acc.reward_vesting_balance as string;
+                }
+                if (auth.user?.username === session.username) {
+                  const u = auth.user!;
+                  u.vp = vp.toFixed(2);
+                  u.hasRewards = hasRewards;
+                  u.rewardBlurt = acc.reward_blurt_balance as string;
+                  u.rewardVesting = acc.reward_vesting_balance as string;
+                }
+              }
+            }).catch(() => {});
+          } else {
+            auth.accounts.push({ username: session.username, type: 'key', key: session.key, encryptedKey: session.key, vp: '…', locked: true, hasRewards: false });
+          }
+        });
+      } catch { /* ignore */ }
+    }
+
+    if (savedActive) {
+      try {
+        const session = JSON.parse(savedActive) as { username: string; type: string; key: string };
+        const found = auth.accounts.find(a => a.username === session.username);
+        if (found) {
+          auth.user = found;
+          if (session.type === 'whalevault') {
+            loadUserCommunities(session.username); loadFollowingList(session.username);
+          } else {
+            loadUserCommunities(session.username); loadFollowingList(session.username); refreshUser();
+          }
         } else {
-          auth.user = { username: session.username, type: 'key', key: session.key, vp: '…', locked: true };
-          loadUserCommunities(session.username); loadFollowingList(session.username); refreshUser();
+          // Migration or single session
+          if (session.type === 'whalevault') {
+            auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
+            auth.accounts.push(auth.user);
+            client.condenser.getAccounts([session.username]).then(accounts => {
+              if (accounts?.[0]) {
+                const acc = accounts[0] as Record<string, unknown>;
+                const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
+                const delta = (Date.now() - lastVoteTime) / 1000;
+                let vp = (acc.voting_power as number) + (10000 * delta / 432000);
+                vp = Math.min(vp / 100, 100);
+                const hasRewards = BFUtils.parsePayout(acc.reward_blurt_balance as string) > 0 || BFUtils.parsePayout(acc.reward_vesting_balance as string) > 0;
+                auth.user = { username: session.username, type: 'whalevault', key: null, vp: vp.toFixed(2), hasRewards, rewardBlurt: acc.reward_blurt_balance as string, rewardVesting: acc.reward_vesting_balance as string };
+                const idx = auth.accounts.findIndex(a => a.username === session.username);
+                if (idx >= 0) auth.accounts[idx] = auth.user;
+              }
+            });
+            loadUserCommunities(session.username); loadFollowingList(session.username);
+          } else {
+            auth.user = { username: session.username, type: 'key', key: session.key, encryptedKey: session.key, vp: '…', locked: true };
+            auth.accounts.push(auth.user);
+            loadUserCommunities(session.username); loadFollowingList(session.username); refreshUser();
+          }
         }
       } catch { /* ignore */ }
     } else {
@@ -1882,9 +1491,10 @@ export function useApp() {
     lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
     activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
     structureNote, selectedCommunity, currentTagFilter, applyTagFilter, clearTagFilter, customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
-    loginForm, loginErr, loginBusy, wvAvailable, replyTarget, replyForm,
+    loginForm, loginErr, loginBusy, wvAvailable, loginOptions, replyTarget, replyForm,
     showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
     goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,
+    switchAccount, removeAccount, showSwitchAccountModal, openSwitchAccountModal,
     syncUrl,
     community: BFCommunity, communityRewards,
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,

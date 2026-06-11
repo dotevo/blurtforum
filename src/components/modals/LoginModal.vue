@@ -2,6 +2,7 @@
 defineProps<{
   loginTab: string;
   loginForm: { username: string; key: string; remember: boolean };
+  loginOptions: { noSwitch: boolean; targetAccount: string };
   loginErr: string;
   loginBusy: boolean;
   wvAvailable: boolean;
@@ -25,6 +26,10 @@ const emit = defineEmits<{
       <button class="modal-close" @click="emit('close')">✕</button>
     </div>
     <div class="modal-body">
+      <div v-if="loginOptions.noSwitch" class="alert alert-info" style="margin-bottom:15px; background: #e3f2fd; border-left: 4px solid #2196f3; padding: 10px; font-size: 13px;">
+        <i class="fa-solid fa-circle-info"></i> {{ t('loggingInFor') }} <strong>@{{ loginOptions.targetAccount }}</strong>
+      </div>
+
       <div v-if="loginErr" class="alert alert-error">{{ loginErr }}</div>
  
       <div class="tabs">

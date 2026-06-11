@@ -33,6 +33,8 @@ const emit = defineEmits<{
   goHome: [];
   setTheme: [theme: string];
   setLang: [lang: string];
+  logout: [];
+  openSwitchAccountModal: [];
 }>();
 
 const getLatestActivities = () => {
@@ -97,6 +99,14 @@ const getLatestActivities = () => {
           @set-lang="emit('setLang', $event)"
           @update:rpc-menu-open="emit('update:rpcMenuOpen', $event)"
         />
+        <div class="mtb-auth-actions" v-if="auth.user">
+          <button class="btn-hdr" @click="emit('openSwitchAccountModal')" :title="t('switchAccount')">
+            <i class="fa-solid fa-users-viewfinder"></i>
+          </button>
+          <button class="btn-hdr logout-btn" @click="emit('logout')" :title="t('logout')">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
       </div>
 
       <div class="drawer-header">
@@ -228,7 +238,31 @@ const getLatestActivities = () => {
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
-  width: 100%;
+  flex: 1;
+}
+
+.mtb-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-main);
+  margin-left: 5px;
+}
+
+.btn-hdr {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--input-border);
+  padding: 5px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.logout-btn:hover {
+  color: #ff4400;
+  border-color: #ff4400;
 }
 
 .drawer-header {

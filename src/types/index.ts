@@ -135,6 +135,7 @@ export interface AuthUser {
   username: string;
   type: 'key' | 'whalevault';
   key: string | null;
+  encryptedKey?: string;
   vp: string;
   balance?: string;
   locked?: boolean;
@@ -156,6 +157,7 @@ export interface Notification {
   msg?: string;
   url?: string;
   score?: number;
+  account?: string;
 }
 
 export interface ActivityItem {
