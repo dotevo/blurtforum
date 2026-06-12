@@ -6,7 +6,7 @@ import type { AuthUser } from '../types';
  */
 export function useWallet(
   auth: { user: AuthUser | null },
-  broadcast: (ops: any[]) => Promise<void>,
+  broadcast: (ops: any[], targetUser?: AuthUser, authority?: 'Posting' | 'Active') => Promise<void>,
   waitAndReload: any,
   showStatus: (title: string, body: string, type: 'info' | 'success' | 'error') => void,
   checkLock: (fn: () => any) => boolean
@@ -48,7 +48,7 @@ export function useWallet(
         label = `Starting power down of ${amount} BP...`;
       }
 
-      await broadcast(ops);
+      await broadcast(ops, undefined, 'Active');
       showStatus('Wallet', 'Transaction broadcasted successfully!', 'success');
       waitAndReload(false, null, null, null, label);
     } catch (err) {
@@ -62,7 +62,7 @@ export function useWallet(
     if (checkLock(() => cancelDelegation(target))) return;
     const op = ['delegate_vesting_shares', { delegator: auth.user.username, delegatee: target, vesting_shares: '0.000000 VESTS' }];
     try {
-      await broadcast([op]);
+      await broadcast([op], undefined, 'Active');
       showStatus('Wallet', 'Delegation cancel requested', 'success');
       waitAndReload(false, null, null, null, `Cancelling delegation to @${target}...`);
     } catch (err) {

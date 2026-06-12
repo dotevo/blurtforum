@@ -10,7 +10,6 @@ interface ParseContext {
   author?: string;
   permlink?: string;
   body?: string;
-  cover?: string;
 }
 
 export const Parser = {
@@ -21,8 +20,6 @@ export const Parser = {
       const tokens: Record<string, string> = {};
       let tokenCounter = 0;
 
-      // Helper to store a component and return a safe token
-      // Alphanumeric tokens are ignored by Markdown's formatting and auto-linkers
       const tokenize = (content: string) => {
         const id = `XBFMEDIATKNX${tokenCounter++}X`;
         tokens[id] = content;
@@ -32,21 +29,18 @@ export const Parser = {
       let processedText = text;
 
       // 1. Extract explicit <iframe> tags FIRST
-      // This hides the URLs inside src from both marked and autoEmbed
       processedText = processedText.replace(/<iframe[^>]+src=["']([^"']+)["'][^>]*>.*?<\/iframe>/gi, (match, src) => {
         const media = this.detectMedia(src);
         if (media) {
-          // If it's a known media source, we can skip the iframe gate and show card immediately
-          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, media.cover));
+          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
         }
         return tokenize(this.getIframePlaceholder(src));
       });
 
-      // 2. Extract raw media links (line-based detection)
+      // 2. Extract raw media links
       const lines = processedText.split('\n');
       const processedLines = lines.map(line => {
         const trimmed = line.trim();
-        // Skip if line is already a token or looks like a markdown image/link start
         if (trimmed.startsWith('XBFMEDIATKNX') || trimmed.startsWith('![') || (trimmed.startsWith('[') && !trimmed.startsWith('[['))) return line;
         
         const urlRegex = /(https?:\/\/[^\s\)]+)/g;
@@ -54,19 +48,19 @@ export const Parser = {
           const cleanUrl = url.replace(/[).,;]$/, '');
           const media = this.detectMedia(cleanUrl);
           if (media) {
-            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, media.cover));
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context));
           }
           return url;
         });
       });
       processedText = processedLines.join('\n');
 
-      // 3. Handle explicit [[MEDIA:...]] syntax if any
+      // 3. Handle explicit [[MEDIA:...]] syntax
       processedText = processedText.replace(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g, (_match, type, id, host) => {
         return tokenize(this.getExperimentalPlaceholder(type, id, host, context));
       });
 
-      // 4. Fix for nested image URLs
+      // 4. Fix for nested image URLs (Proxy bypass)
       processedText = processedText.replace(/!\[(.*?)\]\((https?:\/\/.*?\/)(https?:\/\/.*?)\)/g, (match, alt, proxy, nested) => {
         return `![${alt}](${nested})`;
       });
@@ -74,9 +68,8 @@ export const Parser = {
       // 5. Render Markdown
       let html = marked.parse(processedText, { breaks: true, gfm: true }) as string;
 
-      // 6. Restore Tokens (inject Custom Elements back into HTML)
+      // 6. Restore Tokens
       Object.entries(tokens).forEach(([token, replacement]) => {
-        // Use split/join for global string replacement
         html = html.split(token).join(replacement);
       });
 
@@ -108,56 +101,66 @@ export const Parser = {
             </div>`;
   },
 
-  /** Detects media type from text — returns generic: 'audio', 'youtube', 'peertube' */
-  detectMedia(text: string | undefined): MediaTrack | null {
+  /** Detects media type from text */
+  detectMedia(text: string | undefined): any | null {
     if (!text) return null;
-
-    // YouTube
-    const ytMatch = text.match(
-      /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|v\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/
-    );
+    const ytMatch = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|v\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
     if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
-
-    // Suno.ai (Resolved)
     const sunoSongMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/song\/([a-zA-Z0-9-]+)/);
-    if (sunoSongMatch) return {
-      type: 'audio',
-      id: sunoSongMatch[1],
-      src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`,
-      cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg`,
-    };
-
-    // Suno.ai (Share — pending resolution)
+    if (sunoSongMatch) return { type: 'audio', id: sunoSongMatch[1], src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`, cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg` };
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
-
-    // PeerTube (including blurt.media)
     const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch|videos\/embed)\/([a-zA-Z0-9-]+)/);
     if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
-
-    // Direct audio files
     const audioMatch = text.match(/https?:\/\/[^\s\)]+\.(mp3|wav|ogg|m4a|flac)(\?.*)?/i);
     if (audioMatch) {
       const url = audioMatch[0].replace(/[).,;]$/, '');
       return { type: 'audio', id: btoa(url), src: url };
     }
-
     return null;
   },
 
-  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null, cover?: string): string {
+  /** Extracts all unique media items from text using a robust regex-based approach */
+  extractAllMedia(text: string | undefined): any[] {
+    if (!text) return [];
+    const results: any[] = [];
+    const seen = new Set<string>();
+
+    // Combined regex for all supported media links
+    const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+    const matches = text.matchAll(urlRegex);
+    
+    for (const match of matches) {
+      const url = match[0].replace(/[).,;]$/, '');
+      const media = this.detectMedia(url);
+      if (media && !seen.has(`${media.type}:${media.id}`)) {
+        seen.add(`${media.type}:${media.id}`);
+        results.push(media);
+      }
+    }
+    
+    // Explicit syntax
+    const explicitMatches = text.matchAll(/\[\[MEDIA:([^:]+):([^:\]]+):([^:\]]*)\]\]/g);
+    for (const match of explicitMatches) {
+      const [, type, id, host] = match;
+      if (!seen.has(`${type}:${id}`)) {
+        seen.add(`${type}:${id}`);
+        results.push({ type, id, host });
+      }
+    }
+
+    return results;
+  },
+
+  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null): string {
     const title = (context?.title || 'Media Content').replace(/"/g, '&quot;');
     const author = context?.author || 'post';
     const permlink = context?.permlink || '';
-    const finalCover = cover || context?.cover || '';
-
-    // Audio tracks with short IDs (Suno share) and PeerTube tracks without covers require resolution.
     const isPending = (type === 'audio' && id.length < 30) || (type === 'peertube');
 
     return `<div class="forum-media-card-wrapper">
               <forum-media data-type="${type}" data-id="${id}" data-host="${host}" 
                  data-title="${title}" data-author="${author}" data-permlink="${permlink}"
-                 data-cover="${finalCover}"
                  data-pending="${isPending}"
                  mode="card"></forum-media>
             </div>`;

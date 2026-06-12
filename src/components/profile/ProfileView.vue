@@ -4,6 +4,7 @@ import type { AuthUser } from '../../types';
 import { ref, computed, onMounted, onUpdated } from 'vue';
 import { dispatchScanView } from '../../modules/player';
 import ForumMedia from '../player/ForumMedia.ce.vue';
+import ScrollableTabs from '../layout/ScrollableTabs.vue';
 import PayoutBadge from '../layout/PayoutBadge.vue';
 import UserAvatar from '../layout/UserAvatar.vue';
 import VoteButton from '../layout/VoteButton.vue';
@@ -199,11 +200,13 @@ const barSeries = computed(() => {
       </div>
 
       <div class="tabs" style="margin-top: 20px;">
-        <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="$emit('update:profileTab', 'posts')">{{ t('posts') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="$emit('update:profileTab', 'comments')">{{ t('comments') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='replies'}" @click="$emit('update:profileTab', 'replies')">{{ t('replies') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='wallet'}" @click="$emit('update:profileTab', 'wallet')">💳 {{ t('wallet') }}</button>
-        <button class="tab-btn" :class="{active: profileTab==='earnings'}" @click="$emit('update:profileTab', 'earnings')">💰 {{ t('earnings') }}</button>
+        <ScrollableTabs>
+          <button class="tab-btn" :class="{active: profileTab==='posts'}" @click="$emit('update:profileTab', 'posts')">{{ t('posts') }}</button>
+          <button class="tab-btn" :class="{active: profileTab==='comments'}" @click="$emit('update:profileTab', 'comments')">{{ t('comments') }}</button>
+          <button class="tab-btn" :class="{active: profileTab==='replies'}" @click="$emit('update:profileTab', 'replies')">{{ t('replies') }}</button>
+          <button class="tab-btn" :class="{active: profileTab==='wallet'}" @click="$emit('update:profileTab', 'wallet')">💳 {{ t('wallet') }}</button>
+          <button class="tab-btn" :class="{active: profileTab==='earnings'}" @click="$emit('update:profileTab', 'earnings')">💰 {{ t('earnings') }}</button>
+        </ScrollableTabs>
       </div>
 
       <!-- WALLET TAB -->
@@ -405,13 +408,17 @@ const barSeries = computed(() => {
                           </template>
                           <template v-else-if="tx.op[0] === 'transfer_to_vesting'">
                             <span class="tx-label">{{ t('powerUp') }}</span>
-                            <span v-if="tx.op[1].to !== tx.op[1].from">to <b>@{{ tx.op[1].to }}</b></span>
+                            <span v-if="tx.op[1].to !== tx.op[1].from">
+                              {{ tx.op[1].from === profileUser.username ? 'to' : 'from' }}
+                              <b class="interactive-username" @click="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</b>
+                            </span>
                           </template>
                           <template v-else-if="tx.op[0] === 'withdraw_vesting'">
                             <span class="tx-label">{{ tx.op[1].vesting_shares === '0.000000 VESTS' ? t('stopPowerDown') : t('startPowerDown') }}</span>
                           </template>
                           <template v-else-if="tx.op[0] === 'delegate_vesting_shares'">
-                             <span class="tx-label">{{ t('delegateTo') }}</span> <b>@{{ tx.op[1].delegatee }}</b>
+                             <span class="tx-label">{{ tx.op[1].delegator === profileUser.username ? t('delegateTo') : t('receivedDelegationFrom') || 'Received delegation from' }}</span>
+                             <b class="interactive-username" @click="$emit('openProfile', tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator)">@{{ tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator }}</b>
                           </template>
                         </div>
                       </div>

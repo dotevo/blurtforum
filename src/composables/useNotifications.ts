@@ -2,14 +2,21 @@ import { reactive, watch } from 'vue';
 import type { Notification } from '../types';
 import { useTitle } from './useTitle';
 
+const safeParse = (key: string, fallback: any) => {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : fallback;
+  } catch { return fallback; }
+};
+
 export const notifModal = reactive({
   show: false,
   loading: false,
   initializing: true,
   list: [] as Notification[],
-  lastReadIds: JSON.parse(localStorage.getItem('bf_last_notif_ids') || '{}') as Record<string, number>,
+  lastReadIds: safeParse('bf_last_notif_ids', {}),
   hasNew: false,
-  clickedIds: JSON.parse(localStorage.getItem('bf_clicked_notif_ids') || '[]') as string[]
+  clickedIds: safeParse('bf_clicked_notif_ids', [])
 });
 
 export const useNotifications = (client: any, auth: any) => {
@@ -58,7 +65,7 @@ export const useNotifications = (client: any, auth: any) => {
             list.forEach(n => { n.account = account.username; allNotifications.push(n); });
           }
           
-          const history = await client.call('condenser_api', 'get_account_history', { account: account.username, start: -1, limit: 20 }) as Array<[number, { op: [string, any]; timestamp: string }]>;
+          const history = await client.call('condenser_api', 'get_account_history', [account.username, -1, 20]) as Array<[number, { op: [string, any]; timestamp: string }]>;
           if (Array.isArray(history)) {
             history.forEach(item => {
               const op = item[1].op;

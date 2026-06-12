@@ -49,11 +49,11 @@ const _t = (k: string) => (props.t ? props.t(k) : k);
         <!-- If it's a known media source, let forum-media handle it -->
         <forum-media 
           v-if="detectedMedia" 
-          :data-type="detectedMedia.type" 
-          :data-id="detectedMedia.id" 
-          :data-host="detectedMedia.host"
-          :data-src="detectedMedia.src"
-          :data-cover="detectedMedia.cover"
+          :data-type="(detectedMedia as any).type" 
+          :data-id="(detectedMedia as any).id" 
+          :data-host="(detectedMedia as any).host"
+          :data-src="(detectedMedia as any).src"
+          :data-cover="(detectedMedia as any).cover"
           mode="card"
         ></forum-media>
         

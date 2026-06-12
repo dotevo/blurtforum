@@ -2,9 +2,9 @@
  * BlurtForum MediaPlayer Library
  * Handles audio/video playback, queuing, playlists, event emitter and plugin API.
  */
-import { reactive, watch, nextTick, ref } from 'vue';
+import { reactive, watch, nextTick, ref, computed } from 'vue';
 import { Parser } from './parser';
-import type { MediaTrack, PlayerState, Playlist, PlaylistState, PlayerEvent, PlayerPlugin, BFPlayerAPI, PlayMode } from '../types';
+import type { MediaTrack, MediaEntryMirror, PlayerState, Playlist, PlaylistState, PlayerEvent, PlayerPlugin, BFPlayerAPI, PlayMode } from '../types';
 
 // Minimal YouTube IFrame API typings
 export interface YTPlayer {
@@ -66,9 +66,32 @@ export const state = reactive<PlayerState>({
   playMode: (localStorage.getItem('bf-player-mode') as PlayMode) || 'sequential'
 });
 
-const playlistState = reactive<PlaylistState>({ playlists: [] });
+const defaultPriorities = ['audio', 'peertube', 'youtube'];
+const getPriorities = () => JSON.parse(localStorage.getItem('bf-player-priorities') || JSON.stringify(defaultPriorities)) as string[];
+
+const findBestSourceIndex = (sources: MediaEntryMirror[]): number => {
+  const priorities = getPriorities();
+  console.log('[BFPlayer] findBestSourceIndex. Priorities:', priorities, 'Sources:', sources.map(s => s.type));
+  for (const type of priorities) {
+    const idx = sources.findIndex(s => s.type === type);
+    if (idx !== -1) {
+      console.log('[BFPlayer] findBestSourceIndex: Found match at index', idx, 'type:', type);
+      return idx;
+    }
+  }
+  console.log('[BFPlayer] findBestSourceIndex: No priority match, falling back to 0');
+  return 0;
+};
+
+export const playlistState = reactive<PlaylistState>({ playlists: [] });
+
+export const currentSource = computed<MediaEntryMirror | null>(() => {
+  if (!state.currentTrack || !state.currentTrack.sources.length) return null;
+  return state.currentTrack.sources[state.currentTrack.activeSourceIndex || 0];
+});
 
 window.__bfPlayerEnabled = state.enabled;
+
 
 // ─── Event Emitter ─────────────────────────────────────────────────────────
 
@@ -108,6 +131,31 @@ const registerPlugin = (plugin: PlayerPlugin): void => {
 let audioObj: HTMLAudioElement | null = null;
 let ytPlayer: YTPlayer | null = null;
 let ptPlayer: PTPlayer | null = null;
+let client: any = null;
+let lastLoadedSourceId: string | null = null;
+
+export const setClient = (c: any) => { client = client || c; };
+
+const refreshTrackSources = async (track: MediaTrack): Promise<void> => {
+  if (!client) return;
+  try {
+    const post = await client.condenser.getContent(track.author, track.permlink);
+    if (post && post.body) {
+      const lines = post.body.split('\n');
+      let foundAny = false;
+      for (const line of lines) {
+        const media = Parser.detectMedia(line.trim());
+        if (media && !track.sources.find(m => m.id === media.id && m.type === media.type)) {
+          track.sources.push({ type: media.type, id: media.id, src: media.src, host: media.host });
+          foundAny = true;
+        }
+      }
+      if (foundAny && state.currentTrack?.author === track.author && state.currentTrack?.permlink === track.permlink) {
+         if (track.activeSourceIndex === -1) track.activeSourceIndex = findBestSourceIndex(track.sources);
+      }
+    }
+  } catch (e) { console.warn('Refresh track sources failed:', e); }
+};
 let progressTimer: ReturnType<typeof setInterval> | null = null;
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -116,21 +164,33 @@ const loadSavedQueue = (): void => {
     const saved = localStorage.getItem('bf-player-queue');
     const savedCurrent = localStorage.getItem('bf-player-current');
     const savedHistory = localStorage.getItem('bf-player-history');
-    if (saved) state.queue = JSON.parse(saved);
-    if (savedHistory) state.history = JSON.parse(savedHistory);
+
+    const ensureMirrors = (t: any): MediaTrack => ({
+      ...t,
+      sources: t.sources || (t.id ? [{ type: t.type, id: t.id, src: t.src, host: t.host }] : []),
+      activeSourceIndex: t.activeSourceIndex || 0
+    });
+
+    if (saved) {
+      const q = JSON.parse(saved) as any[];
+      state.queue = q.map(ensureMirrors);
+    }
+    if (savedHistory) {
+      const h = JSON.parse(savedHistory) as any[];
+      state.history = h.map(ensureMirrors);
+    }
+
     const restoredTrack = savedCurrent ? JSON.parse(savedCurrent) : null;
     if (restoredTrack) {
-      state.currentTrack = restoredTrack;
+      state.currentTrack = ensureMirrors(restoredTrack);
       state.minimized = false;
     } else if (state.queue.length > 0) {
       state.minimized = false;
       state.currentTrack = state.queue[0];
-    } else {
-      state.minimized = true;
     }
-    state.playing = false; // Force paused on load
-  } catch (e) { console.warn('Failed to load queue:', e); }
+  } catch (e) { console.warn('Load saved queue failed:', e); }
 };
+
 loadSavedQueue();
 
 const _loadPlaylists = (): void => {
@@ -194,14 +254,14 @@ const initAudio = (): void => {
   if (audioObj) return;
   audioObj = new Audio();
   audioObj.volume = state.volume;
-  const isAudioTrack = () => state.currentTrack?.type === 'audio';
+  const isAudioTrack = () => currentSource.value?.type === 'audio';
   audioObj.addEventListener('play', () => { if (isAudioTrack()) { state.playing = true; state.loading = false; } });
   audioObj.addEventListener('pause', () => { if (isAudioTrack()) state.playing = false; });
   audioObj.addEventListener('waiting', () => { if (isAudioTrack()) state.loading = true; });
   audioObj.addEventListener('playing', () => { if (isAudioTrack()) { state.loading = false; if (audioObj && audioObj.duration) state.duration = audioObj.duration; } });
   audioObj.addEventListener('timeupdate', () => {
     if (audioObj && isAudioTrack() && audioObj.duration > 0) {
-      if (!state.duration) state.duration = audioObj.duration;
+      state.duration = audioObj.duration;
       state.progress = (audioObj.currentTime / audioObj.duration) * 100;
     }
   });
@@ -229,7 +289,7 @@ const initYT = async (): Promise<void> => {
     events: {
       onReady: (event: { target: YTPlayer }) => {
         event.target.setVolume(state.volume * 100);
-        if (state.currentTrack?.type === 'youtube') event.target.loadVideoById(state.currentTrack.id);
+        if (currentSource.value?.type === 'youtube') event.target.loadVideoById(currentSource.value.id);
       },
       onStateChange: (event: { data: number }) => {
         const YT = window.YT!;
@@ -254,7 +314,7 @@ const initYT = async (): Promise<void> => {
 
 const initPT = (): void => {
   const iframe = document.getElementById('bf-pt-player-iframe') as HTMLIFrameElement;
-  if (!iframe || !window.PeerTubePlayer || !state.currentTrack || state.currentTrack.type !== 'peertube') return;
+  if (!iframe || !window.PeerTubePlayer || !currentSource.value || currentSource.value.type !== 'peertube') return;
 
   const PTConstructor = window.PeerTubePlayer as any;
   if (PTConstructor) {
@@ -265,8 +325,8 @@ const initPT = (): void => {
        ptPlayer!.play(); // Auto-play via API as in legacy
        
        ptPlayer!.addEventListener('playbackStatusUpdate', (stats: any) => {
-          if (state.currentTrack?.type !== 'peertube') return;
-          if (stats && typeof stats.position !== 'undefined') {
+          if (currentSource.value?.type !== 'peertube') return;
+          if (stats && typeof stats.position !== 'undefined' && stats.duration > 0) {
             state.progress = (stats.position / stats.duration) * 100;
             state.duration = stats.duration;
             state.volume = stats.volume;
@@ -275,7 +335,7 @@ const initPT = (): void => {
        });
 
        ptPlayer!.addEventListener('playbackStatusChange', (playbackState: any) => {
-          if (state.currentTrack?.type !== 'peertube') return;
+          if (currentSource.value?.type !== 'peertube') return;
           state.playing = (playbackState === 'playing');
        });
     });
@@ -285,8 +345,9 @@ const initPT = (): void => {
 const startYTProgress = (): void => {
   stopYTProgress();
   progressTimer = setInterval(() => {
-    if (ytPlayer?.getCurrentTime) {
-      state.progress = (ytPlayer.getCurrentTime() / ytPlayer.getDuration()) * 100;
+    if (ytPlayer?.getCurrentTime && ytPlayer.getDuration() > 0) {
+      state.duration = ytPlayer.getDuration();
+      state.progress = (ytPlayer.getCurrentTime() / state.duration) * 100;
     }
   }, 500);
 };
@@ -301,7 +362,9 @@ const stopAll = (): void => {
   ptPlayer = null; // Important: reset PT player instance
   state.playing = false; 
   state.progress = 0;
+  state.duration = 0;
   state.isAutoStarting = false;
+  lastLoadedSourceId = null;
 };
 
 export const scrollToCurrent = (): void => {
@@ -317,17 +380,84 @@ export const scrollToCurrent = (): void => {
 export const playTrack = async (track: MediaTrack, isManual = false, manualIdx = -1, fromHistory = false): Promise<void> => {
   if (!state.enabled) return;
   
-  // Prevent duplicate concurrent loads of the same track
-  if (state.loading && state.currentTrack?.id === track.id) return;
+  console.log(`[BFPlayer] playTrack init: ${track.author}/${track.permlink}, isManual: ${isManual}, initialSources: ${track.sources.length}`);
+
+  // If not manual (e.g. Micro mode), try to find the "full" track in our registry
+  // to make sure we have all available mirrors for priority selection.
+  if (!isManual) {
+    const registered = visibleTracks.value.find(t => t.author === track.author && t.permlink === track.permlink);
+    if (registered) {
+      console.log(`[BFPlayer] Registry lookup successful: found ${registered.sources.length} mirrors.`);
+      // Merge metadata from incoming track into registered one if needed
+      if (track.title && track.title !== 'Media Content') registered.title = track.title;
+      if (track.cover) registered.cover = track.cover;
+      track = registered;
+    } else {
+      console.log('[BFPlayer] Registry lookup failed: track not in visibleTracks.');
+    }
+  }
+
+  console.log('[BFPlayer] playTrack requested:', { 
+    author: track.author, 
+    permlink: track.permlink, 
+    sourceCount: track.sources?.length,
+    isManual
+  });
+  
+  refreshTrackSources(track);
+
+  if (!track.sources || track.sources.length === 0) {
+    console.error('[BFPlayer] FATAL: Track has no sources!', track);
+    return;
+  }
+
+  // Respect provided index ONLY if it's manual.
+  // Otherwise (autoplay, playlist, Micro mode), find the best one based on current priorities.
+  if (isManual && typeof track.activeSourceIndex !== 'undefined' && track.activeSourceIndex !== -1) {
+    console.log('[BFPlayer] Using provided manual source index:', track.activeSourceIndex);
+  } else if (manualIdx !== -1) {
+    track.activeSourceIndex = manualIdx;
+    console.log('[BFPlayer] Using provided explicit index:', manualIdx);
+  } else {
+    console.log('[BFPlayer] Finding best source index based on priorities...');
+    track.activeSourceIndex = findBestSourceIndex(track.sources);
+  }
+  
+  let activeSource = track.sources[track.activeSourceIndex];
+  if (!activeSource && track.sources.length > 0) {
+     console.warn('[BFPlayer] Active source at index', track.activeSourceIndex, 'missing, falling back to 0');
+     track.activeSourceIndex = 0;
+     activeSource = track.sources[0];
+  }
+  
+  if (!activeSource || !activeSource.id || !activeSource.type) {
+    console.error('[BFPlayer] FATAL: Active source is invalid!', JSON.stringify(activeSource));
+    state.loading = false;
+    return;
+  }
+  
+  console.log('[BFPlayer] Selected source:', activeSource.type, activeSource.id);
+
+  // If already loading/playing THIS EXACT SOURCE, ignore
+  if (state.loading && lastLoadedSourceId === activeSource.id) {
+     console.log('[BFPlayer] Source already loading, ignoring.');
+     return;
+  }
+  
+  if (state.playing && lastLoadedSourceId === activeSource.id) {
+     console.log('[BFPlayer] Source already playing, ignoring.');
+     return;
+  }
 
   // Singleton: stop everything else before starting new track
+  console.log('[BFPlayer] Stopping previous playback (if any)...');
   stopAll();
+  lastLoadedSourceId = activeSource.id;
 
   // Save to history if we were playing something AND it's a different track
-  if (state.currentTrack && state.currentTrack.id !== track.id && !fromHistory) {
+  if (state.currentTrack && (state.currentTrack.author !== track.author || state.currentTrack.permlink !== track.permlink) && !fromHistory) {
     const historyEntry = { ...state.currentTrack };
-    // Remove if already in history to avoid duplicates and move to end
-    state.history = state.history.filter(t => t.id !== historyEntry.id);
+    state.history = state.history.filter(t => !(t.author === historyEntry.author && t.permlink === historyEntry.permlink));
     state.history.push(historyEntry);
     if (state.history.length > 20) state.history.shift();
   }
@@ -342,37 +472,58 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
     state.queue.splice(manualIdx, 1);
   }
 
-  if (track.type === 'audio') {
+  if (activeSource.type === 'audio') {
+    console.log('[BFPlayer] Initializing Audio playback...');
     initAudio();
     try {
-      if (!track.src && track.id) { try { track.src = atob(track.id); } catch { track.src = track.id; } }
-      audioObj!.src = track.src!;
-      audioObj!.play().catch(e => {
-        console.warn('Play error, retrying once:', e);
+      if (!activeSource.src && activeSource.id) { 
+        try { activeSource.src = atob(activeSource.id); } catch { activeSource.src = activeSource.id; } 
+      }
+      console.log('[BFPlayer] Audio SRC:', activeSource.src);
+      audioObj!.src = activeSource.src!;
+      audioObj!.play().then(() => {
+        console.log('[BFPlayer] Audio playback started successfully');
+      }).catch(e => {
+        console.warn('[BFPlayer] Audio play error, retrying once:', e);
         setTimeout(() => audioObj?.play(), 100);
       });
-    } catch (e) { console.error('Failed to load audio:', e); handleError('Invalid audio link'); }
-  } else if (track.type === 'youtube') {
-    if (!ytPlayer) await initYT();
-    else { ytPlayer.loadVideoById(track.id); ytPlayer.playVideo(); }
-  } else if (track.type === 'peertube') {
+    } catch (e) { console.error('[BFPlayer] Failed to load audio:', e); handleError('Invalid audio link'); }
+  } else if (activeSource.type === 'youtube') {
+    console.log('[BFPlayer] Initializing YouTube playback...', activeSource.id);
+    if (!ytPlayer) {
+      console.log('[BFPlayer] First time YT init...');
+      await initYT();
+    } else { 
+      console.log('[BFPlayer] YT player exists, loading ID...');
+      ytPlayer.loadVideoById(activeSource.id); 
+      ytPlayer.playVideo(); 
+    }
+  } else if (activeSource.type === 'peertube') {
+    console.log('[BFPlayer] Initializing PeerTube playback...', activeSource.id);
     state.playing = true; state.loading = false;
     state.isAutoStarting = true;
-    nextTick(() => { setTimeout(() => initPT(), 1000); });
+    nextTick(() => { 
+      console.log('[BFPlayer] Triggering PT init after nextTick');
+      setTimeout(() => initPT(), 1000); 
+    });
   }
 };
 
 export const playNext = (isAuto = false): void => {
+  console.log('[BFPlayer] playNext called, isAuto:', isAuto, 'PlayMode:', state.playMode);
   _emit('next', state.currentTrack);
   
   // Handle repeat 'repeat-one'
   if (isAuto && state.playMode === 'repeat-one' && state.currentTrack) {
+    console.log('[BFPlayer] Repeat One: replaying current track');
     playTrack(state.currentTrack);
     return;
   }
 
   if (state.queue.length > 0) {
-    playTrack(state.queue.shift()!);
+    const next = state.queue.shift()!;
+    console.log('[BFPlayer] Playing from user queue:', next.title);
+    playTrack(next);
     return;
   } 
   
@@ -380,12 +531,13 @@ export const playNext = (isAuto = false): void => {
     let nextTrack: MediaTrack | null = null;
     
     if (state.playMode === 'shuffle') {
-      const remaining = state.autoQueue.filter(t => t.id !== state.currentTrack?.id);
+      const remaining = state.autoQueue.filter(t => !(t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink));
       if (remaining.length > 0) {
         nextTrack = remaining[Math.floor(Math.random() * remaining.length)];
       }
     } else {
-      const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.id === state.currentTrack?.id) : -1;
+      const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink) : -1;
+      console.log('[BFPlayer] AutoQueue search, currentIndex:', currentIndex, 'Total:', state.autoQueue.length);
       if (currentIndex !== -1 && currentIndex < state.autoQueue.length - 1) {
         nextTrack = state.autoQueue[currentIndex + 1];
       } else if (state.playMode === 'repeat-all' || (currentIndex === -1 && state.autoQueue.length > 0)) {
@@ -394,11 +546,13 @@ export const playNext = (isAuto = false): void => {
     }
 
     if (nextTrack) {
+      console.log('[BFPlayer] Playing next track from AutoQueue:', nextTrack.title);
       playTrack(nextTrack);
       return;
     }
   }
 
+  console.log('[BFPlayer] End of queue, stopping.');
   // End of queue/autoplay
   state.minimized = true;
   state.playing = false;
@@ -415,7 +569,7 @@ export const playPrev = (): void => {
     const prev = state.history.pop()!;
     playTrack(prev, false, -1, true);
   } else if (state.autoQueue.length > 0) {
-    const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.id === state.currentTrack?.id) : -1;
+    const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink) : -1;
     if (currentIndex > 0) {
       playTrack(state.autoQueue[currentIndex - 1]);
     } else if (state.playMode === 'repeat-all') {
@@ -432,43 +586,43 @@ export const togglePlayMode = (): void => {
 };
 
 export const togglePlay = (): void => {
-  if (!state.currentTrack) return;
+  if (!state.currentTrack || !currentSource.value) return;
 
   // If we have a track but no media object initialized (e.g. after refresh),
   // start playback properly instead of just toggling the state.
-  if (state.currentTrack.type === 'audio' && !audioObj) {
+  if (currentSource.value.type === 'audio' && !audioObj) {
     playTrack(state.currentTrack);
     return;
   }
-  if (state.currentTrack.type === 'youtube' && !ytPlayer) {
+  if (currentSource.value.type === 'youtube' && !ytPlayer) {
     playTrack(state.currentTrack);
     return;
   }
-  if (state.currentTrack.type === 'peertube' && !ptPlayer) {
+  if (currentSource.value.type === 'peertube' && !ptPlayer) {
     playTrack(state.currentTrack);
     return;
   }
 
-  if (state.currentTrack.type === 'youtube' && ytPlayer?.getPlayerState) {
+  if (currentSource.value.type === 'youtube' && ytPlayer?.getPlayerState) {
     state.playing = ytPlayer.getPlayerState() === window.YT!.PlayerState.PLAYING;
   }
 
   if (state.playing) {
-    if (state.currentTrack.type === 'audio' && audioObj) audioObj.pause();
-    if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
-    if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.pause();
+    if (currentSource.value.type === 'audio' && audioObj) audioObj.pause();
+    if (currentSource.value.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
+    if (currentSource.value.type === 'peertube' && ptPlayer) ptPlayer.pause();
   } else {
-    if (state.currentTrack.type === 'audio' && audioObj) audioObj.play();
-    if (state.currentTrack.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
-    if (state.currentTrack.type === 'peertube' && ptPlayer) ptPlayer.play();
+    if (currentSource.value.type === 'audio' && audioObj) audioObj.play();
+    if (currentSource.value.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
+    if (currentSource.value.type === 'peertube' && ptPlayer) ptPlayer.play();
   }
 };
 
 export const seek = (pct: number): void => {
   const time = (pct / 100) * state.duration;
-  if (state.currentTrack?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time);
-  else if (state.currentTrack?.type === 'audio' && audioObj) audioObj.currentTime = time;
-  else if (state.currentTrack?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
+  if (currentSource.value?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time);
+  else if (currentSource.value?.type === 'audio' && audioObj) audioObj.currentTime = time;
+  else if (currentSource.value?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
 };
 
 export const addToQueue = (track: MediaTrack): void => { state.queue.push(track); };
@@ -500,38 +654,111 @@ const visibleTracks = ref<MediaTrack[]>([]);
 
 /**
  * Registers a track as currently visible/available in the view.
- * Components call this onMounted.
+ * Components call this onMounted. Now groups by post (author/permlink).
  */
-export const registerTrack = (track: MediaTrack): void => {
-  const idx = visibleTracks.value.findIndex((t: MediaTrack) => t.id === track.id && t.type === track.type);
-  if (idx === -1) {
+export const registerTrack = (incoming: any): void => {
+  const author = incoming.author;
+  const permlink = incoming.permlink;
+  if (!author || !permlink) return;
+
+  // Normalize incoming: it might be a full MediaTrack or a flat registration object
+  const primary = incoming.sources?.[0] || incoming;
+  const type = primary.type;
+  const id = primary.id;
+
+  if (!id || !type) {
+    console.warn('[BFPlayer] Skipping registration of invalid source:', author, permlink, incoming);
+    return;
+  }
+
+  const newSource: MediaEntryMirror = {
+    type: type as any,
+    id: id,
+    src: primary.src || incoming.src,
+    host: primary.host || incoming.host,
+    thumb: primary.thumb || incoming.cover
+  };
+
+  const existingIdx = visibleTracks.value.findIndex(t => t.author === author && t.permlink === permlink);
+  
+  const looksLikeMediaThumb = (url: string | undefined) => 
+    url && (url.includes('suno.ai') || url.includes('img.youtube.com') || url.includes('ytimg.com') || url.includes('peertube'));
+
+  if (existingIdx === -1) {
+    console.log('[BFPlayer] Registering new track:', author, permlink, newSource.type);
+    const track: MediaTrack = {
+      author, permlink,
+      title: incoming.title || 'Media Content',
+      cover: looksLikeMediaThumb(newSource.thumb) ? newSource.thumb : (incoming.cover || newSource.thumb),
+      payout: incoming.payout,
+      voteCount: incoming.voteCount,
+      voted: incoming.voted,
+      pending: incoming.pending,
+      sources: [newSource],
+      activeSourceIndex: 0
+    };
     visibleTracks.value.push(track);
   } else {
-    // Update existing track metadata (useful when pending tracks resolve)
-    visibleTracks.value[idx] = { ...track };
+    const track = visibleTracks.value[existingIdx];
+    // Add source if not already present
+    const isDuplicate = track.sources.some(s => s.id === newSource.id && s.type === newSource.type);
+    if (!isDuplicate) {
+      console.log('[BFPlayer] Adding mirror to existing track:', author, permlink, newSource.type);
+      track.sources.push(newSource);
+    } else {
+      console.log('[BFPlayer] Skipping duplicate mirror:', author, permlink, newSource.type);
+    }
+    console.log(`[BFPlayer] Track ${author}/${permlink} now has ${track.sources.length} sources.`);
+    
+    // Update metadata: prioritize media-specific thumbnails
+    if (incoming.cover && (!track.cover || track.cover.includes('images.blurt.blog') || looksLikeMediaThumb(incoming.cover))) {
+       track.cover = incoming.cover;
+    }
+    if (incoming.payout) track.payout = incoming.payout;
   }
+  
   state.autoQueue = [...visibleTracks.value];
 
-  // Also propagate updates to currentTrack if IDs match
-  if (state.currentTrack && state.currentTrack.id === track.id && state.currentTrack.type === track.type) {
-    // Merge new metadata into currentTrack
-    Object.assign(state.currentTrack, track);
-  }
-
-  // And to the manual queue
-  state.queue.forEach(t => {
-    if (t.id === track.id && t.type === track.type) {
-      Object.assign(t, track);
+  // Sync with current track if it's the same post
+  if (state.currentTrack && state.currentTrack.author === author && state.currentTrack.permlink === permlink) {
+    const track = visibleTracks.value.find(t => t.author === author && t.permlink === permlink);
+    if (track) {
+       track.sources.forEach(s => {
+         const existing = state.currentTrack!.sources.find(os => os.id === s.id && os.type === s.type);
+         if (!existing) {
+           state.currentTrack!.sources.push(s);
+         } else if (s.thumb && !existing.thumb) {
+           existing.thumb = s.thumb;
+         }
+       });
+       
+       if (track.cover && (!state.currentTrack.cover || looksLikeMediaThumb(track.cover) || state.currentTrack.cover.includes('images.blurt.blog'))) {
+         state.currentTrack.cover = track.cover;
+       }
+       if (track.title && track.title !== 'Media Content') state.currentTrack.title = track.title;
     }
-  });
+  }
 };
 
 /**
- * Unregisters a track when it's no longer in the view.
- * Components call this onUnmounted.
+ * Unregisters a track source.
  */
-export const unregisterTrack = (trackId: string, type: string): void => {
-  visibleTracks.value = visibleTracks.value.filter((t: MediaTrack) => !(t.id === trackId && t.type === type));
+export const unregisterTrack = (trackId: string, type: string, author?: string, permlink?: string): void => {
+  if (author && permlink) {
+    const track = visibleTracks.value.find(t => t.author === author && t.permlink === permlink);
+    if (track) {
+      track.sources = track.sources.filter(s => !(s.id === trackId && s.type === type));
+      if (track.sources.length === 0) {
+        visibleTracks.value = visibleTracks.value.filter(t => !(t.author === author && t.permlink === permlink));
+      }
+    }
+  } else {
+    // Fallback: search all tracks for this source
+    visibleTracks.value.forEach(track => {
+      track.sources = track.sources.filter(s => !(s.id === trackId && s.type === type));
+    });
+    visibleTracks.value = visibleTracks.value.filter(t => t.sources.length > 0);
+  }
   state.autoQueue = [...visibleTracks.value];
 };
 
@@ -547,11 +774,11 @@ export const clearTracks = (): void => {
 // Called on every currentTrack change.
 const _syncForumMediaDOM = (): void => {
   document.querySelectorAll<HTMLElement>('forum-media').forEach(el => {
-    const id   = el.getAttribute('data-id');
-    const type = el.getAttribute('data-type');
+    const author   = el.getAttribute('data-author');
+    const permlink = el.getAttribute('data-permlink');
     const isActive =
-      state.currentTrack?.id   === id &&
-      state.currentTrack?.type === type;
+      state.currentTrack?.author === author &&
+      state.currentTrack?.permlink === permlink;
     el.classList.toggle('is-playing', isActive && state.playing);
     el.classList.toggle('is-active',  isActive);
   });
@@ -583,7 +810,7 @@ if (typeof window !== 'undefined') {
 
 // Sync DOM on every currentTrack and playing state change.
 watch(
-  () => [state.currentTrack?.id, state.playing] as const,
+  () => [state.currentTrack?.author, state.currentTrack?.permlink, state.playing] as const,
   () => { nextTick(_syncForumMediaDOM); },
 );
 
@@ -621,17 +848,17 @@ export const renamePlaylist = (id: string, newName: string): void => {
 export const addTrackToPlaylist = (playlistId: string, track: MediaTrack): boolean => {
   const pl = playlistState.playlists.find(p => p.id === playlistId);
   if (!pl) return false;
-  if (pl.tracks.some(t => t.id === track.id)) return false;
+  if (pl.tracks.some(t => t.author === track.author && t.permlink === track.permlink)) return false;
   pl.tracks.push({ ...track, addedAt: Date.now() });
   pl.updatedAt = Date.now();
   _savePlaylists();
   return true;
 };
 
-export const removeTrackFromPlaylist = (playlistId: string, trackId: string): void => {
+export const removeTrackFromPlaylist = (playlistId: string, author: string, permlink: string): void => {
   const pl = playlistState.playlists.find(p => p.id === playlistId);
   if (!pl) return;
-  pl.tracks = pl.tracks.filter(t => t.id !== trackId);
+  pl.tracks = pl.tracks.filter(t => !(t.author === author && t.permlink === permlink));
   pl.updatedAt = Date.now();
   _savePlaylists();
 };
@@ -670,7 +897,9 @@ export const BFPlayer: BFPlayerAPI = {
   playTrack, playNext, playPrev, togglePlay, seek,
   addToQueue, setAutoQueue, scanView,
   registerTrack, unregisterTrack, clearTracks,
+  setClient,
   initResize, scrollToCurrent, toggleExperimental,
+
   togglePlayMode,
   on, off, registerPlugin,
   createPlaylist, deletePlaylist, renamePlaylist,

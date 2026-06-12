@@ -1,6 +1,7 @@
 import { ref, reactive } from 'vue';
 import type { Post, Delegation, RawPost } from '../types';
 import * as Earnings from '../modules/earnings';
+import * as dblurt from '@beblurt/dblurt';
 
 /**
  * Composable for managing user profile state and logic.
@@ -10,7 +11,7 @@ export function useProfile(
   config: any,
   globalProps: any,
   view: any,
-  normalizePost: (p: RawPost) => Post
+  normalizePost: (p: any) => Post
 ) {
   const profileUser = reactive<{
     username: string;
@@ -71,15 +72,24 @@ export function useProfile(
 
   const _fetchEarningsHistory = async (username: string, start = -1, limit = 500): Promise<void> => {
     profileUser.earnings.loading = true;
+    const user = username.toLowerCase();
     try {
-      const history = await client.call('condenser_api', 'get_account_history', { account: username, start, limit }) as any[];
-      const ratio = parseFloat(globalProps.value.total_vesting_fund_blurt || '0') / parseFloat(globalProps.value.total_vesting_shares || '1');
+      // Use bitmask filter for earnings: author_reward (37), curation_reward (38), comment_benefactor_reward (46)
+      const opNames = ['author_reward', 'curation_reward', 'comment_benefactor_reward', 'claim_reward_balance'];
+      const bitmask = dblurt.utils.makeBitMaskFilter(opNames.map(name => dblurt.utils.operationOrders[name as keyof typeof dblurt.utils.operationOrders]));
+
+      const res = await client.condenser.getAccountHistory(user, start, limit, bitmask) as any;
+      const history = Array.isArray(res) ? res : (res?.result || []);
+      
+      const fundVal = String(globalProps.value.total_vesting_fund_blurt || '0').split(' ')[0];
+      const sharesVal = String(globalProps.value.total_vesting_shares || '1').split(' ')[0];
+      const ratio = parseFloat(fundVal) / (parseFloat(sharesVal) || 1);
       
       if (start === -1) {
         profileUser.earnings.rawHistory = history;
       } else {
         const existingIds = new Set(profileUser.earnings.rawHistory.map((h: any) => h[0]));
-        const newItems = history.filter(h => !existingIds.has(h[0]));
+        const newItems = history.filter((h: any) => !existingIds.has(h[0]));
         profileUser.earnings.rawHistory = [...profileUser.earnings.rawHistory, ...newItems];
       }
 
@@ -97,35 +107,92 @@ export function useProfile(
 
   const loadProfileWallet = async (username: string): Promise<void> => {
     profileUser.wallet.loading = true;
+    const user = username.toLowerCase();
     try {
-      const ratio = parseFloat(globalProps.value.total_vesting_fund_blurt || '0') / parseFloat(globalProps.value.total_vesting_shares || '1');
-      const [delegations, history] = await Promise.all([
-        client.call('database_api', 'get_vesting_delegations', { account: username, from: '', limit: 1000 }) as Delegation[],
-        client.call('condenser_api', 'get_account_history', { account: username, start: -1, limit: 500 }) as any[]
+      const fundVal = String(globalProps.value.total_vesting_fund_blurt || '0').split(' ')[0];
+      const sharesVal = String(globalProps.value.total_vesting_shares || '1').split(' ')[0];
+      const ratio = parseFloat(fundVal) / (parseFloat(sharesVal) || 1);
+      
+      // Use bitmask filter for wallet: transfer (2), transfer_to_vesting (3), withdraw_vesting (4), delegate_vesting_shares (32)
+      const opNames = ['transfer', 'transfer_to_vesting', 'withdraw_vesting', 'delegate_vesting_shares'];
+      const bitmask = dblurt.utils.makeBitMaskFilter(opNames.map(name => dblurt.utils.operationOrders[name as keyof typeof dblurt.utils.operationOrders]));
+
+      const [delegationsRes, historyRes] = await Promise.all([
+        client.condenser.getVestingDelegations(user, '', 1000) as Promise<any>,
+        client.condenser.getAccountHistory(user, -1, 100, bitmask) as Promise<any>
       ]);
 
+      const delegations = Array.isArray(delegationsRes) ? delegationsRes : (delegationsRes?.result || []);
+      const history = Array.isArray(historyRes) ? historyRes : (historyRes?.result || []);
+
       if (delegations) {
-        profileUser.wallet.delegations = delegations.map(d => ({ ...d, bp: (parseFloat(d.vesting_shares) * ratio).toFixed(3) }));
+        profileUser.wallet.delegations = delegations.map((d: any) => {
+          const rawVests = d.vesting_shares?.amount || d.vesting_shares || '0';
+          const vests = parseFloat(String(rawVests).split(' ')[0]);
+          return { ...d, bp: (vests * ratio).toFixed(3) };
+        });
       }
 
       if (history) {
         profileUser.wallet.history = history
-          .filter(h => ['transfer', 'transfer_to_vesting', 'withdraw_vesting', 'delegate_vesting_shares'].includes(h[1].op[0]))
-          .map(h => ({ seq: h[0], timestamp: h[1].timestamp, op: h[1].op }))
+          .filter((h: any) => h[1] && h[1].op && ['transfer', 'transfer_to_vesting', 'withdraw_vesting', 'delegate_vesting_shares'].includes(h[1].op[0]))
+          .map((h: any) => ({ seq: h[0], timestamp: h[1].timestamp, op: h[1].op }))
           .reverse();
       }
 
       // Incoming delegations
-      const incoming = await client.call('database_api', 'find_vesting_delegations', { account: username }) as Delegation[];
-      if (incoming) {
-        const incomingMap: Record<string, any> = {};
-        incoming.forEach(d => {
-          if (d.delegator !== username) {
-            incomingMap[d.delegator] = { ...d, bp: (parseFloat(d.vesting_shares) * ratio).toFixed(3) };
+      const incomingMap: Record<string, any> = {};
+      try {
+        const incoming = await client.call('database_api', 'find_vesting_delegations', [{ account: user }]) as any;
+        const res = incoming?.result || incoming;
+        const delegationsList = Array.isArray(res) ? res : (res?.delegations || []);
+        
+        if (delegationsList && Array.isArray(delegationsList)) {
+          delegationsList.forEach(d => {
+            if (d.delegator !== user) {
+              const rawVests = d.vesting_shares?.amount || d.vesting_shares || '0';
+              const vests = parseFloat(String(rawVests).split(' ')[0]);
+              incomingMap[d.delegator] = { ...d, bp: (vests * ratio).toFixed(3) };
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Error fetching incoming delegations via API, falling back to history scan:', e);
+      }
+
+      // Fallback/Enhance with history scan (Blurt often doesn't have an incoming delegations index)
+      // Use broader search for history if incoming delegations are expected
+      let historyForScan = history;
+      if (profileUser.wallet.incomingDelegations.length === 0) {
+         // If still 0, we might need to look back further in history just for this fallback
+         // But only if we haven't already fetched a lot. 
+         // For now, let's just use what we have in historyRes (which is filtered by wallet bitmask)
+      }
+
+      if (historyRes) {
+        const rawHistory = Array.isArray(historyRes) ? historyRes : (historyRes?.result || []);
+        const chronological = [...rawHistory].sort((a, b) => a[0] - b[0]);
+        chronological.forEach(h => {
+          const op = h[1].op;
+          if (op[0] === 'delegate_vesting_shares' && op[1].delegatee === user) {
+            const d = op[1];
+            const rawVests = d.vesting_shares?.amount || d.vesting_shares || '0';
+            const vests = parseFloat(String(rawVests).split(' ')[0]);
+            if (vests > 0) {
+              incomingMap[d.delegator] = { 
+                delegator: d.delegator, 
+                vesting_shares: d.vesting_shares, 
+                bp: (vests * ratio).toFixed(3),
+                timestamp: h[1].timestamp 
+              };
+            } else {
+              delete incomingMap[d.delegator];
+            }
           }
         });
-        profileUser.wallet.incomingDelegations = Object.values(incomingMap);
       }
+      profileUser.wallet.incomingDelegations = Object.values(incomingMap);
+      console.log('[DEBUG] Final incoming delegations count:', profileUser.wallet.incomingDelegations.length);
 
       // Finalize wallet data with power down info
       if (profileUser.data) {
@@ -191,13 +258,16 @@ export function useProfile(
           bp: '0.000', delegatedIn: '0.000', delegatedOut: '0.000', totalBP: '0.000', walletValue: '0.00'
         };
 
-        // Calculate BP and other wallet values
-        const ratio = parseFloat(globalProps.value.total_vesting_fund_blurt || '0') / parseFloat(globalProps.value.total_vesting_shares || '1');
-        const bp = (parseFloat(acc.vesting_shares) * ratio).toFixed(3);
-        const delegatedIn = (parseFloat(acc.received_vesting_shares) * ratio).toFixed(3);
-        const delegatedOut = (parseFloat(acc.delegated_vesting_shares) * ratio).toFixed(3);
+        // Calculate BP and other wallet values safely
+        const fundVal = String(globalProps.value.total_vesting_fund_blurt || '0').split(' ')[0];
+        const sharesVal = String(globalProps.value.total_vesting_shares || '1').split(' ')[0];
+        const ratio = parseFloat(fundVal) / (parseFloat(sharesVal) || 1);
+        
+        const bp = (parseFloat(String(acc.vesting_shares).split(' ')[0]) * ratio).toFixed(3);
+        const delegatedIn = (parseFloat(String(acc.received_vesting_shares).split(' ')[0]) * ratio).toFixed(3);
+        const delegatedOut = (parseFloat(String(acc.delegated_vesting_shares).split(' ')[0]) * ratio).toFixed(3);
         const totalBP = (parseFloat(bp) + parseFloat(delegatedIn) - parseFloat(delegatedOut)).toFixed(3);
-        const walletValue = (parseFloat(acc.balance) + parseFloat(totalBP)).toFixed(2);
+        const walletValue = (parseFloat(String(acc.balance).split(' ')[0]) + parseFloat(totalBP)).toFixed(2);
         
         Object.assign(profileData, { bp, delegatedIn, delegatedOut, totalBP, walletValue });
         profileUser.data = { ...acc, ...profileData };

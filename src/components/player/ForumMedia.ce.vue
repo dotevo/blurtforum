@@ -2,10 +2,22 @@
 import { onMounted, onUnmounted, computed, watch, ref, reactive } from 'vue';
 import { registerTrack, unregisterTrack, playTrack, togglePlay, addToQueue, state } from '../../modules/player';
 import { Parser } from '../../modules/parser';
-import type { MediaTrack } from '../../types';
+import type { MediaTrack, MediaEntryMirror } from '../../types';
 
 export const handleMediaAction = async (type: string, id: string, host: string, action: string, trackData: Partial<MediaTrack> = {}): Promise<void> => {
-  const media: MediaTrack = { type: type as MediaTrack['type'], id, host, ...trackData };
+  const media: MediaTrack = { 
+    author: trackData.author || 'post',
+    permlink: trackData.permlink || '',
+    title: trackData.title || 'Media Content',
+    sources: [{ 
+      type: type as any, 
+      id, 
+      host,
+      thumb: trackData.cover 
+    }],
+    activeSourceIndex: 0,
+    ...trackData 
+  };
   if (action === 'play') {
     await playTrack(media);
   } else if (action === 'queue') {
@@ -26,7 +38,6 @@ if (typeof document !== 'undefined') {
         title: d.title,
         author: d.author,
         permlink: d.permlink,
-        src: d.src,
         cover: d.cover
       });
     }
@@ -74,7 +85,7 @@ const isSunoUuid = (type: string, id: string) => type === 'audio' && id.length >
 
 const trackData = computed<MediaTrack>(() => {
   // 1. Resolve base data (resolvedTrack > props.media > single props)
-  let base: Partial<MediaTrack> = {};
+  let base: any = {};
   if (resolvedTrack.value) {
     base = { ...resolvedTrack.value };
   } else if (props.media) {
@@ -87,8 +98,8 @@ const trackData = computed<MediaTrack>(() => {
   } else {
     base = {
       type: (props.dataType as any) || 'audio',
-      id: props.dataId || '',
-      src: props.dataSrc,
+      id: (props.dataId as any) || '',
+      src: (props.dataSrc as any),
       cover: props.dataCover,
       host: props.dataHost,
       author: props.dataAuthor,
@@ -101,19 +112,25 @@ const trackData = computed<MediaTrack>(() => {
   const id = base.id || '';
   let src = base.src;
   let cover = base.cover;
+  let mediaThumb = '';
 
   if (isSunoUuid(type, id)) {
     if (!src) src = `https://cdn1.suno.ai/${id}.mp3`;
-    if (!cover) cover = `https://cdn2.suno.ai/image_large_${id}.jpeg`;
+    mediaThumb = `https://cdn2.suno.ai/image_large_${id}.jpeg`;
+    if (!cover) cover = mediaThumb;
   }
 
-  // Auto-generate YouTube thumbnail if missing
-  if (type === 'youtube' && !cover) {
-    cover = `https://img.youtube.com/vi/${id}/0.jpg`;
+  // Auto-generate YouTube thumbnail
+  if (type === 'youtube') {
+    const ytThumb = `https://img.youtube.com/vi/${id}/0.jpg`;
+    mediaThumb = ytThumb;
+    if (!cover) cover = ytThumb;
   }
+
+  const author = props.dataAuthor || props.author || base.author || 'post';
+  const permlink = props.dataPermlink || props.permlink || base.permlink || '';
 
   // Title logic: Prefer real titles over placeholders. 
-  // props.title (from thread list) should have high priority.
   let title = base.title || props.title || props.dataTitle || '';
   if (!title || title === '(no title)' || title === 'Media Content') {
     if (props.title && props.title !== '(no title)') title = props.title;
@@ -122,79 +139,53 @@ const trackData = computed<MediaTrack>(() => {
     else title = 'Media Content';
   }
 
-  // Smarter pending logic: ignore props if we already have src or it's a UUID
+  // Mirror support: find ALL media if it's the first registration for this post
+  // This ensures priorities work even in Micro mode.
+  const mirrors: MediaEntryMirror[] = base.sources || [];
+  if (mirrors.length === 0) {
+     // If we were passed a single media object, use it as primary
+     mirrors.push({ type, id, src, host: base.host || props.dataHost, thumb: mediaThumb });
+  }
+
+  // If we have access to the full body (rare in Micro, but possible in TopicView), extract all
+  // For Micro mode in lists, we rely on multiple ForumMedia instances registering themselves,
+  // OR we can try to extract from props if they are duplicated (unlikely).
+  // BEST: Let ForumMedia instances merge themselves in registerTrack (already implemented).
+  
   const dataPending = base.pending || props.dataPending === 'true' || props.dataPending === true;
   const actuallyPending = dataPending && !src && !isSunoUuid(type, id) && type !== 'youtube';
 
   return {
-    type,
-    id,
-    src: src || undefined,
-    cover: cover || undefined,
-    host: base.host || props.dataHost || undefined,
+    author, permlink,
     title,
-    author: base.author || props.author || props.dataAuthor || 'post',
-    permlink: base.permlink || props.permlink || props.dataPermlink || '',
+    cover: mediaThumb || cover,
     pending: !resolvedTrack.value && (isResolving.value || actuallyPending),
+    sources: mirrors,
+    activeSourceIndex: (typeof base.activeSourceIndex !== 'undefined') ? base.activeSourceIndex : -1
   };
 });
 
 // Self-resolution for pending tracks
 const resolveIfNeeded = async () => {
-  const currentId = trackData.value.id;
-  if (!currentId || currentId === lastResolvedId.value) return;
+  const primary = trackData.value.sources[0];
+  const currentId = primary?.id;
+  const currentType = primary?.type;
+  if (!currentId || isResolving.value || !trackData.value.pending) return;
+  if (lastResolvedId.value === currentId) return;
 
   // Immediate exit if it's already a full UUID or has a source - NO RESOLVING NEEDED
-  if (isSunoUuid(trackData.value.type, currentId) || trackData.value.src) {
+  if (isSunoUuid(currentType, currentId) || primary?.src) {
     lastResolvedId.value = currentId;
     return;
   }
 
-  // If already resolving, just exit
-  if (isResolving.value) return;
-
-  // We resolve if marked as pending OR if it's a PeerTube track without a confirmed resolution
-  const isSunoPending = trackData.value.type === 'audio' && trackData.value.pending;
-  const isPeertubeNeeded = trackData.value.type === 'peertube' && !resolvedTrack.value;
-
-  if (!isSunoPending && !isPeertubeNeeded) {
-    lastResolvedId.value = currentId;
-    return;
-  }
-
-  // 0. Check module-level cache first
-  if (trackData.value.type === 'audio' && sunoCache[currentId]) {
-    const cached = sunoCache[currentId];
-    console.log('[ForumMedia] Using module cache for:', currentId);
-    resolvedTrack.value = { ...trackData.value, ...cached, pending: false };
-    lastResolvedId.value = currentId;
-    return;
-  }
-
-  // 1. Check if we already have this resolved in global state
-  const existing = state.autoQueue.find(t => 
-    t.id === currentId && 
-    t.type === trackData.value.type && 
-    !t.pending && 
-    (t.src || t.cover)
-  );
-  
-  if (existing) {
-    console.log('[ForumMedia] Using autoQueue cache for:', currentId);
-    resolvedTrack.value = { ...existing, pending: false };
-    lastResolvedId.value = currentId;
-    return;
-  }
-
-  console.log('[ForumMedia] Resolving:', currentId);
-  lastResolvedId.value = currentId;
   isResolving.value = true;
   try {
-    // Logic moved from Parser for better independence
-    let resolved: MediaTrack | null = null;
-    
-    if (trackData.value.type === 'audio' && !trackData.value.src && currentId.length < 30) {
-      // Suno resolution
+    const isSunoPending = currentType === 'audio' && trackData.value.pending;
+    const isPeertubeNeeded = currentType === 'peertube' && !resolvedTrack.value;
+
+    if (isSunoPending) {
+       // Suno resolution via Proxy
       const url = `https://suno.com/s/${currentId}`;
       const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
       const response = await fetch(proxyUrl);
@@ -202,17 +193,21 @@ const resolveIfNeeded = async () => {
       const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
       if (uuidMatch) {
         const uuid = uuidMatch[1];
-        resolved = { 
+        resolvedTrack.value = { 
           ...trackData.value, 
-          id: uuid, 
-          src: `https://cdn1.suno.ai/${uuid}.mp3`, 
+          sources: [{
+            type: 'audio',
+            id: uuid,
+            src: `https://cdn1.suno.ai/${uuid}.mp3`
+          }],
           cover: `https://cdn2.suno.ai/image_large_${uuid}.jpeg`,
           pending: false 
         };
+        sunoCache[currentId] = { id: uuid, src: resolvedTrack.value.sources[0].src!, cover: resolvedTrack.value.cover! };
+        lastResolvedId.value = currentId;
       }
-    } else if (trackData.value.type === 'peertube' && !trackData.value.cover) {
-      // PeerTube resolution
-      const host = trackData.value.host || 'blurt.media';
+    } else if (isPeertubeNeeded) {
+      const host = primary?.host || 'blurt.media';
       const apiUrl = `https://${host}/api/v1/videos/${currentId}`;
       const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
       const response = await fetch(proxyUrl);
@@ -220,58 +215,33 @@ const resolveIfNeeded = async () => {
         const data = await response.json();
         const cover = data.thumbnailPath ? `https://${host}${data.thumbnailPath}` : (data.previewPath ? `https://${host}${data.previewPath}` : null);
         if (cover) {
-          resolved = { ...trackData.value, cover, pending: false };
+          resolvedTrack.value = { ...trackData.value, cover, pending: false };
         }
       }
     }
-
-    if (resolved) {
-      resolvedTrack.value = resolved;
-      // Save to module-level cache if it was a resolution (short ID -> long ID)
-      if (trackData.value.type === 'audio' && currentId.length < 30 && resolved.id.length >= 32) {
-        sunoCache[currentId] = { id: resolved.id, src: resolved.src!, cover: resolved.cover! };
-      }
-    }
-  } catch (e) { 
-    console.error('ForumMedia: Resolution failed', e); 
-  } finally { 
-    isResolving.value = false; 
+  } catch (e) {
+    console.warn('ForumMedia: Resolution failed', e);
+  } finally {
+    isResolving.value = false;
   }
 };
-
-const isActive = computed(() => {
-  const current = state.currentTrack;
-  if (!current) return false;
-  
-  // Match by ID and Type. 
-  // For Suno, we might have a short ID in the component and a long ID in the player.
-  if (current.id === trackData.value.id && current.type === trackData.value.type) return true;
-  
-  // Fallback: If this is a Suno track, check if the resolved ID matches
-  if (trackData.value.type === 'audio' && lastResolvedId.value === current.id) return true;
-  
-  return false;
-});
-
-const isPlaying = computed(() => isActive.value && state.playing);
 
 let registeredId: string | null = null;
 let registeredType: string | null = null;
 
 const syncTrack = () => {
-  // Register if we have an ID AND (it's not pending OR we already have a cover)
-  // This allows tracks with covers from blockchain metadata to appear immediately.
-  const shouldRegister = trackData.value.id && (!trackData.value.pending || trackData.value.cover);
+  const primary = trackData.value.sources[0];
+  const shouldRegister = primary?.id && (!trackData.value.pending || trackData.value.cover);
   
   if (shouldRegister) {
-    if (registeredId && (registeredId !== trackData.value.id || registeredType !== trackData.value.type)) {
-      unregisterTrack(registeredId, registeredType!);
+    if (registeredId && (registeredId !== primary.id || registeredType !== primary.type)) {
+      unregisterTrack(registeredId, registeredType!, trackData.value.author, trackData.value.permlink);
     }
     registerTrack(trackData.value);
-    registeredId = trackData.value.id;
-    registeredType = trackData.value.type;
+    registeredId = primary.id;
+    registeredType = primary.type;
   } else if (registeredId) {
-    unregisterTrack(registeredId, registeredType!);
+    unregisterTrack(registeredId, registeredType!, trackData.value.author, trackData.value.permlink);
     registeredId = null;
     registeredType = null;
   }
@@ -282,29 +252,44 @@ onMounted(() => {
   resolveIfNeeded();
 });
 
-watch(() => [trackData.value.id, trackData.value.pending, trackData.value.cover], () => {
+watch(() => [trackData.value.sources[0]?.id, trackData.value.pending, trackData.value.cover], () => {
   syncTrack();
   resolveIfNeeded();
 });
 
 onUnmounted(() => {
   if (registeredId && registeredType) {
-    unregisterTrack(registeredId, registeredType);
+    unregisterTrack(registeredId, registeredType, trackData.value.author, trackData.value.permlink);
   }
 });
 
+const isActive = computed(() => {
+  const current = state.currentTrack;
+  if (!current) return false;
+  return (current.author === trackData.value.author && current.permlink === trackData.value.permlink);
+});
+
+const isCurrentSourceActive = computed(() => {
+  if (!isActive.value) return false;
+  const current = state.currentTrack;
+  if (!current) return false;
+  const activeSrc = current.sources[current.activeSourceIndex || 0];
+  const thisSrc = trackData.value.sources[0];
+  return activeSrc?.id === thisSrc?.id && activeSrc?.type === thisSrc?.type;
+});
+
+const isPlaying = computed(() => isCurrentSourceActive.value && state.playing);
+
 const handlePlay = async () => {
   if (isResolving.value) return;
-
-  // If we are pending, we MUST resolve before playing
-  if (trackData.value.pending) {
-    await resolveIfNeeded();
-  }
+  if (trackData.value.pending) await resolveIfNeeded();
   
-  if (isActive.value) {
+  if (isCurrentSourceActive.value) {
     togglePlay();
   } else {
-    playTrack(trackData.value);
+    // Card mode = Manual (this source)
+    // Micro mode = Auto (best source from registry)
+    await playTrack(trackData.value, props.mode === 'card');
   }
 };
 
@@ -314,10 +299,10 @@ const handleQueue = () => {
 };
 
 const thumbUrl = computed(() => trackData.value.cover || '');
-
-const sourceLabel = computed(() => {
-  if (trackData.value.pending) return 'resolving...';
-  return trackData.value.host || (trackData.value.type === 'audio' ? 'suno' : trackData.value.type);
+const typeLabel: Record<string, string> = { youtube: 'YouTube', peertube: 'PeerTube', audio: 'Audio' };
+const displayHost = computed(() => {
+  const primary = trackData.value.sources[0];
+  return primary?.host || (primary?.type === 'audio' ? 'suno' : primary?.type);
 });
 
 </script>
@@ -327,14 +312,17 @@ const sourceLabel = computed(() => {
     class="forum-media-container" 
     :class="[`mode-${mode}`, { 'is-active': isActive, 'is-playing': isPlaying }]"
   >
-    <!-- MICRO MODE -->
+    <!-- MICRO MODE (Default for posts) -->
     <template v-if="mode === 'micro'">
       <div class="forum-media-micro">
         <slot>
           <template v-if="!hideButtons">
             <span class="media-icon" @click.stop="handlePlay" :title="trackData.title" :class="{ 'is-active': isActive, 'is-playing': isPlaying }">
               <i v-if="isResolving" class="fa-solid fa-spinner fa-spin"></i>
-              <i v-else :class="isPlaying ? 'fa-solid fa-pause' : (trackData.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play')"></i>
+              <template v-else>
+                <i v-if="isActive && !isCurrentSourceActive" class="fa-solid fa-shuffle"></i>
+                <i v-else :class="isPlaying ? 'fa-solid fa-pause' : (trackData.sources[0]?.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play')"></i>
+              </template>
             </span>
             <span class="media-icon" @click.stop="handleQueue">
               <i class="fa-solid fa-plus"></i>
@@ -344,25 +332,30 @@ const sourceLabel = computed(() => {
       </div>
     </template>
 
-    <!-- CARD MODE -->
+    <!-- CARD MODE (Explicit cards) -->
     <template v-else-if="mode === 'card'">
       <div 
         class="media-placeholder" 
         :class="{ 'is-resolving': trackData.pending, 'no-thumb': !thumbUrl }"
         :style="thumbUrl ? `background-image: url(${thumbUrl})` : ''"
+        @click="handlePlay"
       >
         <div class="media-placeholder-overlay">
           <div class="media-placeholder-actions">
             <button class="btn btn-primary" @click.stop="handlePlay" :disabled="trackData.pending">
               <i v-if="trackData.pending" class="fa-solid fa-spinner fa-spin"></i>
-              <i v-else :class="isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i> 
-              <span class="btn-text">{{ isPlaying ? 'Pause' : 'Play' }}</span>
+              <template v-else>
+                <i :class="isPlaying ? 'fa-solid fa-pause' : (isActive && !isCurrentSourceActive ? 'fa-solid fa-shuffle' : 'fa-solid fa-play')"></i> 
+                <span class="btn-text">
+                  {{ isPlaying ? 'Pause' : (isActive && !isCurrentSourceActive ? 'Switch' : 'Play') }}
+                </span>
+              </template>
             </button>
             <button class="btn btn-ghost" @click.stop="handleQueue" :disabled="trackData.pending">
               <i class="fa-solid fa-plus"></i> <span class="btn-text">Queue</span>
             </button>
           </div>
-          <div class="source-label">{{ sourceLabel }}</div>
+          <div class="source-label">{{ displayHost }}</div>
         </div>
       </div>
     </template>
@@ -440,6 +433,7 @@ const sourceLabel = computed(() => {
   overflow: hidden;
   border: 1px solid var(--border-main, #98AAB1);
   box-sizing: border-box;
+  cursor: pointer;
 }
 
 .media-placeholder-overlay {

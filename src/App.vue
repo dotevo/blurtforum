@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from 'vue';
+import { watch, defineAsyncComponent } from 'vue';
 import { useApp } from './composables/useApp';
 import { useTitle } from './composables/useTitle';
 
@@ -12,31 +12,32 @@ import NavBar from './components/layout/NavBar.vue';
 import MobileTopBar from './components/layout/MobileTopBar.vue';
 import MobileContext from './components/layout/MobileContext.vue';
 
-// Views
+// Views (Sync for core, Async for heavy)
 import ForumIndex from './components/forum/ForumIndex.vue';
 import ForumView from './components/forum/ForumView.vue';
 import TopicView from './components/forum/TopicView.vue';
-import CommunitiesView from './components/forum/CommunitiesView.vue';
-import ProfileView from './components/profile/ProfileView.vue';
+const CommunitiesView = defineAsyncComponent(() => import('./components/forum/CommunitiesView.vue'));
+const ProfileView = defineAsyncComponent(() => import('./components/profile/ProfileView.vue'));
 
 // Player
-import MediaPlayer from './components/player/MediaPlayer.vue';
+const MediaPlayer = defineAsyncComponent(() => import('./components/player/MediaPlayer.vue'));
 
-// Modals
-import LoginModal from './components/modals/LoginModal.vue';
-import PayoutModal from './components/modals/PayoutModal.vue';
-import NotifModal from './components/modals/NotifModal.vue';
-import EditModal from './components/modals/EditModal.vue';
-import PinModal from './components/modals/PinModal.vue';
-import VoteModal from './components/modals/VoteModal.vue';
-import FollowModal from './components/modals/FollowModal.vue';
-import OldContentModal from './components/modals/OldContentModal.vue';
-import StructureDocs from './components/modals/StructureDocs.vue';
-import LayoutEditor from './components/modals/LayoutEditor.vue';
-import ImageLightbox from './components/modals/ImageLightbox.vue';
-import WalletModal from './components/modals/WalletModal.vue';
-import RpcModal from './components/modals/RpcModal.vue';
-import SwitchAccountModal from './components/modals/SwitchAccountModal.vue';
+// Modals (Async)
+const LoginModal = defineAsyncComponent(() => import('./components/modals/LoginModal.vue'));
+const PayoutModal = defineAsyncComponent(() => import('./components/modals/PayoutModal.vue'));
+const NotifModal = defineAsyncComponent(() => import('./components/modals/NotifModal.vue'));
+const EditModal = defineAsyncComponent(() => import('./components/modals/EditModal.vue'));
+const PinModal = defineAsyncComponent(() => import('./components/modals/PinModal.vue'));
+const VoteModal = defineAsyncComponent(() => import('./components/modals/VoteModal.vue'));
+const FollowModal = defineAsyncComponent(() => import('./components/modals/FollowModal.vue'));
+const OldContentModal = defineAsyncComponent(() => import('./components/modals/OldContentModal.vue'));
+const StructureDocs = defineAsyncComponent(() => import('./components/modals/StructureDocs.vue'));
+const LayoutEditor = defineAsyncComponent(() => import('./components/modals/LayoutEditor.vue'));
+const ImageLightbox = defineAsyncComponent(() => import('./components/modals/ImageLightbox.vue'));
+const WalletModal = defineAsyncComponent(() => import('./components/modals/WalletModal.vue'));
+const WalletAuthModal = defineAsyncComponent(() => import('./components/modals/WalletAuthModal.vue'));
+const RpcModal = defineAsyncComponent(() => import('./components/modals/RpcModal.vue'));
+const SwitchAccountModal = defineAsyncComponent(() => import('./components/modals/SwitchAccountModal.vue'));
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -55,7 +56,9 @@ const {
   changePage,
   submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
   walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
+  walletAuthModal,
   followModal, confirmToggleFollow,
+
   openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
   canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
@@ -545,17 +548,28 @@ const {
     @close="followModal.show = false"
     @confirm="confirmToggleFollow"
   />
+<WalletModal
+  v-if="walletModal.show"
+  :show="walletModal.show"
+  :mode="walletModal.mode"
+  :balance="walletModal.balance"
+  :username="auth.user?.username || ''"
+  :target-user="walletModal.targetUser"
+  :t="t"
+  @close="walletModal.show = false"
+  @submit="handleWalletSubmit"
+/>
 
-  <WalletModal
-    :show="walletModal.show"
-    :mode="walletModal.mode"
-    :balance="walletModal.balance"
-    :username="auth.user?.username || ''"
-    :target-user="walletModal.targetUser"
-    :t="t"
-    @close="walletModal.show = false"
-    @submit="handleWalletSubmit"
-  />
+<WalletAuthModal
+  v-if="walletAuthModal.show"
+  :show="walletAuthModal.show"
+  :username="walletAuthModal.username"
+  :authority="walletAuthModal.authority"
+  :t="t"
+  @close="walletAuthModal.show = false"
+  @submit="(k) => walletAuthModal.callback?.(k)"
+/>
+
 
   <!-- Status modal -->
   <div v-if="statusModal.show" class="modal-overlay" @click.self="statusModal.show=false" style="z-index: 5000;">

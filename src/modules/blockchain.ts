@@ -1,10 +1,8 @@
 import { reactive } from 'vue';
+import * as dblurt from '@beblurt/dblurt';
 import { BFUtils } from './utils';
 import { Parser } from './parser';
-import type { Post, RawPost, Beneficiary, GlobalProps, AuthUser, ActiveVote, RewardFund, ChainProperties } from '../types';
-
-// dblurt is loaded from unpkg CDN via index.html
-declare const dblurt: any;
+import type { Post, RawPost, Beneficiary, GlobalProps, AuthUser, ActiveVote, RewardFund, ChainProperties, MediaEntryMirror } from '../types';
 
 /**
  * Blockchain module for BlurtForum.
@@ -22,7 +20,7 @@ export const Blockchain = {
   async fetchFeeInfo(client: any): Promise<void> {
     if (this.feeInfo.loaded) return;
     try {
-      const props = await client.call('condenser_api', 'get_chain_properties', {}) as ChainProperties;
+      const props = await client.call('condenser_api', 'get_chain_properties', []) as ChainProperties;
       if (props) {
         if (props.operation_flat_fee) this.feeInfo.flatFee = parseFloat(props.operation_flat_fee);
         if (props.bandwidth_kbytes_fee) this.feeInfo.bwFee = parseFloat(props.bandwidth_kbytes_fee);
@@ -41,7 +39,7 @@ export const Blockchain = {
   },
 
   /** Normalizes a raw blockchain post into the application's Post format */
-  normalizePost(p: RawPost, context?: { 
+  normalizePost(p: any, context?: { 
     currentUser?: string | null, 
     followingSet?: Set<string>, 
     readStatusMap?: Record<string, number>,
@@ -94,7 +92,8 @@ export const Blockchain = {
       net_rshares: parseFloat(String(p.net_rshares || 0)),
       beneficiaries: (p.beneficiaries || []) as Beneficiary[],
       json_metadata: p.json_metadata,
-      media: Parser.detectMedia(p.body),
+      media: null,
+      mirrors: [],
       isUnread: !isRead,
       isRead: isRead,
       isFollowing: !!(context?.currentUser && context?.followingSet?.has(p.author)),
@@ -105,6 +104,27 @@ export const Blockchain = {
       tags,
       lastActivityTs: activityTs,
     };
+
+    // Extract all media mirrors
+    const allMedia = Parser.extractAllMedia(p.body);
+    if (allMedia.length > 0) {
+      post.mirrors = allMedia.map(m => ({
+        author: post.author,
+        permlink: post.permlink,
+        title: post.title,
+        sources: [{
+          type: m.type,
+          id: m.id,
+          src: m.src,
+          host: m.host,
+          thumb: m.cover
+        }],
+        activeSourceIndex: -1,
+        pending: m.pending,
+        cover: m.cover
+      }));
+      post.media = post.mirrors[0];
+    }
 
     // If we detected media but it has no cover, try to use the first image from metadata
     if (post.media && !post.media.cover && p.json_metadata) {
@@ -120,7 +140,7 @@ export const Blockchain = {
   },
 
   /** Broadcasts operations to the blockchain using either private key or WhaleVault */
-  async broadcast(client: any, user: AuthUser, ops: any[]): Promise<void> {
+  async broadcast(client: any, user: AuthUser, ops: any[], authority: 'Posting' | 'Active' = 'Posting'): Promise<void> {
     if (user.type === 'key') {
       if (!user.key) throw new Error('Private key missing');
       const privKey = dblurt.PrivateKey.from(user.key);
@@ -133,7 +153,7 @@ export const Blockchain = {
         (window.blurt_keychain as any).requestBroadcast(
           user.username,
           ops,
-          'Posting',
+          authority,
           (res: { success: boolean; message?: string }) => {
             if (res?.success) resolve();
             else reject(new Error(res.message || 'WhaleVault broadcast error'));

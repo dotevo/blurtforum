@@ -13,17 +13,20 @@ const emit = defineEmits<{
 <template>
 <!-- FOLLOW CONFIRMATION MODAL -->
 <div v-if="followModal.show" class="modal-overlay" @click.self="emit('close')">
-  <div class="modal-content" style="max-width: 400px; text-align: center;">
-    <h3>{{ followModal.isFollowing ? t('unfollow') : t('follow') }}</h3>
-    <button class="modal-close" @click="emit('close')">✕</button>
-    <div style="margin: 20px 0; font-size: 14px;">
-      {{ followModal.isFollowing ? t('confirmUnfollow').replace('{user}', followModal.user) : t('confirmFollow').replace('{user}', followModal.user) }}
+  <div class="modal-box">
+    <div class="modal-header">
+      {{ followModal.isFollowing ? t('unfollow') : t('follow') }}
+      <button class="modal-close" @click="emit('close')">✕</button>
     </div>
-    <div style="display: flex; gap: 10px; justify-content: center;">
-      <button class="btn btn-accent" @click="emit('confirm')" style="min-width: 100px;">OK</button>
-      <button class="btn btn-ghost" @click="emit('close')" style="min-width: 100px;">{{ t('cancel') }}</button>
+    <div class="modal-body" style="text-align: center;">
+      <div style="margin-bottom: 20px; font-size: 14px;">
+        {{ followModal.isFollowing ? t('confirmUnfollow').replace('{user}', followModal.user) : t('confirmFollow').replace('{user}', followModal.user) }}
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: center;">
+        <button class="btn btn-accent" @click="emit('confirm')" style="min-width: 100px;">OK</button>
+        <button class="btn btn-ghost" @click="emit('close')" style="min-width: 100px;">{{ t('cancel') }}</button>
+      </div>
     </div>
   </div>
 </div>
-
 </template>

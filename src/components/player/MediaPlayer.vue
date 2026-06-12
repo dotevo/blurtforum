@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import ScrollableTabs from '../layout/ScrollableTabs.vue';
 import VoteButton from '../layout/VoteButton.vue';
 import PlaylistModal from '../modals/PlaylistModal.vue';
-import type { MediaTrack, BFPlayerAPI, Playlist } from '../../types';
+import type { MediaTrack, BFPlayerAPI, Playlist, MediaEntryMirror } from '../../types';
+import { currentSource } from '../../modules/player';
 
 const props = defineProps<{
   player: BFPlayerAPI;
@@ -63,6 +65,16 @@ function formatTime(seconds: number | null | undefined): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+const getBestType = (track: MediaTrack) => {
+  if (!track.sources?.length) return 'audio';
+  const priorities = ['audio', 'peertube', 'youtube'];
+  for (const type of priorities) {
+    const s = track.sources.find(s => s.type === type);
+    if (s) return s.type;
+  }
+  return track.sources[0].type;
+};
+
 function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return '';
   const diff = Date.now() - timestamp;
@@ -78,6 +90,23 @@ function formatRelativeTime(timestamp?: number): string {
 
 // ── Media type badge labels ─────────────────────────────────────────────────
 const typeLabel: Record<string, string> = { youtube: 'YT', peertube: 'PT', audio: 'MP3' };
+
+const brokenImages = ref(new Set<string>());
+function handleImgError(url: string) {
+  if (url) brokenImages.value.add(url);
+}
+
+function getTrackCover(track: MediaTrack | null): string {
+  if (!track) return '';
+  const source = track.sources[track.activeSourceIndex || 0];
+  const url = source?.thumb || track.cover || '';
+  if (url && (url.length < 5 || brokenImages.value.has(url))) return '';
+  return url;
+}
+
+const effectiveCover = computed(() => {
+  return getTrackCover(props.player.state.currentTrack);
+});
 
 // ── Playlists ───────────────────────────────────────────────────────────────
 const activePlaylistId = ref<string | null>(null);
@@ -120,7 +149,7 @@ function isCurrentInActivePlaylist(): boolean {
   const pl = getActivePlaylist();
   const track = props.player.state.currentTrack;
   if (!pl || !track) return false;
-  return pl.tracks.some(t => t.id === track.id);
+  return pl.tracks.some(t => t.author === track.author && t.permlink === track.permlink);
 }
 
 // ── Playlist dropdown ───────────────────────────────────────────────────────
@@ -135,6 +164,32 @@ function openPlaylistDropdown(track: MediaTrack, e: MouseEvent): void {
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   dropdownY.value = rect.top;
   dropdownX.value = rect.right;
+}
+
+// ── Mirror Switcher ─────────────────────────────────────────────────────────
+const mirrorSwitcherVisible = ref(false);
+
+function switchSource(index: number): void {
+  if (!props.player.state.currentTrack) return;
+  props.player.state.currentTrack.activeSourceIndex = index;
+  props.player.playTrack(props.player.state.currentTrack);
+  mirrorSwitcherVisible.value = false;
+}
+
+// ── Mirror Priorities ───────────────────────────────────────────────────────
+const defaultPriorities = ['audio', 'peertube', 'youtube'];
+const priorities = ref<string[]>(JSON.parse(localStorage.getItem('bf-player-priorities') || JSON.stringify(defaultPriorities)));
+
+function savePriorities(): void {
+  localStorage.setItem('bf-player-priorities', JSON.stringify(priorities.value));
+}
+
+function movePriority(index: number, delta: number): void {
+  const target = index + delta;
+  if (target < 0 || target >= priorities.value.length) return;
+  const item = priorities.value.splice(index, 1)[0];
+  priorities.value.splice(target, 0, item);
+  savePriorities();
 }
 
 function closePlaylistDropdown(): void {
@@ -202,7 +257,7 @@ onUnmounted(() => {
     <template v-if="player.state.minimized">
       <button class="bfp-btn bfp-btn--play" @click="if(!player.state.currentTrack) { player.state.minimized = false; player.state.expanded = true; player.state.expandedTab = 'playlists'; } else player.togglePlay()">
         <div class="bfp-cover bfp-cover--minimized">
-          <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-cover-img" alt="" />
+          <img v-if="effectiveCover" :src="effectiveCover" class="bfp-cover-img" alt="" @error="handleImgError(effectiveCover)" />
           <div v-else class="bfp-cover-placeholder"><i class="fa-solid fa-music"></i></div>
         </div>
         <div class="bfp-minimized-info">
@@ -221,20 +276,46 @@ onUnmounted(() => {
         @click="player.state.expanded = !player.state.expanded; if(player.state.expanded) { player.state.expandedTab = 'queue'; player.scrollToCurrent(); }"
         :title="player.state.expanded ? 'Close panel' : 'Open queue'"
       >
-        <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-cover-img" alt="Cover" />
+        <img v-if="effectiveCover" :src="effectiveCover" class="bfp-cover-img" alt="" @error="handleImgError(effectiveCover)" />
         <div v-else class="bfp-cover-placeholder">
-          <i v-if="player.state.currentTrack?.type === 'youtube'" class="fa-brands fa-youtube"></i>
-          <i v-else-if="player.state.currentTrack?.type === 'peertube'" class="fa-solid fa-video"></i>
+          <i v-if="currentSource?.type === 'youtube'" class="fa-brands fa-youtube"></i>
+          <i v-else-if="currentSource?.type === 'peertube'" class="fa-solid fa-video"></i>
           <i v-else class="fa-solid fa-music"></i>
         </div>
-        <span class="bfp-media-badge" :class="`bfp-media-badge--${player.state.currentTrack?.type}`">
-          {{ typeLabel[player.state.currentTrack?.type ?? ''] }}
+        <span v-if="currentSource" class="bfp-media-badge" :class="`bfp-media-badge--${currentSource.type}`">
+          {{ typeLabel[currentSource.type] }}
         </span>
+
         <div class="bfp-cover-eq" v-if="player.state.playing && !player.state.loading">
           <span></span><span></span><span></span>
         </div>
         <div class="bfp-cover-spinner" v-if="player.state.loading">
           <i class="fa-solid fa-spinner fa-spin"></i>
+        </div>
+
+        <button v-if="player.state.currentTrack && player.state.currentTrack.sources.length > 1" 
+                class="bfp-mirror-toggle" @click.stop="mirrorSwitcherVisible = !mirrorSwitcherVisible"
+                :class="{ active: mirrorSwitcherVisible }"
+                title="Switch mirror/source">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+      </div>
+
+      <div v-if="mirrorSwitcherVisible" class="bfp-mirror-overlay" @click.stop>
+        <div class="bfp-mirror-header">
+          <strong>Sources</strong>
+          <button @click="mirrorSwitcherVisible = false"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="bfp-mirror-body">
+          <div v-for="(s, idx) in player.state.currentTrack?.sources" :key="idx" 
+               class="bfp-mirror-row" :class="{ active: player.state.currentTrack?.activeSourceIndex === idx }"
+               @click="switchSource(idx)">
+            <i v-if="s.type === 'youtube'" class="fa-brands fa-youtube"></i>
+            <i v-else-if="s.type === 'peertube'" class="fa-solid fa-video"></i>
+            <i v-else class="fa-solid fa-music"></i>
+            <span>{{ s.host || typeLabel[s.type] }}</span>
+            <i v-if="player.state.currentTrack?.activeSourceIndex === idx" class="fa-solid fa-check ms-auto"></i>
+          </div>
         </div>
       </div>
 
@@ -362,24 +443,24 @@ onUnmounted(() => {
       </div>
 
       <div class="bfp-video-wrap">
-        <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'youtube' }" class="bfp-video-iframe-wrap">
+        <div :class="{ 'bfp-media-hidden': currentSource?.type !== 'youtube' }" class="bfp-video-iframe-wrap">
           <div id="bf-yt-player-target" style="width:100%; height:100%;"></div>
         </div>
         
-        <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'peertube' }" class="bfp-video-iframe-wrap">
+        <div :class="{ 'bfp-media-hidden': currentSource?.type !== 'peertube' }" class="bfp-video-iframe-wrap">
           <iframe
             id="bf-pt-player-iframe"
             class="bfp-video-iframe"
-            :key="player.state.currentTrack?.id"
-            :src="player.state.currentTrack?.type === 'peertube' ? `https://${player.state.currentTrack.host}/videos/embed/${player.state.currentTrack.id}?api=1${player.state.isAutoStarting ? '&autoplay=1' : ''}` : ''"
+            :key="currentSource?.id"
+            :src="currentSource?.type === 'peertube' ? `https://${currentSource.host}/videos/embed/${currentSource.id}?api=1${player.state.isAutoStarting ? '&autoplay=1' : ''}` : ''"
             frameborder="0" allowfullscreen 
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
             allow="autoplay"
           ></iframe>
         </div>
 
-        <div :class="{ 'bfp-media-hidden': player.state.currentTrack?.type !== 'audio' }" class="bfp-video-audio-placeholder">
-          <img v-if="player.state.currentTrack?.cover" :src="player.state.currentTrack.cover" class="bfp-placeholder-cover" alt="Cover" />
+        <div :class="{ 'bfp-media-hidden': currentSource?.type !== 'audio' }" class="bfp-video-audio-placeholder">
+          <img v-if="effectiveCover" :src="effectiveCover" class="bfp-placeholder-cover" alt="" @error="handleImgError(effectiveCover)" />
           <div v-else class="bfp-placeholder-icon"><i class="fa-solid fa-music" style="font-size:48px; opacity:0.3;"></i></div>
           <div class="bfp-placeholder-info">
             <div class="bfp-placeholder-title">{{ player.state.currentTrack?.title }}</div>
@@ -394,24 +475,49 @@ onUnmounted(() => {
 
     <div class="bfp-panel-tabs">
       <div class="bfp-panel-header">
-        <button v-if="vw <= 900" class="bfp-tab" :class="{ active: player.state.expandedTab === 'video' }" @click="player.state.expandedTab = 'video'">
-          <i class="fa-solid fa-tv"></i> {{ t('video') }}
-        </button>
-        <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'queue' }"
-                @click="player.state.expandedTab = 'queue'; player.scrollToCurrent()">
-          <i class="fa-solid fa-list-ul"></i> {{ t('queue') }}
-          <span class="bfp-tab-count" v-if="player.state.queue.length + displayedAutoQueue.length > 0">
-            {{ player.state.queue.length + displayedAutoQueue.length }}
-          </span>
-        </button>
-        <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'playlists' }" @click="player.state.expandedTab = 'playlists'">
-          <i class="fa-solid fa-list"></i> {{ t('playlists') || 'Playlists' }}
-          <span class="bfp-tab-count" v-if="player.playlistState.playlists.length > 0">{{ player.playlistState.playlists.length }}</span>
-        </button>
-        <div class="bfp-panel-header-spacer"></div>
+        <ScrollableTabs>
+          <button v-if="vw <= 900" class="bfp-tab" :class="{ active: player.state.expandedTab === 'video' }" @click="player.state.expandedTab = 'video'">
+            <i class="fa-solid fa-tv"></i> <span>{{ t('video') }}</span>
+          </button>
+          <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'queue' }"
+                  @click="player.state.expandedTab = 'queue'; player.scrollToCurrent()">
+            <i class="fa-solid fa-list-ul"></i> <span>{{ t('queue') }}</span>
+            <span class="bfp-tab-count" v-if="player.state.queue.length + displayedAutoQueue.length > 0">
+              {{ player.state.queue.length + displayedAutoQueue.length }}
+            </span>
+          </button>
+          <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'playlists' }" @click="player.state.expandedTab = 'playlists'">
+            <i class="fa-solid fa-list"></i> <span>{{ t('playlists') || 'Playlists' }}</span>
+            <span class="bfp-tab-count" v-if="player.playlistState.playlists.length > 0">{{ player.playlistState.playlists.length }}</span>
+          </button>
+          <button class="bfp-tab" :class="{ active: player.state.expandedTab === 'settings' }" @click="player.state.expandedTab = 'settings'">
+            <i class="fa-solid fa-gear"></i> <span>{{ t('settings') }}</span>
+          </button>
+        </ScrollableTabs>
         <button class="bfp-btn bfp-panel-close" @click="player.state.expanded = false" aria-label="Close panel">
           <i class="fa-solid fa-xmark"></i>
         </button>
+      </div>
+
+      <div class="bfp-panel-body" v-if="player.state.expandedTab === 'settings'">
+        <div class="bfp-settings-header">
+          <strong>{{ t('mediaPriorities') || 'Media Mirror Priorities' }}</strong>
+        </div>
+        <div class="bfp-settings-body">
+          <p class="gs" style="margin-bottom:15px; font-size:11px; opacity:0.8;">{{ t('dragToReorder') || 'Order sources by preference (top = highest priority):' }}</p>
+          <div class="bfp-priority-list">
+            <div v-for="(type, idx) in priorities" :key="type" class="bfp-priority-item">
+              <i v-if="type === 'youtube'" class="fa-brands fa-youtube" style="color:#ff0000; width:16px;"></i>
+              <i v-else-if="type === 'peertube'" class="fa-solid fa-video" style="color:#f1680d; width:16px;"></i>
+              <i v-else class="fa-solid fa-music" style="color:var(--bfp-accent); width:16px;"></i>
+              <span style="flex:1; font-weight:600;">{{ typeLabel[type] }}</span>
+              <div class="bfp-priority-actions">
+                <button :disabled="idx === 0" @click="movePriority(idx, -1)"><i class="fa-solid fa-chevron-up"></i></button>
+                <button :disabled="idx === priorities.length - 1" @click="movePriority(idx, 1)"><i class="fa-solid fa-chevron-down"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="bfp-panel-body queue-list" v-show="player.state.expandedTab === 'queue'">
@@ -419,20 +525,20 @@ onUnmounted(() => {
     <div class="pq-section-label pq-label--history" v-if="player.state.history.length > 0">
       <i class="fa-solid fa-clock-rotate-left"></i> {{ t('history') }}
     </div>
-    <div v-for="(track, idx) in player.state.history" :key="'h-'+track.id+idx"
+    <div v-for="(track, idx) in player.state.history" :key="'h-'+track.author + '-' + track.permlink+idx"
          class="pq-item pq-item--history" @click="player.playTrack(track, false, -1, true)" :title="'Replay: ' + track.title">
       <div class="pq-timeline-col">
         <div class="pq-dot pq-dot--history"><i class="fa-solid fa-check"></i></div>
         <div class="pq-line"></div>
       </div>
       <div class="pq-card">
-        <img v-if="track.cover" :src="track.cover" class="pq-thumb" alt="" />
+        <img v-if="getTrackCover(track)" :src="getTrackCover(track)" class="pq-thumb" alt="" @error="handleImgError(getTrackCover(track))" />
         <div v-else class="pq-thumb pq-thumb--placeholder"><i class="fa-solid fa-music"></i></div>
         <div class="pq-info">
           <div class="pq-title">{{ track.title }}</div>
           <div class="pq-meta">
             <span>@{{ track.author }}</span>
-            <span class="pq-type-badge" :class="`pq-type-badge--${track.type}`">{{ typeLabel[track.type] }}</span>
+            <span class="pq-type-badge" :class="`pq-type-badge--${getBestType(track)}`">{{ typeLabel[getBestType(track)] }}</span>
           </div>
         </div>
         <div class="pq-actions">
@@ -464,8 +570,9 @@ onUnmounted(() => {
           <div class="pq-title pq-title--now">{{ player.state.currentTrack.title }}</div>
           <div class="pq-meta">
             <span>@{{ player.state.currentTrack.author }}</span>
-            <span class="pq-type-badge" :class="`pq-type-badge--${player.state.currentTrack.type}`">{{ typeLabel[player.state.currentTrack.type] }}</span>
+            <span v-if="currentSource" class="pq-type-badge" :class="`pq-type-badge--${currentSource.type}`">{{ typeLabel[currentSource.type] }}</span>
           </div>
+
         </div>
         <div class="pq-equalizer" v-if="player.state.playing && !player.state.loading">
           <span></span><span></span><span></span><span></span>
@@ -481,7 +588,7 @@ onUnmounted(() => {
       <i class="fa-solid fa-hand-pointer"></i> {{ t('queueManual') || 'Up next' }}
       <button class="pq-section-clear" @click="player.state.queue = []" title="Clear queue">{{ t('clear') || 'Clear' }}</button>
     </div>
-    <div v-for="(track, idx) in player.state.queue" :key="'q-'+track.id+idx"
+    <div v-for="(track, idx) in player.state.queue" :key="'q-'+track.author + '-' + track.permlink+idx"
          class="pq-item pq-item--manual" :class="{ 'pq-item--next': idx === 0 }">
       <div class="pq-timeline-col">
         <div class="pq-dot pq-dot--manual"><span>{{ idx + 1 }}</span></div>
@@ -494,7 +601,7 @@ onUnmounted(() => {
           <div class="pq-title">{{ track.title }}</div>
           <div class="pq-meta">
             <span>@{{ track.author }}</span>
-            <span class="pq-type-badge" :class="`pq-type-badge--${track.type}`">{{ typeLabel[track.type] }}</span>
+            <span class="pq-type-badge" :class="`pq-type-badge--${getBestType(track)}`">{{ typeLabel[getBestType(track)] }}</span>
           </div>
         </div>
         <div class="pq-actions">
@@ -509,20 +616,20 @@ onUnmounted(() => {
     <div class="pq-section-label pq-label--auto" v-if="displayedAutoQueue.length > 0">
       <i class="fa-solid fa-shuffle"></i> {{ t('queueAutoplay') || 'Autoplay' }}
     </div>
-    <div v-for="(track, idx) in displayedAutoQueue" :key="'a-'+track.id+idx"
+    <div v-for="(track, idx) in displayedAutoQueue" :key="'a-'+track.author + '-' + track.permlink+idx"
          class="pq-item pq-item--auto" @click="player.playTrack(track)">
       <div class="pq-timeline-col">
         <div class="pq-dot pq-dot--auto"><span>{{ idx + 1 }}</span></div>
         <div class="pq-line" v-if="idx < displayedAutoQueue.length - 1"></div>
       </div>
       <div class="pq-card">
-        <img v-if="track.cover" :src="track.cover" class="pq-thumb" alt="" />
+        <img v-if="getTrackCover(track)" :src="getTrackCover(track)" class="pq-thumb" alt="" @error="handleImgError(getTrackCover(track))" />
         <div v-else class="pq-thumb pq-thumb--placeholder"><i class="fa-solid fa-music"></i></div>
         <div class="pq-info">
           <div class="pq-title">{{ track.title }}</div>
           <div class="pq-meta">
             <span>@{{ track.author }}</span>
-            <span class="pq-type-badge" :class="`pq-type-badge--${track.type}`">{{ typeLabel[track.type] }}</span>
+            <span class="pq-type-badge" :class="`pq-type-badge--${getBestType(track)}`">{{ typeLabel[getBestType(track)] }}</span>
           </div>
         </div>
         <div class="pq-actions">
@@ -580,7 +687,7 @@ onUnmounted(() => {
         </div>
 
         <div class="pl-track-list">
-          <div v-for="(track, idx) in getActivePlaylist()?.tracks || []" :key="'plt-'+track.id"
+          <div v-for="(track, idx) in getActivePlaylist()?.tracks || []" :key="'plt-'+track.author + '-' + track.permlink"
                class="pl-track-row" @click="player.playPlaylist(activePlaylistId!, idx)">
             <div class="pl-track-num">{{ idx + 1 }}</div>
             <div class="pl-track-play"><i class="fa-solid fa-play" style="font-size:10px"></i></div>
@@ -590,12 +697,12 @@ onUnmounted(() => {
               <div class="pl-track-title">{{ track.title }}</div>
               <div class="pl-track-meta">
                 @{{ track.author }} · {{ formatRelativeTime(track.addedAt) }} ·
-                <span class="pq-type-badge" :class="`pq-type-badge--${track.type}`">{{ typeLabel[track.type] }}</span>
+                <span class="pq-type-badge" :class="`pq-type-badge--${getBestType(track)}`">{{ typeLabel[getBestType(track)] }}</span>
               </div>
             </div>
             <div class="pl-track-actions">
               <a v-if="track.permlink" href="#" class="pq-action pq-action--link" @click.stop.prevent="emit('openTopic', { author: track.author!, permlink: track.permlink! })" title="Open post"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-              <button class="pl-action-btn delete" @click.stop="player.removeTrackFromPlaylist(activePlaylistId!, track.id)"><i class="fa-solid fa-xmark"></i></button>
+              <button class="pl-action-btn delete" @click.stop="player.removeTrackFromPlaylist(activePlaylistId!, track.author, track.permlink)"><i class="fa-solid fa-xmark"></i></button>
             </div>
           </div>
 
@@ -621,7 +728,7 @@ onUnmounted(() => {
     <div class="pl-dropdown-dot" :style="{ background: pl.color }"></div>
     <span>{{ pl.name }}</span>
     <i class="fa-solid fa-check" style="margin-left:auto; color:var(--primary);"
-       v-if="pl.tracks.some(t => t.id === dropdownTrack?.id)"></i>
+       v-if="pl.tracks.some(t => t.author === dropdownTrack?.author && t.permlink === dropdownTrack?.permlink)"></i>
   </div>
   <div class="pl-dropdown-sep"></div>
   <div class="pl-dropdown-item pl-dropdown-new" @click="createAndAddFromDropdown()">
@@ -807,6 +914,67 @@ onUnmounted(() => {
 
 .bfp-cover-spinner { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; color: #fff; }
 
+.bfp-mirror-toggle {
+  position: absolute; top: 2px; right: 2px;
+  width: 18px; height: 18px; border-radius: 4px;
+  background: var(--bfp-accent); color: #fff;
+  border: none; cursor: pointer; font-size: 10px;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10; opacity: 0.8; transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+.bfp-mirror-toggle:hover, .bfp-mirror-toggle.active { opacity: 1; transform: scale(1.1); }
+
+.bfp-mirror-overlay {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 220px;
+  background: var(--bfp-bg);
+  border: 1px solid var(--bfp-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -5px 15px rgba(0,0,0,0.3);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.bfp-mirror-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--bfp-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255,255,255,0.03);
+}
+
+.bfp-mirror-header strong { font-size: 12px; opacity: 0.8; }
+.bfp-mirror-header button { 
+  background: none; border: none; color: var(--bfp-muted); 
+  cursor: pointer; font-size: 14px; 
+}
+
+.bfp-mirror-body {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.bfp-mirror-row {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.bfp-mirror-row:hover { background: var(--bfp-hover); }
+.bfp-mirror-row.active { background: rgba(var(--bfp-accent-rgb, 26, 155, 120), 0.1); color: var(--bfp-accent); font-weight: 600; }
+.bfp-mirror-row i { width: 16px; text-align: center; }
+.ms-auto { margin-left: auto; }
+
 /* ── Track info ──────────────────────────────────────────────────────────── */
 .bfp-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
 .bfp-info-top { display: flex; align-items: center; gap: 10px; }
@@ -957,10 +1125,52 @@ onUnmounted(() => {
 .bfp-panel-header {
   display: flex; align-items: center;
   border-bottom: 1px solid var(--bfp-border);
-  flex-shrink: 0; padding: 0 8px;
+  flex-shrink: 0; padding: 0;
 }
-.bfp-panel-header-spacer { flex: 1; }
-.bfp-panel-close { font-size: 16px; }
+.bfp-settings-header {
+  padding: 12px 15px; border-bottom: 1px solid var(--bfp-border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.bfp-settings-body { padding: 15px; flex: 1; overflow-y: auto; }
+
+.bfp-priority-list { display: flex; flex-direction: column; gap: 8px; }
+.bfp-priority-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  background: var(--bfp-hover); border: 1px solid var(--bfp-border); border-radius: 6px;
+  font-size: 13px;
+}
+.bfp-priority-actions { display: flex; gap: 4px; }
+.bfp-priority-actions button {
+  background: rgba(255,255,255,0.05); border: 1px solid var(--bfp-border);
+  color: var(--bfp-text); border-radius: 4px; padding: 4px 8px; cursor: pointer;
+  transition: all 0.2s;
+}
+.bfp-priority-actions button:hover:not(:disabled) { background: var(--bfp-accent); border-color: var(--bfp-accent); color: #fff; }
+.bfp-priority-actions button:disabled { opacity: 0.2; cursor: default; }
+
+/* ── Optimized Spinners ──────────────────────────────────────────────────── */
+.fa-spin {
+  animation: fa-spin 1s infinite linear;
+}
+@keyframes fa-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.bfp-cover-spinner { 
+  position: absolute; inset: 0; 
+  background: rgba(0,0,0,0.5); 
+  display: flex; align-items: center; justify-content: center; 
+  color: #fff; 
+  z-index: 5;
+}
+.bfp-cover-spinner .fa-spinner {
+  font-size: 24px;
+}
+
+.bfp-btn--play .fa-spinner {
+  font-size: 16px;
+}
 .bfp-tab {
   background: none; border: none; cursor: pointer;
   color: var(--bfp-muted);
@@ -1338,10 +1548,15 @@ onUnmounted(() => {
   /* When other tabs are active, video is already hidden via .bfp-media-hidden */
   
   .bfp-panel-header { z-index: 10; position: relative; background: var(--bfp-bg); }
-  
-  .bfp-post-stats .payout-link, 
+
+  .bfp-post-stats .payout-link,
   .bfp-post-stats .vote-btn { display: none !important; }
   .bfp-info-spacer { display: none; }
+}
+
+@media (max-width: 480px) {
+  .bfp-tab { min-width: 40px; }
+  .bfp-tab i { margin-right: 0 !important; font-size: 14px; }
 }
 
 @media (max-width: 600px) {
@@ -1351,15 +1566,20 @@ onUnmounted(() => {
   .bfp-track-title { font-size: 12px; }
   .bfp-track-meta { font-size: 9px; gap: 4px; }
   .bfp-time { font-size: 9px; white-space: nowrap; }
-  
+
   .bfp-controls { gap: 2px; }
   .bfp-btn { padding: 4px 6px; font-size: 14px; }
   .bfp-btn--play { width: 32px; height: 32px; font-size: 12px; }
   .bfp-expand-btn { padding: 4px 6px; font-size: 14px; }
-  
-  .bfp-cover { width: 44px; height: 44px; }
-}
 
+  .bfp-cover { width: 44px; height: 44px; }
+
+  /* Panel Header Mobile Fixes */
+  .bfp-tab { padding: 0 6px !important; font-size: 10px !important; }
+  .bfp-tab i { font-size: 12px; margin-right: 2px !important; }
+  .bfp-tab-count { padding: 1px 3px; font-size: 8px; }
+  .bfp-panel-close { padding: 4px 8px !important; }
+}
 /* ── Minimized Pill Fix ─────────────────────────────────────────────────── */
 .bfp-bar--minimized .bfp-bar-inner { padding: 0 10px 0 0 !important; }
 .bfp-bar--minimized .bfp-btn--play { padding: 0 10px 0 0 !important; }

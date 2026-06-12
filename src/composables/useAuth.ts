@@ -1,9 +1,8 @@
 import { ref, reactive } from 'vue';
+import * as dblurt from '@beblurt/dblurt';
 import type { AuthUser } from '../types';
 import { AuthService } from '../modules/auth';
 import { whalevault } from '../modules/whalevault';
-
-declare const dblurt: any;
 
 /**
  * Composable for managing authentication, multi-account support, and PIN encryption.

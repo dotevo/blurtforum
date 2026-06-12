@@ -27,13 +27,13 @@ export interface RawPost {
   url: string;
   children?: number;
   reply_count?: number;
-  pending_payout_value?: string | number;
-  total_payout_value?: string | number;
-  payout?: number | string;
+  pending_payout_value?: any;
+  total_payout_value?: any;
+  payout?: any;
   cashout_time?: string;
   active_votes?: ActiveVote[];
   net_votes?: number;
-  net_rshares?: number;
+  net_rshares?: any;
   beneficiaries?: Beneficiary[];
   json_metadata?: string | Record<string, unknown>;
   parent_author?: string;
@@ -45,7 +45,7 @@ export interface RawPost {
 export interface ActiveVote {
   voter: string;
   percent: number;
-  rshares?: number;
+  rshares?: any;
 }
 
 export interface Beneficiary {
@@ -59,6 +59,7 @@ export interface Post {
   author: string;
   permlink: string;
   media: MediaTrack | null;
+  mirrors?: MediaTrack[];
   title: string;
   body: string;
   created: string;
@@ -175,15 +176,21 @@ export interface ActivityItem {
   lastActivityTs: number;
 }
 
-export interface MediaTrack {
+export interface MediaEntryMirror {
   type: 'audio' | 'youtube' | 'peertube';
   id: string;
   src?: string;
-  cover?: string;
   host?: string;
-  title?: string;
-  author?: string;
-  permlink?: string;
+  thumb?: string;
+}
+
+export interface MediaTrack {
+  author: string;
+  permlink: string;
+  title: string;
+  sources: MediaEntryMirror[];
+  activeSourceIndex: number;
+  cover?: string;
   payout?: number;
   voteCount?: number;
   voted?: boolean;
@@ -201,7 +208,7 @@ export interface PlayerState {
   minimized: boolean;
   expanded: boolean;
   expandedHeight: number;
-  expandedTab: 'video' | 'queue' | 'playlists';
+  expandedTab: 'video' | 'queue' | 'playlists' | 'settings';
   currentTrack: MediaTrack | null;
   queue: MediaTrack[];
   autoQueue: MediaTrack[];
@@ -247,8 +254,9 @@ export interface BFPlayerAPI {
   seek: (pct: number) => void;
   addToQueue: (track: MediaTrack) => void;
   scanView: (container?: Element | null) => void;
-  registerTrack: (track: MediaTrack) => void;
-  unregisterTrack: (trackId: string, type: string) => void;
+  registerTrack: (incoming: any) => void;
+  unregisterTrack: (trackId: string, type: string, author?: string, permlink?: string) => void;
+  setClient: (client: any) => void;
   clearTracks: () => void;
   setAutoQueue: (tracks: MediaTrack[]) => void;
   initResize: (e: MouseEvent | TouchEvent) => void;
@@ -262,7 +270,7 @@ export interface BFPlayerAPI {
   deletePlaylist: (id: string) => void;
   renamePlaylist: (id: string, newName: string) => void;
   addTrackToPlaylist: (playlistId: string, track: MediaTrack) => boolean;
-  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
+  removeTrackFromPlaylist: (playlistId: string, author: string, permlink: string) => void;
   playPlaylist: (playlistId: string, startIndex?: number) => void;
 }
 
@@ -293,8 +301,9 @@ export interface FollowCount {
 
 export interface GlobalProps {
   head_block_number?: number;
-  total_vesting_fund_blurt?: string;
-  total_vesting_shares?: string;
+  total_vesting_fund_blurt?: any;
+  total_vesting_shares?: any;
+  [key: string]: any;
 }
 
 export interface RewardFund {

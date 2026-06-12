@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUpdated } from 'vue';
+import { ref, reactive, onMounted, onUpdated, defineAsyncComponent } from 'vue';
 import { BFPlayer, dispatchScanView } from '../../modules/player';
 import { Blockchain } from '../../modules/blockchain';
 import { BFUtils } from '../../modules/utils';
-import OldContentModal from '../modals/OldContentModal.vue';
+const OldContentModal = defineAsyncComponent(() => import('../modals/OldContentModal.vue'));
 import VoteButton from '../layout/VoteButton.vue';
 import PostBeneficiaries from '../layout/PostBeneficiaries.vue';
 import ForumMedia from '../player/ForumMedia.ce.vue';

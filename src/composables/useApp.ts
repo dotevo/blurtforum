@@ -29,33 +29,7 @@ import type {
   UserSubscription, Notification, MediaTrack, Delegation,
 } from '../types';
 
-// dblurt is loaded from unpkg CDN via index.html
-declare const dblurt: {
-  Client: new (nodes: string[]) => {
-    condenser: {
-      getDynamicGlobalProperties: () => Promise<GlobalProps>;
-      getAccounts: (names: string[]) => Promise<Array<Record<string, unknown>>>;
-      getContent: (author: string, permlink: string) => Promise<RawPost>;
-      getContentReplies: (author: string, permlink: string) => Promise<RawPost[]>;
-      getDiscussions: (type: string, params: Record<string, unknown>) => Promise<RawPost[]>;
-      call: (namespace: string, method: string, params: unknown[]) => Promise<unknown>;
-    };
-    call: (namespace: string, method: string, params: any) => Promise<unknown>;
-    broadcast: {
-      sendOperations: (ops: unknown[], key: ReturnType<typeof dblurt.PrivateKey.from>) => Promise<void>;
-    };
-    nexus: {
-      getCommunity: (account: string) => Promise<Record<string, unknown>>;
-    };
-  };
-  PrivateKey: {
-    from: (key: string) => {
-      createPublic: () => { toString: () => string };
-      sign: (bytes: Uint8Array) => { toString: () => string } | Uint8Array;
-    };
-  };
-  Signature: { fromString: (s: string) => { toString: () => string } };
-};
+import * as dblurt from '@beblurt/dblurt';
 
 export function useApp() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -233,8 +207,7 @@ export function useApp() {
       ctx = {
         ...context,
         voteCount: context.vote_count,
-        voted: hasVoted(context),
-        cover: context.media?.cover
+        voted: hasVoted(context)
       };
     }
     return Parser.render(text, ctx);
@@ -298,7 +271,7 @@ export function useApp() {
     try {
       if (direction === 'current' && !targetForum) {
         const props = await client.condenser.getDynamicGlobalProperties();
-        globalProps.value = props;
+        globalProps.value = props as any;
         moderators.value = [];
         communityInfo.value = {};
         forumPagination.lastAuthor = '';
@@ -311,7 +284,7 @@ export function useApp() {
       if (direction === 'current' && !targetForum) {
         try {
           if (config.communityAccount.startsWith('blurt-')) {
-            const cc = await forumClient.nexus.getCommunity(config.communityAccount) as Record<string, unknown>;
+            const cc = await forumClient.nexus.getCommunity(config.communityAccount) as any;
             if (cc) {
               communityInfo.value = { title: (cc.title as string) || config.communityAccount, about: (cc.about as string) || '' };
               rawDescription.value = (cc.description as string) || '';
@@ -327,7 +300,7 @@ export function useApp() {
               forumStructure.value = parsed ?? BFUtils.defaultStructure();
               if (!parsed) structureNote.value = true;
               if (cc.team) {
-                moderators.value = (cc.team as Array<[string, string, string]>).map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
+                moderators.value = (cc.team as any[]).map(m => ({ account: m[0], role: m[1], title: m[2] || '' }));
               }
             }
           } else {
@@ -340,7 +313,7 @@ export function useApp() {
           structureNote.value = true;
         }
 
-          const accounts = await client.condenser.getAccounts([config.communityAccount]) as Record<string, unknown>[];
+          const accounts = await client.condenser.getAccounts([config.communityAccount]) as any[];
           const acc = accounts?.[0];
           if (acc) {
             const rb = acc.reward_blurt_balance as string;
@@ -506,9 +479,9 @@ export function useApp() {
     }
     const flat: Post[] = [];
     const recurse = async (pAuthor: string, pPermlink: string, depth: number): Promise<void> => {
-      let results: RawPost[];
+      let results: any[];
       try {
-        results = await client.condenser.getContentReplies(pAuthor, pPermlink);
+        results = await client.condenser.getContentReplies(pAuthor, pPermlink) as any[];
       } catch (e) {
         console.error(`Error loading replies for ${pAuthor}/${pPermlink}:`, e);
         return;
@@ -576,8 +549,10 @@ export function useApp() {
   const clearTagFilter = async () => { currentTagFilter.value = ''; syncUrl(); await loadData('current', activeForum.value); };
 
   const goHome = (): void => {
+    BFPlayer.clearTracks();
     view.value = 'index';
     activeForum.value = null;
+
     activeTopic.value = null;
     replies.value = [];
     showNewPostForm.value = false;
@@ -585,6 +560,7 @@ export function useApp() {
     syncUrl();
     loadData('current');
   };
+      BFPlayer.clearTracks();
 
   const openForum = (forum: Forum): void => {
     // Aggressively reset all pagination markers for this forum
@@ -619,7 +595,7 @@ export function useApp() {
     if (!topic.payout && !topic.body) {
       loading.value = true;
       try {
-        const full = await client.condenser.getContent(topic.author, topic.permlink);
+        const full = await client.condenser.getContent(topic.author, topic.permlink) as any;
         if (full?.author) topic = normalizePost(full);
       } catch (e) { console.error('Error fetching full topic:', e); }
       loading.value = false;
@@ -631,7 +607,7 @@ export function useApp() {
     markTopicAsRead(activeTopic.value);
     loadReplies(topic.author, topic.permlink);
     if (!topic.beneficiaries?.length) {
-      client.condenser.getContent(topic.author, topic.permlink).then(full => {
+      client.condenser.getContent(topic.author, topic.permlink).then((full: any) => {
         if (full?.beneficiaries?.length && activeTopic.value?.permlink === topic.permlink) {
           activeTopic.value = { ...activeTopic.value, beneficiaries: full.beneficiaries as Beneficiary[] };
         }
@@ -675,16 +651,42 @@ export function useApp() {
     } catch (err) { showStatus('Community', 'Error: ' + ((err as Error).message || err), 'error'); }
   };
 
-  const broadcast = (ops: unknown[], targetUser?: AuthUser) => {
+  const walletAuthModal = reactive({
+    show: false,
+    username: '',
+    authority: 'Posting' as 'Posting' | 'Active',
+    callback: null as ((key: string) => void) | null
+  });
+
+  const broadcast = async (ops: unknown[], targetUser?: AuthUser, authority: 'Posting' | 'Active' = 'Posting'): Promise<void> => {
     const user = targetUser || auth.user;
     if (!user) throw new Error('Not logged in');
-    return Blockchain.broadcast(client, user, ops);
+    
+    if (user.type === 'key' && authority === 'Active') {
+       return new Promise((resolve, reject) => {
+         walletAuthModal.username = user.username;
+         walletAuthModal.authority = 'Active';
+         walletAuthModal.show = true;
+         walletAuthModal.callback = async (tempKey: string) => {
+           walletAuthModal.show = false;
+           try {
+             const tempUser = { ...user, key: tempKey };
+             await Blockchain.broadcast(client, tempUser, ops, authority);
+             resolve();
+           } catch (e) {
+             reject(e);
+           }
+         };
+       });
+    }
+    
+    return Blockchain.broadcast(client, user, ops, authority);
   };
 
   const loadFollowingList = async (username: string): Promise<void> => {
     if (!username) return;
     try {
-      const following = await client.call('condenser_api', 'get_following', { account: username, start: '', type: 'blog', limit: 1000 }) as Array<{ following: string }>;
+      const following = await client.call('condenser_api', 'get_following', [username, '', 'blog', 1000]) as Array<{ following: string }>;
       if (Array.isArray(following)) followingSet.value = new Set(following.map(f => f.following));
     } catch (e) { console.warn('Error loading following list:', e); }
   };
@@ -727,8 +729,8 @@ export function useApp() {
     let sigHex: string;
     if (auth.user.type === 'key') {
       const privKey = dblurt.PrivateKey.from(auth.user.key!);
-      const sig = privKey.sign(hashBytes);
-      sigHex = typeof (sig as { toString: () => string }).toString === 'function' ? (sig as { toString: () => string }).toString() : Array.from(sig as Uint8Array).map(b => b.toString(16).padStart(2, '0')).join('');
+      const sig = privKey.sign(hashBytes as any);
+      sigHex = sig.toString();
     } else {
       sigHex = await new Promise((resolve, reject) => {
         if (!window.blurt_keychain) { reject(new Error('WhaleVault not available')); return; }
@@ -801,7 +803,7 @@ export function useApp() {
     try {
       const accounts = await client.condenser.getAccounts([auth.user.username]);
       if (accounts?.[0]) {
-        const acc = accounts[0] as Record<string, unknown>;
+        const acc = accounts[0] as any;
         const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
         const delta = (Date.now() - lastVoteTime) / 1000;
         let vp = (acc.voting_power as number) + (10000 * delta / 432000);
@@ -1081,7 +1083,7 @@ export function useApp() {
   const loadUserCommunities = async (username: string): Promise<void> => {
     try {
       let subs = await client.call('bridge', 'list_all_subscriptions', { account: username }) as Array<[string, string]>;
-      if (!subs?.length) subs = await client.condenser.call('bridge', 'list_all_subscriptions', [username]) as Array<[string, string]>;
+      if (!subs?.length) subs = await client.call('condenser_api', 'list_all_subscriptions', [username]) as Array<[string, string]>;
       if (Array.isArray(subs)) userSubscriptions.value = subs.map(s => ({ account: s[0], title: s[1] || s[0] }));
     } catch (err) { console.error('Error loading communities:', err); }
   };
@@ -1100,10 +1102,11 @@ export function useApp() {
 
     if (checkLock(() => claimRewards(targetAccount))) return;
     try {
-      const accounts = await client.condenser.getAccounts([username]);
-      const acc = accounts?.[0] as Record<string, unknown>;
+      const accounts = await client.condenser.getAccounts([username]) as any[];
+      const acc = accounts?.[0] as any;
       if (!acc) return;
-      if (BFUtils.parsePayout(acc.reward_blurt_balance as string) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance as string) === 0) { 
+      if (BFUtils.parsePayout(acc.reward_blurt_balance as string) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance as string) === 0) {
+ 
         if (!targetAccount) showStatus(t('claimRewards'), t('noRewardsToClaim'), 'info'); 
         return; 
       }
@@ -1347,6 +1350,7 @@ export function useApp() {
 
   onMounted(() => {
     loadLanguage(lang.value);
+    BFPlayer.setClient(client);
     BFPlayer.registerPlugin(BlurtPlayerPlugin(client, auth));
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
@@ -1371,9 +1375,9 @@ export function useApp() {
         sessions.forEach(session => {
           if (session.type === 'whalevault') {
             auth.accounts.push({ username: session.username, type: 'whalevault', key: null, vp: '…', hasRewards: false });
-            client.condenser.getAccounts([session.username]).then(accounts => {
+            client.condenser.getAccounts([session.username]).then((accounts: any[]) => {
               if (accounts?.[0]) {
-                const acc = accounts[0] as Record<string, unknown>;
+                const acc = accounts[0] as any;
                 const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
                 const delta = (Date.now() - lastVoteTime) / 1000;
                 let vp = (acc.voting_power as number) + (10000 * delta / 432000);
@@ -1418,9 +1422,9 @@ export function useApp() {
           if (session.type === 'whalevault') {
             auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
             auth.accounts.push(auth.user);
-            client.condenser.getAccounts([session.username]).then(accounts => {
+            client.condenser.getAccounts([session.username]).then((accounts: any[]) => {
               if (accounts?.[0]) {
-                const acc = accounts[0] as Record<string, unknown>;
+                const acc = accounts[0] as any;
                 const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
                 const delta = (Date.now() - lastVoteTime) / 1000;
                 let vp = (acc.voting_power as number) + (10000 * delta / 432000);
@@ -1501,6 +1505,7 @@ export function useApp() {
     changePage,
     submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
     walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
+    walletAuthModal,
     followModal, confirmToggleFollow,
     openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
     canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
