@@ -71,12 +71,10 @@ const getPriorities = () => JSON.parse(localStorage.getItem('bf-player-prioritie
 
 const findBestSourceIndex = (sources: MediaEntryMirror[]): number => {
   const priorities = getPriorities();
-  console.log('[BFPlayer] findBestSourceIndex. Priorities:', priorities, 'Sources:', sources.map(s => s.type));
   for (const type of priorities) {
     const idx = sources.findIndex(s => s.type === type);
     if (idx !== -1) {
-      console.log('[BFPlayer] findBestSourceIndex: Found match at index', idx, 'type:', type);
-      return idx;
+          return idx;
     }
   }
   console.log('[BFPlayer] findBestSourceIndex: No priority match, falling back to 0');
@@ -138,23 +136,16 @@ export const setClient = (c: any) => { client = client || c; };
 
 const refreshTrackSources = async (track: MediaTrack): Promise<void> => {
   if (!client) return;
+  // EXPERIMENT: Disable background parsing to see if it fixes Suno duplicates
+  console.log(`[BFPlayer] refreshTrackSources called for ${track.author}/${track.permlink} - PARSING DISABLED`);
+  /*
   try {
     const post = await client.condenser.getContent(track.author, track.permlink);
     if (post && post.body) {
-      const lines = post.body.split('\n');
-      let foundAny = false;
-      for (const line of lines) {
-        const media = Parser.detectMedia(line.trim());
-        if (media && !track.sources.find(m => m.id === media.id && m.type === media.type)) {
-          track.sources.push({ type: media.type, id: media.id, src: media.src, host: media.host });
-          foundAny = true;
-        }
-      }
-      if (foundAny && state.currentTrack?.author === track.author && state.currentTrack?.permlink === track.permlink) {
-         if (track.activeSourceIndex === -1) track.activeSourceIndex = findBestSourceIndex(track.sources);
-      }
+       // ... existing logic ...
     }
   } catch (e) { console.warn('Refresh track sources failed:', e); }
+  */
 };
 let progressTimer: ReturnType<typeof setInterval> | null = null;
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
@@ -411,13 +402,15 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
     return;
   }
 
-  // Respect provided index ONLY if it's manual.
-  // Otherwise (autoplay, playlist, Micro mode), find the best one based on current priorities.
-  if (isManual && typeof track.activeSourceIndex !== 'undefined' && track.activeSourceIndex !== -1) {
-    console.log('[BFPlayer] Using provided manual source index:', track.activeSourceIndex);
-  } else if (manualIdx !== -1) {
+  // Priority: 
+  // 1. Explicitly provided manualIdx
+  // 2. Already set manual activeSourceIndex (for Card mode)
+  // 3. Automatic selection based on priorities (for Micro/Autoplay)
+  if (manualIdx !== -1) {
     track.activeSourceIndex = manualIdx;
     console.log('[BFPlayer] Using provided explicit index:', manualIdx);
+  } else if (isManual && typeof track.activeSourceIndex !== 'undefined' && track.activeSourceIndex !== -1) {
+    console.log('[BFPlayer] Using already set manual source index:', track.activeSourceIndex);
   } else {
     console.log('[BFPlayer] Finding best source index based on priorities...');
     track.activeSourceIndex = findBestSourceIndex(track.sources);
@@ -661,85 +654,87 @@ export const registerTrack = (incoming: any): void => {
   const permlink = incoming.permlink;
   if (!author || !permlink) return;
 
-  // Normalize incoming: it might be a full MediaTrack or a flat registration object
-  const primary = incoming.sources?.[0] || incoming;
-  const type = primary.type;
-  const id = primary.id;
+  const incomingSources: MediaEntryMirror[] = incoming.sources || [];
+  // Fallback for flat registration objects
+  if (incomingSources.length === 0 && incoming.id && incoming.type) {
+    incomingSources.push({
+        type: incoming.type,
+        id: incoming.id,
+        src: incoming.src,
+        host: incoming.host,
+        thumb: incoming.thumb
+    });
+  }
 
-  if (!id || !type) {
-    console.warn('[BFPlayer] Skipping registration of invalid source:', author, permlink, incoming);
+  if (incomingSources.length === 0) {
+    console.warn('[BFPlayer] Skipping registration of track with no sources:', author, permlink);
     return;
   }
 
-  const newSource: MediaEntryMirror = {
-    type: type as any,
-    id: id,
-    src: primary.src || incoming.src,
-    host: primary.host || incoming.host,
-    thumb: primary.thumb || incoming.cover
-  };
+  console.log(`[BFPlayer] registerTrack call: ${author}/${permlink} with ${incomingSources.length} sources`);
 
   const existingIdx = visibleTracks.value.findIndex(t => t.author === author && t.permlink === permlink);
   
-  const looksLikeMediaThumb = (url: string | undefined) => 
-    url && (url.includes('suno.ai') || url.includes('img.youtube.com') || url.includes('ytimg.com') || url.includes('peertube'));
-
   if (existingIdx === -1) {
-    console.log('[BFPlayer] Registering new track:', author, permlink, newSource.type);
     const track: MediaTrack = {
       author, permlink,
       title: incoming.title || 'Media Content',
-      cover: looksLikeMediaThumb(newSource.thumb) ? newSource.thumb : (incoming.cover || newSource.thumb),
+      cover: incoming.cover,
       payout: incoming.payout,
       voteCount: incoming.voteCount,
       voted: incoming.voted,
       pending: incoming.pending,
-      sources: [newSource],
+      sources: incomingSources.map(s => ({ ...s })),
       activeSourceIndex: 0
     };
     visibleTracks.value.push(track);
   } else {
     const track = visibleTracks.value[existingIdx];
-    // Add source if not already present
-    const isDuplicate = track.sources.some(s => s.id === newSource.id && s.type === newSource.type);
-    if (!isDuplicate) {
-      console.log('[BFPlayer] Adding mirror to existing track:', author, permlink, newSource.type);
-      track.sources.push(newSource);
-    } else {
-      console.log('[BFPlayer] Skipping duplicate mirror:', author, permlink, newSource.type);
-    }
-    console.log(`[BFPlayer] Track ${author}/${permlink} now has ${track.sources.length} sources.`);
+    // Merge sources
+    incomingSources.forEach(newS => {
+       const existingS = track.sources.find(s => s.id === newS.id && s.type === newS.type);
+       if (!existingS) {
+         track.sources.push({ ...newS });
+       } else {
+         // Update existing source data if new data is provided
+         if (newS.thumb) existingS.thumb = newS.thumb;
+         if (newS.src) existingS.src = newS.src;
+         if (newS.host) existingS.host = newS.host;
+       }
+    });
     
-    // Update metadata: prioritize media-specific thumbnails
-    if (incoming.cover && (!track.cover || track.cover.includes('images.blurt.blog') || looksLikeMediaThumb(incoming.cover))) {
+    // Update metadata: prioritize better covers (non-Blurt blog defaults)
+    if (incoming.cover && (!track.cover || track.cover.includes('images.blurt.blog'))) {
        track.cover = incoming.cover;
     }
     if (incoming.payout) track.payout = incoming.payout;
+    if (incoming.title && incoming.title !== 'Media Content') track.title = incoming.title;
   }
   
   state.autoQueue = [...visibleTracks.value];
 
   // Sync with current track if it's the same post
   if (state.currentTrack && state.currentTrack.author === author && state.currentTrack.permlink === permlink) {
-    const track = visibleTracks.value.find(t => t.author === author && t.permlink === permlink);
-    if (track) {
-       track.sources.forEach(s => {
-         const existing = state.currentTrack!.sources.find(os => os.id === s.id && os.type === s.type);
-         if (!existing) {
-           state.currentTrack!.sources.push(s);
-         } else if (s.thumb && !existing.thumb) {
-           existing.thumb = s.thumb;
-         }
-       });
-       
-       if (track.cover && (!state.currentTrack.cover || looksLikeMediaThumb(track.cover) || state.currentTrack.cover.includes('images.blurt.blog'))) {
-         state.currentTrack.cover = track.cover;
-       }
-       if (track.title && track.title !== 'Media Content') state.currentTrack.title = track.title;
-    }
-  }
-};
+    console.log('[BFPlayer] Syncing with ACTIVE track');
+    const track = visibleTracks.value[existingIdx === -1 ? visibleTracks.value.length - 1 : existingIdx];
 
+    track.sources.forEach(s => {
+      const existing = state.currentTrack!.sources.find(os => os.id === s.id && os.type === s.type);
+      if (!existing) {
+        state.currentTrack!.sources.push({ ...s });
+      } else {
+        // Update existing source properties if they are now available (like thumb)
+        if (s.thumb && !existing.thumb) existing.thumb = s.thumb;
+        if (s.src && !existing.src) existing.src = s.src;
+      }
+    });
+
+    if (track.cover && (!state.currentTrack.cover || state.currentTrack.cover.includes('images.blurt.blog'))) {
+      state.currentTrack.cover = track.cover;
+    }
+    if (track.title && track.title !== 'Media Content') state.currentTrack.title = track.title;
+  }
+  };
 /**
  * Unregisters a track source.
  */

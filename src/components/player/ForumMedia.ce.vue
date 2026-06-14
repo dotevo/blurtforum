@@ -5,6 +5,8 @@ import { Parser } from '../../modules/parser';
 import type { MediaTrack, MediaEntryMirror } from '../../types';
 
 export const handleMediaAction = async (type: string, id: string, host: string, action: string, trackData: Partial<MediaTrack> = {}): Promise<void> => {
+  const trackCover = trackData.cover || (type === 'youtube' ? `https://img.youtube.com/vi/${id}/0.jpg` : '');
+
   const media: MediaTrack = { 
     author: trackData.author || 'post',
     permlink: trackData.permlink || '',
@@ -13,9 +15,10 @@ export const handleMediaAction = async (type: string, id: string, host: string, 
       type: type as any, 
       id, 
       host,
-      thumb: trackData.cover 
+      thumb: trackCover 
     }],
     activeSourceIndex: 0,
+    cover: trackCover,
     ...trackData 
   };
   if (action === 'play') {
@@ -55,7 +58,7 @@ const props = withDefaults(defineProps<{
   author?: string;
   permlink?: string;
   t?: (k: string) => string;
-  mode?: 'card' | 'micro';
+  mode?: 'card' | 'micro' | 'unvisible';
   hideButtons?: boolean;
   // Fallback data attributes from parser (for non-Vue content bridge)
   dataType?: string;
@@ -122,9 +125,8 @@ const trackData = computed<MediaTrack>(() => {
 
   // Auto-generate YouTube thumbnail
   if (type === 'youtube') {
-    const ytThumb = `https://img.youtube.com/vi/${id}/0.jpg`;
-    mediaThumb = ytThumb;
-    if (!cover) cover = ytThumb;
+    mediaThumb = base.thumb || `https://img.youtube.com/vi/${id}/0.jpg`;
+    if (!cover) cover = mediaThumb;
   }
 
   const author = props.dataAuthor || props.author || base.author || 'post';
@@ -145,13 +147,13 @@ const trackData = computed<MediaTrack>(() => {
   if (mirrors.length === 0) {
      // If we were passed a single media object, use it as primary
      mirrors.push({ type, id, src, host: base.host || props.dataHost, thumb: mediaThumb });
+  } else {
+    // Ensure the primary source in mirrors has the generated thumb if missing
+    mirrors.forEach(m => {
+      if (m.id === id && m.type === type && !m.thumb) m.thumb = mediaThumb;
+    });
   }
 
-  // If we have access to the full body (rare in Micro, but possible in TopicView), extract all
-  // For Micro mode in lists, we rely on multiple ForumMedia instances registering themselves,
-  // OR we can try to extract from props if they are duplicated (unlikely).
-  // BEST: Let ForumMedia instances merge themselves in registerTrack (already implemented).
-  
   const dataPending = base.pending || props.dataPending === 'true' || props.dataPending === true;
   const actuallyPending = dataPending && !src && !isSunoUuid(type, id) && type !== 'youtube';
 
@@ -193,17 +195,19 @@ const resolveIfNeeded = async () => {
       const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
       if (uuidMatch) {
         const uuid = uuidMatch[1];
+        const sunoCover = `https://cdn2.suno.ai/image_large_${uuid}.jpeg`;
         resolvedTrack.value = { 
           ...trackData.value, 
           sources: [{
             type: 'audio',
             id: uuid,
-            src: `https://cdn1.suno.ai/${uuid}.mp3`
+            src: `https://cdn1.suno.ai/${uuid}.mp3`,
+            thumb: sunoCover
           }],
-          cover: `https://cdn2.suno.ai/image_large_${uuid}.jpeg`,
+          cover: sunoCover,
           pending: false 
         };
-        sunoCache[currentId] = { id: uuid, src: resolvedTrack.value.sources[0].src!, cover: resolvedTrack.value.cover! };
+        sunoCache[currentId] = { id: uuid, src: resolvedTrack.value.sources[0].src!, cover: sunoCover };
         lastResolvedId.value = currentId;
       }
     } else if (isPeertubeNeeded) {
@@ -215,7 +219,15 @@ const resolveIfNeeded = async () => {
         const data = await response.json();
         const cover = data.thumbnailPath ? `https://${host}${data.thumbnailPath}` : (data.previewPath ? `https://${host}${data.previewPath}` : null);
         if (cover) {
-          resolvedTrack.value = { ...trackData.value, cover, pending: false };
+          resolvedTrack.value = { 
+            ...trackData.value, 
+            cover, 
+            sources: trackData.value.sources.map(s => {
+              if (s.id === currentId && s.type === currentType) return { ...s, thumb: cover };
+              return s;
+            }),
+            pending: false 
+          };
         }
       }
     }
@@ -231,30 +243,35 @@ let registeredType: string | null = null;
 
 const syncTrack = () => {
   const primary = trackData.value.sources[0];
-  const shouldRegister = primary?.id && (!trackData.value.pending || trackData.value.cover);
+  // CRITICAL: Only register if we have a stable, non-pending ID
+  const shouldRegister = primary?.id && !trackData.value.pending;
   
   if (shouldRegister) {
     if (registeredId && (registeredId !== primary.id || registeredType !== primary.type)) {
-      unregisterTrack(registeredId, registeredType!, trackData.value.author, trackData.value.permlink);
+      unregisterTrack(registeredId, registeredType!, props.author, props.permlink);
     }
     registerTrack(trackData.value);
     registeredId = primary.id;
     registeredType = primary.type;
   } else if (registeredId) {
-    unregisterTrack(registeredId, registeredType!, trackData.value.author, trackData.value.permlink);
+    // If it became pending or lost ID, unregister
+    unregisterTrack(registeredId, registeredType!, props.author, props.permlink);
     registeredId = null;
     registeredType = null;
   }
 };
 
 onMounted(() => {
-  syncTrack();
-  resolveIfNeeded();
+  console.log(`[ForumMedia] Mounted: ${props.author}/${props.permlink} (Initial ID: ${trackData.value.sources[0]?.id}, Pending: ${trackData.value.pending})`);
+  resolveIfNeeded().then(() => {
+    console.log(`[ForumMedia] Resolution finished for ${props.author}/${props.permlink}. Final ID: ${trackData.value.sources[0]?.id}`);
+    syncTrack();
+  });
 });
 
-watch(() => [trackData.value.sources[0]?.id, trackData.value.pending, trackData.value.cover], () => {
+watch(() => [trackData.value.pending, trackData.value.sources[0]?.id], (newVal, oldVal) => {
+  console.log(`[ForumMedia] Watch triggered: ${props.author}/${props.permlink}. Old: ${oldVal}, New: ${newVal}`);
   syncTrack();
-  resolveIfNeeded();
 });
 
 onUnmounted(() => {
@@ -308,7 +325,9 @@ const displayHost = computed(() => {
 </script>
 
 <template>
+  <template v-if="mode === 'unvisible'"></template>
   <div 
+    v-else
     class="forum-media-container" 
     :class="[`mode-${mode}`, { 'is-active': isActive, 'is-playing': isPlaying }]"
   >

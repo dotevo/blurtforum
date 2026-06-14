@@ -98,8 +98,20 @@ function handleImgError(url: string) {
 
 function getTrackCover(track: MediaTrack | null): string {
   if (!track) return '';
-  const source = track.sources[track.activeSourceIndex || 0];
-  const url = source?.thumb || track.cover || '';
+  const idx = typeof track.activeSourceIndex !== 'undefined' && track.activeSourceIndex !== -1 ? track.activeSourceIndex : 0;
+  const source = track.sources[idx];
+  
+  // 1. Prioritize active source thumb (from ForumMedia registration)
+  let url = source?.thumb || '';
+  
+  // 2. Auto-generate YT thumb if missing from the specific source object
+  if (!url && source?.type === 'youtube' && source.id) {
+    url = `https://img.youtube.com/vi/${source.id}/0.jpg`;
+  }
+
+  // 3. Fallback to general track cover (might be from another source or markdown)
+  if (!url) url = track.cover || '';
+
   if (url && (url.length < 5 || brokenImages.value.has(url))) return '';
   return url;
 }
@@ -172,7 +184,7 @@ const mirrorSwitcherVisible = ref(false);
 function switchSource(index: number): void {
   if (!props.player.state.currentTrack) return;
   props.player.state.currentTrack.activeSourceIndex = index;
-  props.player.playTrack(props.player.state.currentTrack);
+  props.player.playTrack(props.player.state.currentTrack, true);
   mirrorSwitcherVisible.value = false;
 }
 
@@ -286,9 +298,6 @@ onUnmounted(() => {
           {{ typeLabel[currentSource.type] }}
         </span>
 
-        <div class="bfp-cover-eq" v-if="player.state.playing && !player.state.loading">
-          <span></span><span></span><span></span>
-        </div>
         <div class="bfp-cover-spinner" v-if="player.state.loading">
           <i class="fa-solid fa-spinner fa-spin"></i>
         </div>
@@ -563,7 +572,7 @@ onUnmounted(() => {
         <div class="pq-line pq-line--now"></div>
       </div>
       <div class="pq-card pq-card--now">
-        <img v-if="player.state.currentTrack.cover" :src="player.state.currentTrack.cover" class="pq-thumb pq-thumb--now" alt="" />
+        <img v-if="getTrackCover(player.state.currentTrack)" :src="getTrackCover(player.state.currentTrack)" class="pq-thumb pq-thumb--now" alt="" />
         <div v-else class="pq-thumb pq-thumb--placeholder pq-thumb--now"><i class="fa-solid fa-music"></i></div>
         <div class="pq-info">
           <div class="pq-now-badge">▶ NOW</div>
@@ -898,9 +907,9 @@ onUnmounted(() => {
 .bfp-cover-eq {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.45);
   display: flex; align-items: flex-end; justify-content: center;
   gap: 2px; padding-bottom: 6px;
+  pointer-events: none;
 }
 .bfp-cover-eq span {
   width: 3px; background: var(--bfp-accent);

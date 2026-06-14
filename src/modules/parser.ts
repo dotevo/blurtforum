@@ -61,9 +61,25 @@ export const Parser = {
       });
 
       // 4. Fix for nested image URLs (Proxy bypass)
-      processedText = processedText.replace(/!\[(.*?)\]\((https?:\/\/.*?\/)(https?:\/\/.*?)\)/g, (match, alt, proxy, nested) => {
-        return `![${alt}](${nested})`;
+      const unproxy = (url: string): string => {
+        const lastHttp = url.lastIndexOf('http');
+        if (lastHttp > 0) return url.substring(lastHttp);
+        return url;
+      };
+
+      processedText = processedText.replace(/!\[(.*?)\]\((https?:\/\/.*?)\)/g, (match, alt, url) => {
+        return `![${alt}](${unproxy(url)})`;
       });
+
+      // 4.5. Raw image URLs on their own lines
+      const imgRegex = /^https?:\/\/[^\s]+\.(png|jpg|jpeg|gif|webp|svg)(\?.*)?$/i;
+      processedText = processedText.split('\n').map(line => {
+        const trimmed = line.trim();
+        if (imgRegex.test(trimmed)) {
+          return `![image](${unproxy(trimmed)})`;
+        }
+        return line;
+      }).join('\n');
 
       // 5. Render Markdown
       let html = marked.parse(processedText, { breaks: true, gfm: true }) as string;
@@ -105,8 +121,11 @@ export const Parser = {
   detectMedia(text: string | undefined): any | null {
     if (!text) return null;
     const ytMatch = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|v\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
-    if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
-    const sunoSongMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/song\/([a-zA-Z0-9-]+)/);
+    if (ytMatch) {
+      const id = ytMatch[1];
+      return { type: 'youtube', id, thumb: `https://img.youtube.com/vi/${id}/0.jpg` };
+    }
+    const sunoSongMatch = text.match(/https?:\/\/(?:www\.)?suno.com\/song\/([a-zA-Z0-9-]+)/);
     if (sunoSongMatch) return { type: 'audio', id: sunoSongMatch[1], src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`, cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg` };
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };

@@ -3,7 +3,7 @@ import { onMounted, onUpdated } from 'vue';
 import { dispatchScanView } from '../../modules/player';
 import type { Forum, Post, AuthUser } from '../../types';
 import VoteButton from '../layout/VoteButton.vue';
-import ForumMedia from '../player/ForumMedia.ce.vue';
+import ForumMediaContainer from '../player/ForumMediaContainer.vue';
 import PayoutBadge from '../layout/PayoutBadge.vue';
 import UserAvatar from '../layout/UserAvatar.vue';
 
@@ -182,18 +182,12 @@ onUpdated(triggerScan);
               <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
               <span v-else style="display:inline-block; width:8px; height:8px; background:var(--border-main); border-radius:50%; margin-right:8px;" title="Read"></span>
               
-              <!-- Media icons component (Multi-instance for robust registration) -->
-              <template v-if="player.state.enabled && post.mirrors && post.mirrors.length">
-                <ForumMedia 
-                  v-for="(m, idx) in post.mirrors"
-                  :key="`${post.author}/${post.permlink}/${m.sources[0].id}`"
-                  :media="m"
-                  :title="post.title"
-                  :author="post.author"
-                  :permlink="post.permlink"
-                  :t="t"
-                />
-              </template>
+              <!-- Media Container (Unified controls for all mirrors) -->
+              <ForumMediaContainer 
+                v-if="player.state.enabled"
+                :post="post"
+                :t="t"
+              />
 
               <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
                  :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
