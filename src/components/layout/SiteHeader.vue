@@ -29,14 +29,14 @@ const emit = defineEmits<{
   <div class="header-inner">
     <div class="logo" @click="emit('goHome')">
       <div class="logo-title">Blurt<em>Forum</em></div>
-      <div class="logo-sub">BLOCKCHAIN-POWERED COMMUNITY PLATFORM • BLURT NETWORK</div>
+      <div class="logo-sub">{{ t('siteSubtitle') || 'BLOCKCHAIN-POWERED COMMUNITY PLATFORM • BLURT NETWORK' }}</div>
       <div class="active-community-badge">
         🏛️ {{ communityTitle || communityAccount }}
       </div>
     </div>
     <div class="header-right">
       <div class="block-status hide-tablet">
-        ONLINE | BLOCK: #{{ headBlockNumber || '…' }}
+        {{ t('online') || 'ONLINE' }} | {{ t('block') || 'BLOCK' }}: #{{ headBlockNumber || '…' }}
       </div>
       <div class="user-bar" v-if="!auth.user">
         <span>{{ t('notLoggedIn') }}</span>

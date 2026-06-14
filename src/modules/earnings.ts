@@ -1,5 +1,3 @@
-import type { Post } from '../types';
-
 export interface EarningOp {
   seq: number;
   timestamp: string;

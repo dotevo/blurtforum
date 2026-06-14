@@ -3,7 +3,6 @@
  * Handles audio/video playback, queuing, playlists, event emitter and plugin API.
  */
 import { reactive, watch, nextTick, ref, computed } from 'vue';
-import { Parser } from './parser';
 import type { MediaTrack, MediaEntryMirror, PlayerState, Playlist, PlaylistState, PlayerEvent, PlayerPlugin, BFPlayerAPI, PlayMode } from '../types';
 
 // Minimal YouTube IFrame API typings
@@ -66,7 +65,7 @@ export const state = reactive<PlayerState>({
   playMode: (localStorage.getItem('bf-player-mode') as PlayMode) || 'sequential'
 });
 
-const defaultPriorities = ['audio', 'peertube', 'youtube'];
+const defaultPriorities = ['youtube', 'audio', 'peertube'];
 const getPriorities = () => JSON.parse(localStorage.getItem('bf-player-priorities') || JSON.stringify(defaultPriorities)) as string[];
 
 const findBestSourceIndex = (sources: MediaEntryMirror[]): number => {
@@ -81,7 +80,7 @@ const findBestSourceIndex = (sources: MediaEntryMirror[]): number => {
   return 0;
 };
 
-export const playlistState = reactive<PlaylistState>({ playlists: [] });
+const playlistState = reactive<PlaylistState>({ playlists: [] });
 
 export const currentSource = computed<MediaEntryMirror | null>(() => {
   if (!state.currentTrack || !state.currentTrack.sources.length) return null;
@@ -132,7 +131,7 @@ let ptPlayer: PTPlayer | null = null;
 let client: any = null;
 let lastLoadedSourceId: string | null = null;
 
-export const setClient = (c: any) => { client = client || c; };
+const setClient = (c: any) => { client = client || c; };
 
 const refreshTrackSources = async (track: MediaTrack): Promise<void> => {
   if (!client) return;
@@ -140,7 +139,7 @@ const refreshTrackSources = async (track: MediaTrack): Promise<void> => {
   console.log(`[BFPlayer] refreshTrackSources called for ${track.author}/${track.permlink} - PARSING DISABLED`);
   /*
   try {
-    const post = await client.condenser.getContent(track.author, track.permlink);
+    const post = await Blockchain.getContent(client, track.author, track.permlink);
     if (post && post.body) {
        // ... existing logic ...
     }
@@ -218,7 +217,7 @@ const handleError = (msg: string): void => {
   }, 5000);
 };
 
-export const initResize = (e: MouseEvent | TouchEvent): void => {
+const initResize = (e: MouseEvent | TouchEvent): void => {
   let isResizing = true;
   const startY = 'touches' in e ? e.touches[0].clientY : e.clientY;
   const startH = state.expandedHeight;
@@ -358,7 +357,7 @@ const stopAll = (): void => {
   lastLoadedSourceId = null;
 };
 
-export const scrollToCurrent = (): void => {
+const scrollToCurrent = (): void => {
   nextTick(() => {
     const anchor = document.getElementById('current-queue-anchor');
     const list = document.querySelector<HTMLElement>('.queue-list');
@@ -371,12 +370,12 @@ export const scrollToCurrent = (): void => {
 export const playTrack = async (track: MediaTrack, isManual = false, manualIdx = -1, fromHistory = false): Promise<void> => {
   if (!state.enabled) return;
   
-  console.log(`[BFPlayer] playTrack init: ${track.author}/${track.permlink}, isManual: ${isManual}, initialSources: ${track.sources.length}`);
+  console.log(`[BFPlayer] playTrack init: ${track.author}/${track.permlink}/${track.subId || 'default'}, isManual: ${isManual}, initialSources: ${track.sources.length}`);
 
   // If not manual (e.g. Micro mode), try to find the "full" track in our registry
   // to make sure we have all available mirrors for priority selection.
   if (!isManual) {
-    const registered = visibleTracks.value.find(t => t.author === track.author && t.permlink === track.permlink);
+    const registered = visibleTracks.value.find(t => t.author === track.author && t.permlink === track.permlink && t.subId === track.subId);
     if (registered) {
       console.log(`[BFPlayer] Registry lookup successful: found ${registered.sources.length} mirrors.`);
       // Merge metadata from incoming track into registered one if needed
@@ -391,6 +390,7 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   console.log('[BFPlayer] playTrack requested:', { 
     author: track.author, 
     permlink: track.permlink, 
+    subId: track.subId,
     sourceCount: track.sources?.length,
     isManual
   });
@@ -502,7 +502,7 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   }
 };
 
-export const playNext = (isAuto = false): void => {
+const playNext = (isAuto = false): void => {
   console.log('[BFPlayer] playNext called, isAuto:', isAuto, 'PlayMode:', state.playMode);
   _emit('next', state.currentTrack);
   
@@ -524,12 +524,12 @@ export const playNext = (isAuto = false): void => {
     let nextTrack: MediaTrack | null = null;
     
     if (state.playMode === 'shuffle') {
-      const remaining = state.autoQueue.filter(t => !(t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink));
+      const remaining = state.autoQueue.filter(t => !(t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink && t.subId === state.currentTrack?.subId));
       if (remaining.length > 0) {
         nextTrack = remaining[Math.floor(Math.random() * remaining.length)];
       }
     } else {
-      const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink) : -1;
+      const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink && t.subId === state.currentTrack?.subId) : -1;
       console.log('[BFPlayer] AutoQueue search, currentIndex:', currentIndex, 'Total:', state.autoQueue.length);
       if (currentIndex !== -1 && currentIndex < state.autoQueue.length - 1) {
         nextTrack = state.autoQueue[currentIndex + 1];
@@ -554,7 +554,7 @@ export const playNext = (isAuto = false): void => {
   if (ptPlayer) ptPlayer.pause();
 };
 
-export const playPrev = (): void => {
+const playPrev = (): void => {
   _emit('prev', state.currentTrack);
   
   if (state.history.length > 0) {
@@ -562,7 +562,7 @@ export const playPrev = (): void => {
     const prev = state.history.pop()!;
     playTrack(prev, false, -1, true);
   } else if (state.autoQueue.length > 0) {
-    const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink) : -1;
+    const currentIndex = state.currentTrack ? state.autoQueue.findIndex(t => t.author === state.currentTrack?.author && t.permlink === state.currentTrack?.permlink && t.subId === state.currentTrack?.subId) : -1;
     if (currentIndex > 0) {
       playTrack(state.autoQueue[currentIndex - 1]);
     } else if (state.playMode === 'repeat-all') {
@@ -611,7 +611,7 @@ export const togglePlay = (): void => {
   }
 };
 
-export const seek = (pct: number): void => {
+const seek = (pct: number): void => {
   const time = (pct / 100) * state.duration;
   if (currentSource.value?.type === 'youtube' && ytPlayer) ytPlayer.seekTo(time);
   else if (currentSource.value?.type === 'audio' && audioObj) audioObj.currentTime = time;
@@ -619,7 +619,7 @@ export const seek = (pct: number): void => {
 };
 
 export const addToQueue = (track: MediaTrack): void => { state.queue.push(track); };
-export const setAutoQueue = (tracks: MediaTrack[]): void => { state.autoQueue = tracks; };
+const setAutoQueue = (tracks: MediaTrack[]): void => { state.autoQueue = tracks; };
 
 // ─── DOM-aware Auto-queue ───────────────────────────────────────────────────
 //
@@ -652,6 +652,7 @@ const visibleTracks = ref<MediaTrack[]>([]);
 export const registerTrack = (incoming: any): void => {
   const author = incoming.author;
   const permlink = incoming.permlink;
+  const subId = incoming.subId;
   if (!author || !permlink) return;
 
   const incomingSources: MediaEntryMirror[] = incoming.sources || [];
@@ -662,22 +663,24 @@ export const registerTrack = (incoming: any): void => {
         id: incoming.id,
         src: incoming.src,
         host: incoming.host,
-        thumb: incoming.thumb
+        thumb: incoming.thumb,
+        group: incoming.group,
+        typeIndex: incoming.typeIndex
     });
   }
 
   if (incomingSources.length === 0) {
-    console.warn('[BFPlayer] Skipping registration of track with no sources:', author, permlink);
+    console.warn('[BFPlayer] Skipping registration of track with no sources:', author, permlink, subId);
     return;
   }
 
-  console.log(`[BFPlayer] registerTrack call: ${author}/${permlink} with ${incomingSources.length} sources`);
+  console.log(`[BFPlayer] registerTrack call: ${author}/${permlink}/${subId || 'default'} with ${incomingSources.length} sources`);
 
-  const existingIdx = visibleTracks.value.findIndex(t => t.author === author && t.permlink === permlink);
+  const existingIdx = visibleTracks.value.findIndex(t => t.author === author && t.permlink === permlink && t.subId === subId);
   
   if (existingIdx === -1) {
     const track: MediaTrack = {
-      author, permlink,
+      author, permlink, subId,
       title: incoming.title || 'Media Content',
       cover: incoming.cover,
       payout: incoming.payout,
@@ -703,7 +706,7 @@ export const registerTrack = (incoming: any): void => {
        }
     });
     
-    // Update metadata: prioritize better covers (non-Blurt blog defaults)
+    // Update metadata
     if (incoming.cover && (!track.cover || track.cover.includes('images.blurt.blog'))) {
        track.cover = incoming.cover;
     }
@@ -713,8 +716,8 @@ export const registerTrack = (incoming: any): void => {
   
   state.autoQueue = [...visibleTracks.value];
 
-  // Sync with current track if it's the same post
-  if (state.currentTrack && state.currentTrack.author === author && state.currentTrack.permlink === permlink) {
+  // Sync with current track if it's the same track
+  if (state.currentTrack && state.currentTrack.author === author && state.currentTrack.permlink === permlink && state.currentTrack.subId === subId) {
     console.log('[BFPlayer] Syncing with ACTIVE track');
     const track = visibleTracks.value[existingIdx === -1 ? visibleTracks.value.length - 1 : existingIdx];
 
@@ -738,13 +741,13 @@ export const registerTrack = (incoming: any): void => {
 /**
  * Unregisters a track source.
  */
-export const unregisterTrack = (trackId: string, type: string, author?: string, permlink?: string): void => {
+export const unregisterTrack = (trackId: string, type: string, author?: string, permlink?: string, subId?: string): void => {
   if (author && permlink) {
-    const track = visibleTracks.value.find(t => t.author === author && t.permlink === permlink);
+    const track = visibleTracks.value.find(t => t.author === author && t.permlink === permlink && t.subId === subId);
     if (track) {
       track.sources = track.sources.filter(s => !(s.id === trackId && s.type === type));
       if (track.sources.length === 0) {
-        visibleTracks.value = visibleTracks.value.filter(t => !(t.author === author && t.permlink === permlink));
+        visibleTracks.value = visibleTracks.value.filter(t => !(t.author === author && t.permlink === permlink && t.subId === subId));
       }
     }
   } else {
@@ -760,7 +763,7 @@ export const unregisterTrack = (trackId: string, type: string, author?: string, 
 /**
  * Clears all registered tracks. Useful for page transitions if needed.
  */
-export const clearTracks = (): void => {
+const clearTracks = (): void => {
   visibleTracks.value = [];
   state.autoQueue = [];
 };
@@ -779,7 +782,7 @@ const _syncForumMediaDOM = (): void => {
   });
 };
 
-export const scanView = (container?: Element | null): void => {
+const scanView = (_container?: Element | null): void => {
   // scanView is now mostly a no-op or a bridge for non-Vue content.
   // For Vue content, registration is automatic.
   console.log('[Player] scanView called (registration is now component-based)');
@@ -805,11 +808,11 @@ if (typeof window !== 'undefined') {
 
 // Sync DOM on every currentTrack and playing state change.
 watch(
-  () => [state.currentTrack?.author, state.currentTrack?.permlink, state.playing] as const,
+  () => [state.currentTrack?.author, state.currentTrack?.permlink, state.currentTrack?.subId, state.playing] as const,
   () => { nextTick(_syncForumMediaDOM); },
 );
 
-export const toggleExperimental = (val: boolean): void => {
+const toggleExperimental = (val: boolean): void => {
   state.experimental = val;
   localStorage.setItem('bf-player-experimental', String(val));
   window.__bfPlayerEnabled = val;
@@ -817,7 +820,7 @@ export const toggleExperimental = (val: boolean): void => {
 
 // ─── Playlist Methods ───────────────────────────────────────────────────────
 
-export const createPlaylist = (name: string, color = '#1a9b78'): Playlist | null => {
+const createPlaylist = (name: string, color = '#1a9b78'): Playlist | null => {
   if (!name?.trim()) return null;
   const pl: Playlist = {
     id: 'pl_' + Date.now(),
@@ -830,35 +833,35 @@ export const createPlaylist = (name: string, color = '#1a9b78'): Playlist | null
   return pl;
 };
 
-export const deletePlaylist = (id: string): void => {
+const deletePlaylist = (id: string): void => {
   playlistState.playlists = playlistState.playlists.filter(p => p.id !== id);
   _savePlaylists();
 };
 
-export const renamePlaylist = (id: string, newName: string): void => {
+const renamePlaylist = (id: string, newName: string): void => {
   const pl = playlistState.playlists.find(p => p.id === id);
   if (pl && newName?.trim()) { pl.name = newName.trim(); pl.updatedAt = Date.now(); _savePlaylists(); }
 };
 
-export const addTrackToPlaylist = (playlistId: string, track: MediaTrack): boolean => {
+const addTrackToPlaylist = (playlistId: string, track: MediaTrack): boolean => {
   const pl = playlistState.playlists.find(p => p.id === playlistId);
   if (!pl) return false;
-  if (pl.tracks.some(t => t.author === track.author && t.permlink === track.permlink)) return false;
+  if (pl.tracks.some(t => t.author === track.author && t.permlink === track.permlink && t.subId === track.subId)) return false;
   pl.tracks.push({ ...track, addedAt: Date.now() });
   pl.updatedAt = Date.now();
   _savePlaylists();
   return true;
 };
 
-export const removeTrackFromPlaylist = (playlistId: string, author: string, permlink: string): void => {
+const removeTrackFromPlaylist = (playlistId: string, author: string, permlink: string, subId?: string): void => {
   const pl = playlistState.playlists.find(p => p.id === playlistId);
   if (!pl) return;
-  pl.tracks = pl.tracks.filter(t => !(t.author === author && t.permlink === permlink));
+  pl.tracks = pl.tracks.filter(t => !(t.author === author && t.permlink === permlink && t.subId === subId));
   pl.updatedAt = Date.now();
   _savePlaylists();
 };
 
-export const playPlaylist = (playlistId: string, startIndex = 0): void => {
+const playPlaylist = (playlistId: string, startIndex = 0): void => {
   const pl = playlistState.playlists.find(p => p.id === playlistId);
   if (!pl || !pl.tracks.length) return;
   state.autoQueue = [...pl.tracks];

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue';
+import { reactive, computed, watch } from 'vue';
 
 const props = defineProps<{
   show: boolean;
@@ -21,8 +21,6 @@ const form = reactive({
   memo: '',
   error: ''
 });
-
-const isBusy = ref(false);
 
 watch(() => props.show, (val) => {
   if (val) {

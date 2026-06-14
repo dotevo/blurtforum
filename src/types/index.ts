@@ -59,7 +59,7 @@ export interface Post {
   author: string;
   permlink: string;
   media: MediaTrack | null;
-  mirrors?: MediaTrack[];
+  tracks?: MediaTrack[];
   title: string;
   body: string;
   created: string;
@@ -182,11 +182,14 @@ export interface MediaEntryMirror {
   src?: string;
   host?: string;
   thumb?: string;
+  group?: string;
+  typeIndex?: number;
 }
 
 export interface MediaTrack {
   author: string;
   permlink: string;
+  subId?: string;
   title: string;
   sources: MediaEntryMirror[];
   activeSourceIndex: number;

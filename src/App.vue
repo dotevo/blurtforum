@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, defineAsyncComponent } from 'vue';
+import { defineAsyncComponent } from 'vue';
 import { useApp } from './composables/useApp';
 import { useTitle } from './composables/useTitle';
 
@@ -30,7 +30,6 @@ const EditModal = defineAsyncComponent(() => import('./components/modals/EditMod
 const PinModal = defineAsyncComponent(() => import('./components/modals/PinModal.vue'));
 const VoteModal = defineAsyncComponent(() => import('./components/modals/VoteModal.vue'));
 const FollowModal = defineAsyncComponent(() => import('./components/modals/FollowModal.vue'));
-const OldContentModal = defineAsyncComponent(() => import('./components/modals/OldContentModal.vue'));
 const StructureDocs = defineAsyncComponent(() => import('./components/modals/StructureDocs.vue'));
 const LayoutEditor = defineAsyncComponent(() => import('./components/modals/LayoutEditor.vue'));
 const ImageLightbox = defineAsyncComponent(() => import('./components/modals/ImageLightbox.vue'));
@@ -62,15 +61,15 @@ const {
   openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
   canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
-  forumPagination, loadMorePosts,
+  forumPagination,
   pinModal, handlePinSubmit,
   globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
   editModal, startEdit, submitEdit,
-  voteModal, openVoteModal, submitVoteConfirmed, estimateVote,
-  feeInfo, feeEstimates, scheduleFeeUpdate,
+  voteModal, submitVoteConfirmed, estimateVote,
+  feeEstimates, scheduleFeeUpdate,
   bcWaitQueue, bcQueueExpanded,
-  imgModal, openImgModal,
-  statusModal, showStatus,
+  imgModal,
+  statusModal,
   claimRewards,
   postPreview, replyPreview, saveDraft, clearDraft,
   imgUploads, onImagePick, onPaste,
@@ -79,7 +78,6 @@ const {
   loadTopicContext,
   isPostInCommunity,
   toggleFollow,
-  topicViewRef,
   broadcast, waitAndReload, checkLock,
   explorationExpanded,
   explorationForm,
@@ -245,9 +243,10 @@ const {
     </div>
 
     <!-- Blockchain wait queue panel -->
-    <div v-if="bcWaitQueue.length > 0" class="bc-queue-panel">
+    <div v-if="bcWaitQueue.length > 0" class="bc-queue-panel"
+         :style="{ bottom: (player.state.active && !player.state.minimized) ? (player.state.expanded ? player.state.expandedHeight + 'px' : '100px') : '0' }">
       <div class="bc-queue-inner">
-        <template v-for="(entry, idx) in (bcQueueExpanded ? bcWaitQueue : bcWaitQueue.slice(0, 3))" :key="entry.id">
+        <template v-for="entry in (bcQueueExpanded ? bcWaitQueue : bcWaitQueue.slice(0, 3))" :key="entry.id">
           <div class="bc-queue-item">
             <div class="bc-queue-bar-wrap">
               <div class="bc-queue-bar-fill" :style="{ width: entry.progress + '%' }"></div>
@@ -342,7 +341,6 @@ const {
 
       <TopicView
         v-if="view === 'topic' && activeTopic"
-        ref="topicViewRef"
         :active-topic="activeTopic"
         :replies="replies"
         :replies-loading="repliesLoading"

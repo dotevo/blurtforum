@@ -121,7 +121,7 @@ onUpdated(triggerScan);
           <!-- live preview of final tags -->
           <div class="gs" style="font-size:11px;">
             {{ t('sentTags') }}:
-            <template v-for="(tag, i) in [config.communityAccount, postForm.selectedTag, ...postForm.customTags.split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9-]/g,'')).filter(Boolean)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5)" :key="tag">
+            <template v-for="tag in [config.communityAccount, postForm.selectedTag, ...postForm.customTags.split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9-]/g,'')).filter(Boolean)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5)" :key="tag">
               <span style="display:inline-block; background:var(--primary); color:#fff; border-radius:3px; padding:1px 6px; margin:2px 2px 0 0; font-size:10px;">#{{ tag }}</span>
             </template>
             <span style="opacity:0.5">{{ t('max5') }}</span>

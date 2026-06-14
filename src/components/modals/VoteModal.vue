@@ -84,3 +84,50 @@ const emit = defineEmits<{
   </div>
 </div>
 </template>
+
+<style scoped>
+/* ===== VOTE WEIGHT MODAL ===== */
+.vote-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  display: block;
+}
+.vote-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--bg-white);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  cursor: pointer;
+}
+.vote-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--bg-white);
+  cursor: pointer;
+}
+.vote-estimate-box {
+  background: var(--bg-r2);
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.vote-est-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  color: var(--text);
+}
+.vote-est-row span { color: var(--text-muted); }
+</style>

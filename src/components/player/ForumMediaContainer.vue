@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { state, playTrack, togglePlay, addToQueue } from '../../modules/player';
-import type { Post, MediaTrack } from '../../types';
+import type { Post } from '../../types';
 import ForumMedia from './ForumMedia.ce.vue';
 
 const props = defineProps<{
@@ -15,14 +15,6 @@ const isActive = computed(() => {
   return (current.author === props.post.author && current.permlink === props.post.permlink);
 });
 
-const isCurrentPriorityActive = computed(() => {
-  if (!isActive.value) return false;
-  const current = state.currentTrack;
-  if (!current) return false;
-  // If playing any source of this post, and it's from registry, it will respect priorities
-  return true; 
-});
-
 const isPlaying = computed(() => isActive.value && state.playing);
 
 const handlePlay = async () => {
@@ -30,13 +22,12 @@ const handlePlay = async () => {
     togglePlay();
   } else {
     // Micro mode logic: pick best source
-    await playTrack(props.post.media || props.post.mirrors![0], false);
+    await playTrack(props.post.media || props.post.tracks![0], false);
   }
 };
 
 const handleSwitch = async () => {
   const current = state.currentTrack;
-  const sources = props.post.mirrors || (props.post.media ? [props.post.media] : []);
   
   if (!isActive.value || !current || current.sources.length <= 1) {
     await handlePlay();
@@ -54,19 +45,19 @@ const handleSwitch = async () => {
 };
 
 const handleQueue = () => {
-  addToQueue(props.post.media || props.post.mirrors![0]);
+  addToQueue(props.post.media || props.post.tracks![0]);
 };
 
-const hasMirrors = computed(() => (props.post.mirrors?.length || 0) > 1);
+const hasMirrors = computed(() => (props.post.tracks?.length || 0) > 1);
 
 </script>
 
 <template>
   <div class="forum-media-container mode-micro">
     <!-- Hidden mirrors for registration -->
-    <template v-if="post.mirrors && post.mirrors.length">
+    <template v-if="post.tracks && post.tracks.length">
       <ForumMedia 
-        v-for="m in post.mirrors" 
+        v-for="m in post.tracks" 
         :key="`${post.author}/${post.permlink}/${m.sources[0].id}`"
         :media="m"
         mode="unvisible"

@@ -21,8 +21,14 @@ export default defineConfig({
 
   build: {
     outDir: 'dist',
-    // dblurt and PeerTube embed API are loaded from CDN and exposed as globals.
-    // Marking them as externals would prevent bundling; instead we rely on the
-    // CDN <script> tags in index.html and declare them as globals in env.d.ts.
+    cssCodeSplit: false,
+    rollupOptions: {
+      output: {
+        manualChunks: () => 'index.js',
+        entryFileNames: `assets/[name].js`,
+        chunkFileNames: `assets/[name].js`,
+        assetFileNames: `assets/[name].[ext]`,
+      },
+    },
   },
 });

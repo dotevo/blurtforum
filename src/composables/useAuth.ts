@@ -3,6 +3,7 @@ import * as dblurt from '@beblurt/dblurt';
 import type { AuthUser } from '../types';
 import { AuthService } from '../modules/auth';
 import { whalevault } from '../modules/whalevault';
+import { Blockchain } from '../modules/blockchain';
 
 /**
  * Composable for managing authentication, multi-account support, and PIN encryption.
@@ -124,8 +125,7 @@ export function useAuth(client: any, t: (k: string) => string) {
     try {
       const privKey = (dblurt as any).PrivateKey.from(keyStr);
       const pubKey = privKey.createPublic().toString();
-      const accounts = await client.condenser.getAccounts([username]);
-      const acc = accounts?.[0] as Record<string, unknown>;
+      const acc = await Blockchain.getAccount(client, username);
       if (!acc) throw new Error('Account not found');
       const postingPubs = (acc.posting as { key_auths: [string, number][] }).key_auths.map(k => k[0]);
       if (!postingPubs.includes(pubKey)) throw new Error('Key mismatch');
@@ -155,9 +155,9 @@ export function useAuth(client: any, t: (k: string) => string) {
       const challenge = `Login to BlurtForum as ${username} at ${new Date().toISOString()}`;
       const response = await whalevault.promiseRequestSignBuffer('blurtforum', 'blt:' + username, challenge, 'posting', 'Login', 'hex');
       if (response && response.success) {
-        const accounts = await client.condenser.getAccounts([username]);
-        if (accounts?.[0]) {
-          completeLogin(username, null, accounts[0], undefined, callbacks);
+        const acc = await Blockchain.getAccount(client, username);
+        if (acc) {
+          completeLogin(username, null, acc, undefined, callbacks);
         }
       } else {
         throw new Error(response?.message || 'WhaleVault sign error');
@@ -226,9 +226,9 @@ export function useAuth(client: any, t: (k: string) => string) {
           }
         });
 
-        const accounts = await client.condenser.getAccounts([session.username]);
-        if (accounts?.[0]) {
-          completeLogin(session.username, decrypted, accounts[0] as Record<string, unknown>, pinModal.value, callbacks);
+        const acc = await Blockchain.getAccount(client, session.username);
+        if (acc) {
+          completeLogin(session.username, decrypted, acc as Record<string, unknown>, pinModal.value, callbacks);
           if (auth.user) auth.user.locked = false;
           pinModal.show = false;
           if (callbacks.resumeAction) callbacks.resumeAction();

@@ -41,7 +41,7 @@ const startDragging = (e: MouseEvent) => {
   scrollLeft.value = container.value.scrollLeft;
 };
 
-const stopDragging = (e: MouseEvent) => {
+const stopDragging = (_e: MouseEvent) => {
   if (!isDragging.value) return;
   isDragging.value = false;
   

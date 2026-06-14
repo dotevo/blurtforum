@@ -724,6 +724,7 @@ a:hover { color: var(--accent); text-decoration: underline; }
   border-top: 2px solid var(--primary);
   box-shadow: 0 -3px 12px rgba(0,0,0,0.2);
   padding: 8px 14px;
+  transition: bottom 0.3s ease-in-out;
 }
 .bc-queue-inner {
   max-width: 1200px;

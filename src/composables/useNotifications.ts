@@ -1,6 +1,7 @@
 import { reactive, watch } from 'vue';
 import type { Notification } from '../types';
 import { useTitle } from './useTitle';
+import { Blockchain } from '../modules/blockchain';
 
 const safeParse = (key: string, fallback: any) => {
   try {
@@ -36,7 +37,7 @@ export const useNotifications = (client: any, auth: any) => {
       let hasAnyNew = false;
       for (const account of auth.accounts) {
         const lastReadId = notifModal.lastReadIds[account.username] || 0;
-        const list = await client.call('bridge', 'account_notifications', { account: account.username, limit: 1 }) as Notification[];
+        const list = await Blockchain.getNotifications(client, account.username, 1);
         if (list?.length && Number(list[0].id) > lastReadId) {
           hasAnyNew = true;
           break;
@@ -60,12 +61,12 @@ export const useNotifications = (client: any, auth: any) => {
       
       await Promise.all(auth.accounts.map(async (account: any) => {
         try {
-          const list = await client.call('bridge', 'account_notifications', { account: account.username, limit: 20 }) as Notification[];
+          const list = await Blockchain.getNotifications(client, account.username, 20);
           if (Array.isArray(list)) {
             list.forEach(n => { n.account = account.username; allNotifications.push(n); });
           }
           
-          const history = await client.call('condenser_api', 'get_account_history', [account.username, -1, 20]) as Array<[number, { op: [string, any]; timestamp: string }]>;
+          const history = await Blockchain.getAccountHistory(client, account.username, -1, 20);
           if (Array.isArray(history)) {
             history.forEach(item => {
               const op = item[1].op;
@@ -152,14 +153,14 @@ export const useNotifications = (client: any, auth: any) => {
       const author = parts[0].replace('@', '');
       const permlink = parts[1];
       if (permlink) {
-        const content = await callbacks.client.condenser.getContent(author, permlink);
+        const content = await Blockchain.getContent(callbacks.client, author, permlink);
         if (content?.author) {
           let root: any = content;
           if (content.parent_author) {
             const urlParts = content.url.split('#')[0].split('/');
             if (urlParts.length >= 4) {
               const rootAuthor = urlParts[2].replace('@', ''); const rootPermlink = urlParts[3];
-              if (rootAuthor !== author || rootPermlink !== permlink) root = await callbacks.client.condenser.getContent(rootAuthor, rootPermlink);
+              if (rootAuthor !== author || rootPermlink !== permlink) root = await Blockchain.getContent(callbacks.client, rootAuthor, rootPermlink);
             }
           }
           const targetCommunity = root.category;

@@ -181,13 +181,13 @@ const barSeries = computed(() => {
                 <div class="stat-val">{{ (profileUser.data as any).followingCount }}</div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">BLURT</div>
+                <div class="stat-label">{{ t('blurt') || 'BLURT' }}</div>
                 <div class="stat-val">{{ (profileUser.data as any).balance }}</div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">BLURT POWER</div>
+                <div class="stat-label">{{ t('blurtPower') || 'BLURT POWER' }}</div>
                 <div class="stat-val">
-                  {{ (profileUser.data as any).totalBP }} BP
+                  {{ (profileUser.data as any).totalBP }} {{ t('bp') || 'BP' }}
                   <div class="gs" style="font-weight: normal; margin-top: 2px;">
                     ({{ (profileUser.data as any).bp }} + {{ (profileUser.data as any).delegatedIn }} - {{ (profileUser.data as any).delegatedOut }})
                   </div>
@@ -221,7 +221,7 @@ const barSeries = computed(() => {
             <!-- TOTAL VALUE -->
             <div class="wallet-card forumline total-card">
                <div class="stat-label">{{ t('estimatedAccountValue') || 'Estimated Account Value' }}</div>
-               <div class="stat-val main-amt highlight">~{{ (profileUser.data as any)?.walletValue }} <span class="unit">BLURT</span></div>
+               <div class="stat-val main-amt highlight">~{{ (profileUser.data as any)?.walletValue }} <span class="unit">{{ t('blurt') || 'BLURT' }}</span></div>
                <div class="gs" style="font-size:10px; margin-top:5px; opacity:0.8">
                  {{ t('totalValueDesc') || 'Sum of liquid BLURT and BP (excluding incoming delegations).' }}
                </div>
@@ -230,7 +230,7 @@ const barSeries = computed(() => {
             <!-- BLURT -->
             <div class="wallet-card forumline highlight-card">
               <div class="wallet-card-header">
-                <div class="stat-label">BLURT (Liquid)</div>
+                <div class="stat-label">{{ t('blurt') || 'BLURT' }} ({{ t('liquid') }})</div>
                 <div class="stat-val main-amt">{{ (profileUser.data as any)?.balance || '0.000 BLURT' }}</div>
               </div>
               <div class="wallet-card-desc gs">
@@ -254,18 +254,18 @@ const barSeries = computed(() => {
             <!-- BLURT POWER -->
             <div class="wallet-card forumline highlight-card-bp">
               <div class="wallet-card-header">
-                <div class="stat-label">BLURT POWER</div>
-                <div class="stat-val main-amt">{{ (profileUser.data as any)?.totalBP }} BP</div>
+                <div class="stat-label">{{ t('blurtPower') || 'BLURT POWER' }}</div>
+                <div class="stat-val main-amt">{{ (profileUser.data as any)?.totalBP }} {{ t('bp') || 'BP' }}</div>
               </div>
               <div class="wallet-card-desc gs">
                 <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
-                   <span>{{ t('own') }}:</span> <b>{{ (profileUser.data as any)?.bp }} BP</b>
+                   <span>{{ t('own') }}:</span> <b>{{ (profileUser.data as any)?.bp }} {{ t('bp') || 'BP' }}</b>
                 </div>
                 <div style="display:flex; justify-content:space-between; color: var(--success-text);">
-                   <span>{{ t('received') }}:</span> <b>+ {{ (profileUser.data as any)?.delegatedIn }} BP</b>
+                   <span>{{ t('received') }}:</span> <b>+ {{ (profileUser.data as any)?.delegatedIn }} {{ t('bp') || 'BP' }}</b>
                 </div>
                 <div style="display:flex; justify-content:space-between; color: var(--error-text);">
-                   <span>{{ t('delegated') }}:</span> <b>- {{ (profileUser.data as any)?.delegatedOut }} BP</b>
+                   <span>{{ t('delegated') }}:</span> <b>- {{ (profileUser.data as any)?.delegatedOut }} {{ t('bp') || 'BP' }}</b>
                 </div>
               </div>
               <div v-if="auth.user?.username === profileUser.username" class="wallet-actions">
@@ -487,7 +487,7 @@ const barSeries = computed(() => {
           <div class="profile-stats earnings-grid">
             <div class="stat-box accent">
               <div class="stat-label">{{ t('totalGenerated') }}</div>
-              <div class="stat-val">{{ profileUser.earnings.stats.total.toFixed(2) }} <span class="unit">BLURT</span></div>
+              <div class="stat-val">{{ profileUser.earnings.stats.total.toFixed(2) }} <span class="unit">{{ t('blurt') || 'BLURT' }}</span></div>
             </div>
             <div class="stat-box success">
               <div class="stat-label">{{ t('avgPerDay') }}</div>
@@ -507,8 +507,8 @@ const barSeries = computed(() => {
                 <td class="thHead" style="text-align:left;padding-left:10px">{{ t('date') }}</td>
                 <td class="thHead">{{ t('source') }}</td>
                 <td class="thHead">{{ t('type') }}</td>
-                <td class="thHead" align="right">BLURT</td>
-                <td class="thHead" align="right">BP</td>
+                <td class="thHead" align="right">{{ t('blurt') || 'BLURT' }}</td>
+                <td class="thHead" align="right">{{ t('bp') || 'BP' }}</td>
                 <td class="thHead" align="right">SUM</td>
               </tr>
             </thead>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUpdated, defineAsyncComponent } from 'vue';
-import { BFPlayer, dispatchScanView } from '../../modules/player';
-import { Blockchain } from '../../modules/blockchain';
+import { reactive, onMounted, onUpdated, defineAsyncComponent } from 'vue';
+import { dispatchScanView } from '../../modules/player';
 import { BFUtils } from '../../modules/utils';
 const OldContentModal = defineAsyncComponent(() => import('../modals/OldContentModal.vue'));
 import VoteButton from '../layout/VoteButton.vue';
@@ -61,28 +60,6 @@ const oldContentModal = reactive({
   status: '',
   loading: false
 });
-
-const triggerSupportLogic = async (post: Post, weight: number): Promise<void> => {
-  let fullPost: RawPost = post as unknown as RawPost;
-  if (!post.beneficiaries?.length) {
-    try { fullPost = await props.client.condenser.getContent(post.author, post.permlink); } catch { /* ignore */ }
-  }
-  const beneficiaries = (fullPost.beneficiaries || []) as Beneficiary[];
-  let existingSupport: RawPost | undefined;
-  try {
-    const reps = await props.client.condenser.getContentReplies(post.author, post.permlink);
-    existingSupport = reps.find((r: any) => {
-      if (!r.body?.trim().startsWith('Supporting original content by @')) return false;
-      const rBens = (r.beneficiaries || []) as Beneficiary[];
-      return rBens.length === beneficiaries.length && beneficiaries.every(b => rBens.some(rb => rb.account === b.account && rb.weight === b.weight));
-    });
-  } catch { /* ignore */ }
-  if (existingSupport) {
-    try { await props.broadcast([['vote', { voter: props.auth.user!.username, author: existingSupport.author, permlink: existingSupport.permlink, weight }]]); } catch { /* ignore */ }
-  } else {
-    oldContentModal.author = post.author; oldContentModal.permlink = post.permlink; oldContentModal.beneficiaries = beneficiaries; oldContentModal.originalPost = fullPost; oldContentModal.weight = weight; oldContentModal.body = 'Supporting original content by @' + post.author; oldContentModal.status = ''; oldContentModal.loading = false; oldContentModal.show = true;
-  }
-};
 
 const submitSupportComment = async (): Promise<void> => {
   if (props.checkLock(submitSupportComment)) return;

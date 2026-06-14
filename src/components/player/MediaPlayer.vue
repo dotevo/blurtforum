@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import ScrollableTabs from '../layout/ScrollableTabs.vue';
 import VoteButton from '../layout/VoteButton.vue';
 import PlaylistModal from '../modals/PlaylistModal.vue';
-import type { MediaTrack, BFPlayerAPI, Playlist, MediaEntryMirror } from '../../types';
+import type { MediaTrack, BFPlayerAPI, Playlist } from '../../types';
 import { currentSource } from '../../modules/player';
 
 const props = defineProps<{
@@ -67,7 +67,7 @@ function formatTime(seconds: number | null | undefined): string {
 
 const getBestType = (track: MediaTrack) => {
   if (!track.sources?.length) return 'audio';
-  const priorities = ['audio', 'peertube', 'youtube'];
+  const priorities = ['youtube', 'audio', 'peertube'];
   for (const type of priorities) {
     const s = track.sources.find(s => s.type === type);
     if (s) return s.type;
@@ -122,25 +122,11 @@ const effectiveCover = computed(() => {
 
 // ── Playlists ───────────────────────────────────────────────────────────────
 const activePlaylistId = ref<string | null>(null);
-const showCreateForm = ref(false);
-const newPlaylistName = ref('');
-const newPlaylistColor = ref('#1a9b78');
 const editingPlaylistName = ref(false);
 const editNameValue = ref('');
-const plNameInput = ref<HTMLInputElement | null>(null);
-
-const playlistColors = ['#1a9b78', '#f5a623', '#e55353', '#5b8dd9', '#9b59b6', '#f39c12', '#7a8290'];
 
 function getActivePlaylist(): Playlist | null {
   return props.player.playlistState.playlists.find(p => p.id === activePlaylistId.value) || null;
-}
-
-function createAndClose(): void {
-  const name = newPlaylistName.value.trim();
-  if (!name) return;
-  props.player.createPlaylist(name, newPlaylistColor.value);
-  newPlaylistName.value = '';
-  showCreateForm.value = false;
 }
 
 function startEditName(): void {
@@ -189,7 +175,7 @@ function switchSource(index: number): void {
 }
 
 // ── Mirror Priorities ───────────────────────────────────────────────────────
-const defaultPriorities = ['audio', 'peertube', 'youtube'];
+const defaultPriorities = ['youtube', 'audio', 'peertube'];
 const priorities = ref<string[]>(JSON.parse(localStorage.getItem('bf-player-priorities') || JSON.stringify(defaultPriorities)));
 
 function savePriorities(): void {

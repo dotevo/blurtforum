@@ -3,12 +3,11 @@
  * Ports the entire app.js setup() logic into a typed Vue 3 composable.
  */
 import {
-  ref, reactive, computed, onMounted, watch, nextTick,
+  ref, reactive, computed, onMounted, nextTick,
 } from 'vue';
 import CryptoJS from 'crypto-js';
 import { useNotifications, notifModal } from './useNotifications';
 import { BFUtils } from '../modules/utils';
-import * as Earnings from '../modules/earnings';
 import { Blockchain } from '../modules/blockchain';
 import { useVote } from './useVote';
 import { useWallet } from './useWallet';
@@ -16,17 +15,17 @@ import { useProfile } from './useProfile';
 import { useAuth } from './useAuth';
 import { useGlobalActivity } from './useGlobalActivity';
 import { BlurtPlayerPlugin } from '../modules/blurt-player-plugin';
-import { AuthService } from '../modules/auth';
 import { BFCommunity, VIRTUAL_FORUMS, DEFAULT_COMMUNITIES } from '../modules/community';
 import { BFPlayer } from '../modules/player';
 import { Parser } from '../modules/parser';
+import { PostProcessor } from '../modules/post-processor';
 
 import { TR, loadLanguage, type Lang, LANGS as langs } from '../modules/translations';
 import '../modules/whalevault';
 import type {
   Post, Forum, ForumCategory, RawPost, AuthUser, ActivityItem,
   Beneficiary, BcQueueEntry, GlobalProps, Moderator, CommunityInfo,
-  UserSubscription, Notification, MediaTrack, Delegation,
+  UserSubscription, Notification,
 } from '../types';
 
 import * as dblurt from '@beblurt/dblurt';
@@ -221,7 +220,7 @@ export function useApp() {
 
   const getReadStatusMap = () => JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
   
-  const normalizePost = (p: RawPost): Post => Blockchain.normalizePost(p, {
+  const normalizePost = (p: RawPost): Post => PostProcessor.normalizePost(p, {
     currentUser: auth.user?.username,
     followingSet: followingSet.value,
     readStatusMap: getReadStatusMap(),
@@ -257,10 +256,6 @@ export function useApp() {
     openTopic({ author: act.root_author, permlink: act.root_permlink } as Post);
   };
 
-  const oldContentModal = reactive({
-    show: false, loading: false, author: '', permlink: '', body: '', status: '',
-    beneficiaries: [] as Beneficiary[], originalPost: null as RawPost | null, weight: 0,
-  });
   const imgModal = reactive({ show: false, src: '' });
   const openImgModal = (src: string) => { imgModal.src = src; imgModal.show = true; };
 
@@ -270,7 +265,7 @@ export function useApp() {
     refreshUser();
     try {
       if (direction === 'current' && !targetForum) {
-        const props = await client.condenser.getDynamicGlobalProperties();
+        const props = await Blockchain.getDynamicGlobalProperties(client);
         globalProps.value = props as any;
         moderators.value = [];
         communityInfo.value = {};
@@ -284,7 +279,7 @@ export function useApp() {
       if (direction === 'current' && !targetForum) {
         try {
           if (config.communityAccount.startsWith('blurt-')) {
-            const cc = await forumClient.nexus.getCommunity(config.communityAccount) as any;
+            const cc = await Blockchain.getCommunity(forumClient, config.communityAccount);
             if (cc) {
               communityInfo.value = { title: (cc.title as string) || config.communityAccount, about: (cc.about as string) || '' };
               rawDescription.value = (cc.description as string) || '';
@@ -292,7 +287,7 @@ export function useApp() {
               const extMatch = structureSource.match(/\[\[Forum config:(@?)([a-z0-9.-]+)\/([a-z0-9-]+)\]\]/i);
               if (extMatch) {
                 try {
-                  const post = await client.condenser.getContent(extMatch[2], extMatch[3]);
+                  const post = await Blockchain.getContent(client, extMatch[2], extMatch[3]);
                   if (post?.body) structureSource = post.body;
                 } catch (err) { console.warn('External config load error:', err); }
               }
@@ -313,8 +308,7 @@ export function useApp() {
           structureNote.value = true;
         }
 
-          const accounts = await client.condenser.getAccounts([config.communityAccount]) as any[];
-          const acc = accounts?.[0];
+          const acc = await Blockchain.getAccount(client, config.communityAccount);
           if (acc) {
             const rb = acc.reward_blurt_balance as string;
             const rv = acc.reward_vesting_balance as string;
@@ -332,7 +326,7 @@ export function useApp() {
 
         try {
           if (!moderators.value.length) {
-            const roles = await forumClient.call('bridge', 'list_community_roles', { community: config.communityAccount }) as Array<[string, string, string]>;
+            const roles = await Blockchain.listCommunityRoles(forumClient, config.communityAccount);
             if (Array.isArray(roles) && roles.length > 0) {
               moderators.value = roles.map(r => ({ account: r[0], role: r[1], title: r[2] || '' }));
             }
@@ -394,18 +388,16 @@ export function useApp() {
         if (currentTagFilter.value) apiParams.tag = currentTagFilter.value;
 
         if (vf.id === 'user-feed' && auth.user) {
-          rawPosts = await forumClient.call('bridge', 'get_account_posts', { ...apiParams, account: auth.user.username, sort: 'feed' }) as RawPost[];
+          rawPosts = await Blockchain.getAccountPosts(forumClient, 'feed', auth.user.username, fetchLimit, params.start_author as string, params.start_permlink as string);
         } else if (vf.id === 'global-trending') {
-          rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'trending' }) as RawPost[];
+          rawPosts = await Blockchain.getRankedPosts(forumClient, 'trending', currentTagFilter.value as string, fetchLimit, params.start_author as string, params.start_permlink as string);
         } else if (vf.id === 'global-new') {
-          rawPosts = await forumClient.call('bridge', 'get_ranked_posts', { ...apiParams, sort: 'created' }) as RawPost[];
+          rawPosts = await Blockchain.getRankedPosts(forumClient, 'created', currentTagFilter.value as string, fetchLimit, params.start_author as string, params.start_permlink as string);
         } else if (vf.id === 'global-activity') {
-          rawPosts = await forumClient.call('bridge', 'get_forum_posts', { ...apiParams, community: '', sort: 'activity' }) as RawPost[];
+          rawPosts = await Blockchain.getForumPosts(forumClient, '', fetchLimit, 'activity', undefined, params.start_author as string, params.start_permlink as string);
         }
       } else {
-        const qp: Record<string, any> = { ...params };
-        if (!qp.start_author) { delete qp.start_author; delete qp.start_permlink; }
-        rawPosts = await forumClient.call('bridge', 'get_forum_posts', qp) as RawPost[];
+        rawPosts = await Blockchain.getForumPosts(forumClient, params.community as string, fetchLimit, 'activity', undefined, params.start_author as string, params.start_permlink as string, params.tags_any as string[]);
       }
 
       if (!rawPosts || rawPosts.length === 0) {
@@ -481,7 +473,7 @@ export function useApp() {
     const recurse = async (pAuthor: string, pPermlink: string, depth: number): Promise<void> => {
       let results: any[];
       try {
-        results = await client.condenser.getContentReplies(pAuthor, pPermlink) as any[];
+        results = await Blockchain.getContentReplies(client, pAuthor, pPermlink);
       } catch (e) {
         console.error(`Error loading replies for ${pAuthor}/${pPermlink}:`, e);
         return;
@@ -595,7 +587,7 @@ export function useApp() {
     if (!topic.payout && !topic.body) {
       loading.value = true;
       try {
-        const full = await client.condenser.getContent(topic.author, topic.permlink) as any;
+        const full = await Blockchain.getContent(client, topic.author, topic.permlink);
         if (full?.author) topic = normalizePost(full);
       } catch (e) { console.error('Error fetching full topic:', e); }
       loading.value = false;
@@ -607,7 +599,7 @@ export function useApp() {
     markTopicAsRead(activeTopic.value);
     loadReplies(topic.author, topic.permlink);
     if (!topic.beneficiaries?.length) {
-      client.condenser.getContent(topic.author, topic.permlink).then((full: any) => {
+      Blockchain.getContent(client, topic.author, topic.permlink).then((full: any) => {
         if (full?.beneficiaries?.length && activeTopic.value?.permlink === topic.permlink) {
           activeTopic.value = { ...activeTopic.value, beneficiaries: full.beneficiaries as Beneficiary[] };
         }
@@ -686,7 +678,7 @@ export function useApp() {
   const loadFollowingList = async (username: string): Promise<void> => {
     if (!username) return;
     try {
-      const following = await client.call('condenser_api', 'get_following', [username, '', 'blog', 1000]) as Array<{ following: string }>;
+      const following = await Blockchain.getFollowing(client, username);
       if (Array.isArray(following)) followingSet.value = new Set(following.map(f => f.following));
     } catch (e) { console.warn('Error loading following list:', e); }
   };
@@ -801,9 +793,8 @@ export function useApp() {
   const refreshUser = async (): Promise<void> => {
     if (!auth.user) return;
     try {
-      const accounts = await client.condenser.getAccounts([auth.user.username]);
-      if (accounts?.[0]) {
-        const acc = accounts[0] as any;
+      const acc = await Blockchain.getAccount(client, auth.user.username);
+      if (acc) {
         const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
         const delta = (Date.now() - lastVoteTime) / 1000;
         let vp = (acc.voting_power as number) + (10000 * delta / 432000);
@@ -831,7 +822,7 @@ export function useApp() {
         entry.progress = Math.min(((Date.now() - start) / maxMs) * 85, 85);
         await new Promise(r => setTimeout(r, pollMs));
         try {
-          const c = await client.condenser.getContent(author, permlink);
+          const c = await Blockchain.getContent(client, author, permlink);
           if (isReal(c)) { lastContent = c; if (!pollFn || pollFn(c)) { found = true; break; } }
         } catch { /* ignore */ }
         if (!found) entry.label = t('syncingWithBlockchain') || 'Waiting for data node synchronization…';
@@ -840,7 +831,7 @@ export function useApp() {
       if (!found) {
         entry.progress = 88; entry.label = 'Still syncing… final attempt';
         await new Promise(r => setTimeout(r, 10000));
-        try { const c = await client.condenser.getContent(author, permlink); if (isReal(c)) { lastContent = c; found = true; } } catch { /* ignore */ }
+        try { const c = await Blockchain.getContent(client, author, permlink); if (isReal(c)) { lastContent = c; found = true; } } catch { /* ignore */ }
       }
     } else {
       while (Date.now() - start < 4000) { entry.progress = Math.min(((Date.now() - start) / 4000) * 85, 85); await new Promise(r => setTimeout(r, 300)); }
@@ -970,7 +961,7 @@ export function useApp() {
     ].find(p => p && p.author === post.author && p.permlink === post.permlink);
     
     if (found) return found;
-    const raw = await client.condenser.getContent(post.author, post.permlink);
+    const raw = await Blockchain.getContent(client, post.author, post.permlink);
     return normalizePost(raw);
   };
 
@@ -1052,7 +1043,7 @@ export function useApp() {
     if (!('created' in post) || !post.created) {
       loading.value = true;
       try {
-        const raw = await client.condenser.getContent(post.author, post.permlink);
+        const raw = await Blockchain.getContent(client, post.author, post.permlink);
         fullPost = normalizePost(raw);
       } catch (e) {
         showStatus('Error', 'Could not fetch post details', 'error');
@@ -1071,7 +1062,7 @@ export function useApp() {
     payoutModal.beneficiaries = []; payoutModal.show = true;
     if (fullPost.beneficiaries?.length) payoutModal.beneficiaries = fullPost.beneficiaries as Beneficiary[];
     else {
-      try { const fresh = await client.condenser.getContent(fullPost.author, fullPost.permlink); if (fresh?.beneficiaries) payoutModal.beneficiaries = fresh.beneficiaries as Beneficiary[]; } catch { /* ignore */ }
+      try { const fresh = await Blockchain.getContent(client, fullPost.author, fullPost.permlink); if (fresh?.beneficiaries) payoutModal.beneficiaries = fresh.beneficiaries as Beneficiary[]; } catch { /* ignore */ }
     }
   };
 
@@ -1082,8 +1073,7 @@ export function useApp() {
 
   const loadUserCommunities = async (username: string): Promise<void> => {
     try {
-      let subs = await client.call('bridge', 'list_all_subscriptions', { account: username }) as Array<[string, string]>;
-      if (!subs?.length) subs = await client.call('condenser_api', 'list_all_subscriptions', [username]) as Array<[string, string]>;
+      const subs = await Blockchain.listSubscriptions(client, username);
       if (Array.isArray(subs)) userSubscriptions.value = subs.map(s => ({ account: s[0], title: s[1] || s[0] }));
     } catch (err) { console.error('Error loading communities:', err); }
   };
@@ -1102,8 +1092,7 @@ export function useApp() {
 
     if (checkLock(() => claimRewards(targetAccount))) return;
     try {
-      const accounts = await client.condenser.getAccounts([username]) as any[];
-      const acc = accounts?.[0] as any;
+      const acc = await Blockchain.getAccount(client, username);
       if (!acc) return;
       if (BFUtils.parsePayout(acc.reward_blurt_balance as string) === 0 && BFUtils.parsePayout(acc.reward_vesting_balance as string) === 0) {
  
@@ -1177,10 +1166,8 @@ export function useApp() {
       const allForums: Forum[] = [];
       forumStructure.value.forEach(cat => cat.forums.forEach(f => allForums.push(f)));
       allForums.forEach(async (f) => {
-        const p: Record<string, unknown> = { community: config.communityAccount, limit: 10, sort: 'activity' };
-        if (f.targetTags.length > 0) p.tags_any = f.targetTags;
         try {
-          const raw = await client.call('bridge', 'get_forum_posts', p) as RawPost[];
+          const raw = await Blockchain.getForumPosts(client, config.communityAccount, 10, 'activity', undefined, undefined, undefined, f.targetTags.length > 0 ? f.targetTags : undefined);
           if (raw?.length) f.posts = raw.map(normalizePost).filter(post => !post.isMuted || canMute.value).slice(0, 5);
         } catch { /* ignore */ }
       });
@@ -1208,7 +1195,7 @@ export function useApp() {
         if (f) activeForum.value = f;
       }
 
-      client.condenser.getContent(requestedAuthor, requestedPermlink).then(content => {
+      Blockchain.getContent(client, requestedAuthor, requestedPermlink).then(content => {
         if (content?.author) { activeTopic.value = { ...normalizePost(content), beneficiaries: (content.beneficiaries || []) as Beneficiary[] }; view.value = 'topic'; loadReplies(content.author, content.permlink); }
       });
     } else if (requestedView === 'profile' && requestedUser) {
@@ -1258,7 +1245,7 @@ export function useApp() {
         const parts = url.split('#')[0].split('/');
         if (parts.length >= 4) {
           const rootAuthor = parts[2].replace('@', ''); const rootPermlink = parts[3];
-          const root = await client.condenser.getContent(rootAuthor, rootPermlink);
+          const root = await Blockchain.getContent(client, rootAuthor, rootPermlink);
           if (root?.author) openTopic(normalizePost(root));
         }
       }
@@ -1273,14 +1260,13 @@ export function useApp() {
     auth, loginTab, loginForm, loginErr, loginBusy, wvAvailable, showLoginModal, loginOptions, pinModal,
     completeLogin: _completeLogin, doKeyLogin: _doKeyLogin, doWVLogin: _doWVLogin, logout, 
     switchAccount: _switchAccount, removeAccount, openLoginModal, openSwitchAccountModal, showSwitchAccountModal,
-    handlePinSubmit: _handlePinSubmit, saveSessions
+    handlePinSubmit: _handlePinSubmit
   } = useAuth(client, t);
 
   const authCallbacks = { 
     loadUserCommunities, loadFollowingList, loadData,
     resumeAction: () => { if (resumeAction.value) { const fn = resumeAction.value; resumeAction.value = null; fn(); } }
   };
-  const completeLogin = (u: string, k: string | null, a: any, p?: string) => _completeLogin(u, k, a, p, authCallbacks);
   const doKeyLogin = () => _doKeyLogin(authCallbacks);
   const doWVLogin = () => _doWVLogin(authCallbacks);
   const switchAccount = (u: string) => _switchAccount(u, authCallbacks);
@@ -1318,7 +1304,7 @@ export function useApp() {
     openProfile,
     loadMoreProfileContent,
     fetchEarningsHistory: _fetchEarningsHistory
-  } = useProfile(client, config, globalProps, view, normalizePost);
+  } = useProfile(client, globalProps, view, normalizePost);
 
   const {
     voteModal,
@@ -1338,15 +1324,13 @@ export function useApp() {
 
   const handleWalletSubmit = (data: any) => _handleWalletSubmit(data, globalProps);
 
-  const { checkNewNotifications, openNotifModal, openNotification: _openNotification, startPolling: startNotifPolling } = useNotifications(client, auth);
+  const { openNotifModal, openNotification: _openNotification, startPolling: startNotifPolling } = useNotifications(client, auth);
 
   const openNotification = (notif: Notification) => _openNotification(notif, {
     openTopic, openProfile, normalizePost, client, config, targetNotifPermlink,
     selectedCommunity, loading, loadData, forumClient, getForumUrl, getDataUrl,
     auth, switchAccount
   });
-
-  const player = BFPlayer;
 
   onMounted(() => {
     loadLanguage(lang.value);
@@ -1375,9 +1359,8 @@ export function useApp() {
         sessions.forEach(session => {
           if (session.type === 'whalevault') {
             auth.accounts.push({ username: session.username, type: 'whalevault', key: null, vp: '…', hasRewards: false });
-            client.condenser.getAccounts([session.username]).then((accounts: any[]) => {
-              if (accounts?.[0]) {
-                const acc = accounts[0] as any;
+            Blockchain.getAccount(client, session.username).then((acc: any) => {
+              if (acc) {
                 const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
                 const delta = (Date.now() - lastVoteTime) / 1000;
                 let vp = (acc.voting_power as number) + (10000 * delta / 432000);
@@ -1422,9 +1405,8 @@ export function useApp() {
           if (session.type === 'whalevault') {
             auth.user = { username: session.username, type: 'whalevault', key: null, vp: '…' };
             auth.accounts.push(auth.user);
-            client.condenser.getAccounts([session.username]).then((accounts: any[]) => {
-              if (accounts?.[0]) {
-                const acc = accounts[0] as any;
+            Blockchain.getAccount(client, session.username).then((acc: any) => {
+              if (acc) {
                 const lastVoteTime = new Date((acc.last_vote_time as string) + 'Z').getTime();
                 const delta = (Date.now() - lastVoteTime) / 1000;
                 let vp = (acc.voting_power as number) + (10000 * delta / 432000);

@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue';
 import type { ActivityItem, RawPost, AuthUser } from '../types';
 import { useTitle } from './useTitle';
+import { Blockchain } from '../modules/blockchain';
 
 /**
  * Composable for managing global activity feed.
@@ -15,11 +16,8 @@ export function useGlobalActivity(
   const globalActivity = ref<ActivityItem[]>([]);
   const { setTitleIcon } = useTitle();
 
-  const getReadStatusMap = () => JSON.parse(localStorage.getItem('bf_read_status_v2') || '{}') as Record<string, number>;
-
   const updateGlobalActivity = async (): Promise<void> => {
     if (!auth.user) return;
-    const readStatus = getReadStatusMap();
     const allActivity: ActivityItem[] = [];
     
     const subsToCheck = userSubscriptions.value.length > 0 
@@ -29,7 +27,7 @@ export function useGlobalActivity(
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     for (const sub of subsToCheck) {
       try {
-        const posts = await client.call('bridge', 'get_forum_posts', { community: sub.account, limit: 5, sort: 'activity' }) as RawPost[];
+        const posts = await Blockchain.getForumPosts(client, sub.account, 5, 'activity');
         if (Array.isArray(posts)) {
           posts.forEach(p => {
             const normalized = normalizePost(p);

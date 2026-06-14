@@ -33,7 +33,7 @@ const emit = defineEmits<{
 
   <!-- BREADCRUMB -->
   <div class="breadcrumb">
-    <a href="#" @click.prevent="emit('goHome')">BlurtForum</a>
+    <a href="#" @click.prevent="emit('goHome')">{{ t('siteTitle') || 'BlurtForum' }}</a>
     <template v-if="view==='communities'"> &raquo; {{ t('exploreCommunities') }}</template>
     <template v-if="activeForum"> &raquo; <a href="#" @click.prevent="emit('openForum', activeForum!)">{{ activeForum.name }}</a></template>
     <template v-if="activeTopic"> &raquo; {{ activeTopic.title }}</template>

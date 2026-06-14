@@ -1,3 +1,4 @@
+import { PostProcessor } from './post-processor';
 import { Blockchain } from './blockchain';
 import type { BFPlayerAPI, MediaTrack } from '../types';
 
@@ -8,7 +9,7 @@ import type { BFPlayerAPI, MediaTrack } from '../types';
 export const BlurtPlayerPlugin = (client: any, auth: any) => ({
   name: 'BlurtMetadata',
 
-  install(player: BFPlayerAPI) {
+  install(_player: BFPlayerAPI) {
     console.log('BlurtMetadataPlugin installed');
   },
 
@@ -20,10 +21,10 @@ export const BlurtPlayerPlugin = (client: any, auth: any) => ({
 
     try {
       // Fetch fresh content from blockchain
-      const raw = await client.condenser.getContent(track.author, track.permlink);
+      const raw = await Blockchain.getContent(client, track.author, track.permlink);
       if (!raw || !raw.author) return;
 
-      const normalized = Blockchain.normalizePost(raw);
+      const normalized = PostProcessor.normalizePost(raw);
 
       // Update track properties reactively
       track.payout = normalized.payout;

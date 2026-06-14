@@ -10,6 +10,7 @@ export const handleMediaAction = async (type: string, id: string, host: string, 
   const media: MediaTrack = { 
     author: trackData.author || 'post',
     permlink: trackData.permlink || '',
+    subId: trackData.subId,
     title: trackData.title || 'Media Content',
     sources: [{ 
       type: type as any, 
@@ -41,6 +42,7 @@ if (typeof document !== 'undefined') {
         title: d.title,
         author: d.author,
         permlink: d.permlink,
+        subId: d.group ? (Number(d.index) > 1 ? `${d.group}:${d.index}` : d.group) : `idx:${d.type}:${d.index}`,
         cover: d.cover
       });
     }
@@ -70,6 +72,8 @@ const props = withDefaults(defineProps<{
   dataAuthor?: string;
   dataPermlink?: string;
   dataPending?: string | boolean;
+  dataGroup?: string;
+  dataIndex?: string | number;
 }>(), {
   mode: 'micro',
   hideButtons: false
@@ -107,7 +111,9 @@ const trackData = computed<MediaTrack>(() => {
       host: props.dataHost,
       author: props.dataAuthor,
       permlink: props.dataPermlink,
-      title: props.dataTitle
+      title: props.dataTitle,
+      group: props.dataGroup,
+      typeIndex: props.dataIndex
     };
   }
   
@@ -132,6 +138,19 @@ const trackData = computed<MediaTrack>(() => {
   const author = props.dataAuthor || props.author || base.author || 'post';
   const permlink = props.dataPermlink || props.permlink || base.permlink || '';
 
+  // STRATEGY: subId calculation
+  const group = props.dataGroup || base.group || '';
+  const typeIndex = props.dataIndex || base.typeIndex || 0;
+  
+  let subId = base.subId || '';
+  if (!subId) {
+    if (group) {
+        subId = Number(typeIndex) > 1 ? `${group}:${typeIndex}` : group;
+    } else {
+        subId = `idx:${type}:${typeIndex}`;
+    }
+  }
+
   // Title logic: Prefer real titles over placeholders. 
   let title = base.title || props.title || props.dataTitle || '';
   if (!title || title === '(no title)' || title === 'Media Content') {
@@ -146,7 +165,7 @@ const trackData = computed<MediaTrack>(() => {
   const mirrors: MediaEntryMirror[] = base.sources || [];
   if (mirrors.length === 0) {
      // If we were passed a single media object, use it as primary
-     mirrors.push({ type, id, src, host: base.host || props.dataHost, thumb: mediaThumb });
+     mirrors.push({ type, id, src, host: base.host || props.dataHost, thumb: mediaThumb, group, typeIndex: Number(typeIndex) });
   } else {
     // Ensure the primary source in mirrors has the generated thumb if missing
     mirrors.forEach(m => {
@@ -158,7 +177,7 @@ const trackData = computed<MediaTrack>(() => {
   const actuallyPending = dataPending && !src && !isSunoUuid(type, id) && type !== 'youtube';
 
   return {
-    author, permlink,
+    author, permlink, subId,
     title,
     cover: mediaThumb || cover,
     pending: !resolvedTrack.value && (isResolving.value || actuallyPending),
@@ -240,6 +259,7 @@ const resolveIfNeeded = async () => {
 
 let registeredId: string | null = null;
 let registeredType: string | null = null;
+let registeredSubId: string | undefined = undefined;
 
 const syncTrack = () => {
   const primary = trackData.value.sources[0];
@@ -247,43 +267,45 @@ const syncTrack = () => {
   const shouldRegister = primary?.id && !trackData.value.pending;
   
   if (shouldRegister) {
-    if (registeredId && (registeredId !== primary.id || registeredType !== primary.type)) {
-      unregisterTrack(registeredId, registeredType!, props.author, props.permlink);
+    if (registeredId && (registeredId !== primary.id || registeredType !== primary.type || registeredSubId !== trackData.value.subId)) {
+      unregisterTrack(registeredId, registeredType!, props.author, props.permlink, registeredSubId);
     }
     registerTrack(trackData.value);
     registeredId = primary.id;
     registeredType = primary.type;
+    registeredSubId = trackData.value.subId;
   } else if (registeredId) {
     // If it became pending or lost ID, unregister
-    unregisterTrack(registeredId, registeredType!, props.author, props.permlink);
+    unregisterTrack(registeredId, registeredType!, props.author, props.permlink, registeredSubId);
     registeredId = null;
     registeredType = null;
+    registeredSubId = undefined;
   }
 };
 
 onMounted(() => {
-  console.log(`[ForumMedia] Mounted: ${props.author}/${props.permlink} (Initial ID: ${trackData.value.sources[0]?.id}, Pending: ${trackData.value.pending})`);
+  console.log(`[ForumMedia] Mounted: ${props.author}/${props.permlink}/${trackData.value.subId} (Initial ID: ${trackData.value.sources[0]?.id}, Pending: ${trackData.value.pending})`);
   resolveIfNeeded().then(() => {
-    console.log(`[ForumMedia] Resolution finished for ${props.author}/${props.permlink}. Final ID: ${trackData.value.sources[0]?.id}`);
+    console.log(`[ForumMedia] Resolution finished for ${props.author}/${props.permlink}/${trackData.value.subId}. Final ID: ${trackData.value.sources[0]?.id}`);
     syncTrack();
   });
 });
 
-watch(() => [trackData.value.pending, trackData.value.sources[0]?.id], (newVal, oldVal) => {
-  console.log(`[ForumMedia] Watch triggered: ${props.author}/${props.permlink}. Old: ${oldVal}, New: ${newVal}`);
+watch(() => [trackData.value.pending, trackData.value.sources[0]?.id, trackData.value.subId], (newVal, oldVal) => {
+  console.log(`[ForumMedia] Watch triggered: ${props.author}/${props.permlink}/${trackData.value.subId}. Old: ${oldVal}, New: ${newVal}`);
   syncTrack();
 });
 
 onUnmounted(() => {
   if (registeredId && registeredType) {
-    unregisterTrack(registeredId, registeredType, trackData.value.author, trackData.value.permlink);
+    unregisterTrack(registeredId, registeredType, trackData.value.author, trackData.value.permlink, registeredSubId);
   }
 });
 
 const isActive = computed(() => {
   const current = state.currentTrack;
   if (!current) return false;
-  return (current.author === trackData.value.author && current.permlink === trackData.value.permlink);
+  return (current.author === trackData.value.author && current.permlink === trackData.value.permlink && current.subId === trackData.value.subId);
 });
 
 const isCurrentSourceActive = computed(() => {
@@ -316,7 +338,6 @@ const handleQueue = () => {
 };
 
 const thumbUrl = computed(() => trackData.value.cover || '');
-const typeLabel: Record<string, string> = { youtube: 'YouTube', peertube: 'PeerTube', audio: 'Audio' };
 const displayHost = computed(() => {
   const primary = trackData.value.sources[0];
   return primary?.host || (primary?.type === 'audio' ? 'suno' : primary?.type);

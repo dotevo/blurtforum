@@ -4,7 +4,6 @@ import NotifBell from './NotifBell.vue';
 import UserAvatar from './UserAvatar.vue';
 import ActivityFeed from './ActivityFeed.vue';
 import LangBar from './LangBar.vue';
-import { computed } from 'vue';
 
 const props = defineProps<{
   auth: { user: AuthUser | null };

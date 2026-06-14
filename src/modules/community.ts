@@ -3,6 +3,7 @@
  */
 import { reactive } from 'vue';
 import type { Community, AuthUser, Forum, UserSubscription } from '../types';
+import { Blockchain } from './blockchain';
 
 export const VIRTUAL_FORUMS: Forum[] = [
   { id: 'user-feed',       nameKey: 'myFeed',         targetTags: [], type: 'feed',     auth: true,  posts: [], lastAuthor: '', lastPermlink: '', hasMore: true, pageHistory: [] },
@@ -46,8 +47,7 @@ const fetchCommunities = async (client: Record<string, unknown>, refresh = false
 
   state.loading = true;
   try {
-    const result = await (client as { call: (m: string, n: string, p: Record<string, unknown>) => Promise<Community[]> })
-      .call('bridge', 'list_communities', { last: state.last, limit: 20, query: state.query });
+    const result = await Blockchain.listCommunities(client, state.last, 20, state.query);
 
     if (result && result.length > 0) {
       state.list.push(...result);

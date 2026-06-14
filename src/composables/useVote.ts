@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue';
+import { reactive } from 'vue';
 import { Blockchain } from '../modules/blockchain';
 import type { Post, AuthUser } from '../types';
 

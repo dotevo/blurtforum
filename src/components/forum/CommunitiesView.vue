@@ -67,3 +67,74 @@ const emit = defineEmits<{
     
  
 </template>
+
+<style scoped>
+/* ===== COMMUNITY DISCOVERY ===== */
+.community-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 15px;
+  margin-top: 20px;
+  width: 100%;
+}
+.community-card {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-white);
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+}
+.community-card-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.community-card-header .avatar-sm {
+  margin: 0;
+}
+.community-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.community-card-title {
+  font-weight: bold;
+  color: var(--primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 16px;
+}
+.community-card-title:hover {
+  text-decoration: underline;
+}
+.community-card-name {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.community-card-about {
+  font-size: 13px;
+  line-height: 1.4;
+  height: 4.2em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  color: var(--text);
+}
+.community-card-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 15px;
+}
+.community-card-actions {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid var(--bg-r1);
+}
+</style>

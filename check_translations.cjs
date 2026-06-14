@@ -1,111 +1,104 @@
 const fs = require('fs');
 const path = require('path');
 
-// 1. Load translations from raw file (using simple regex to extract objects)
-const translationsFile = fs.readFileSync('src/modules/translations.raw.ts', 'utf8');
-const languages = ['en', 'pl', 'eo'];
-const dicts = {};
+const localesDir = path.join(__dirname, 'public/locales');
+const srcDir = path.join(__dirname, 'src');
 
-languages.forEach(lang => {
-    const startIdx = translationsFile.indexOf(`${lang}: {`);
-    if (startIdx === -1) return;
-    
-    // Find closing brace of the language object
-    let braceCount = 1;
-    let endIdx = -1;
-    for (let i = startIdx + lang.length + 3; i < translationsFile.length; i++) {
-        if (translationsFile[i] === '{') braceCount++;
-        if (translationsFile[i] === '}') braceCount--;
-        if (braceCount === 0) {
-            endIdx = i;
-            break;
-        }
-    }
-    
-    const objStr = translationsFile.substring(startIdx + lang.length + 2, endIdx + 1);
-    // Rough parse of keys
-    const keys = [];
-    const keyRegex = /([a-zA-Z0-9]+):\s*["']/g;
-    let match;
-    while ((match = keyRegex.exec(objStr)) !== null) {
-        keys.push(match[1]);
-    }
-    dicts[lang] = new Set(keys);
+const locales = ['en', 'pl', 'eo'];
+const translations = {};
+
+// Load translations
+locales.forEach(lang => {
+  const filePath = path.join(localesDir, `${lang}.json`);
+  if (fs.existsSync(filePath)) {
+    translations[lang] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  }
 });
-
-// 2. Scan files for t('key') or t("key")
-const files = [];
-function walkDir(dir) {
-    fs.readdirSync(dir).forEach(file => {
-        const fullPath = path.join(dir, file);
-        if (fs.statSync(fullPath).isDirectory()) {
-            if (file !== 'node_modules' && file !== '.git' && file !== 'dist') walkDir(fullPath);
-        } else if (file.endsWith('.vue') || file.endsWith('.ts')) {
-            files.push(fullPath);
-        }
-    });
-}
-walkDir('src');
 
 const usedKeys = new Set();
-const potentialHardcoded = [];
+const missingKeys = {};
+const hardcodedStrings = [];
 
-files.forEach(file => {
-    const content = fs.readFileSync(file, 'utf8');
-    
-    // Find used keys: t('key') or t("key")
-    const tRegex = /t\(['"]([a-zA-Z0-9]+)['"]\)/g;
-    let match;
-    while ((match = tRegex.exec(content)) !== null) {
-        usedKeys.add(match[1]);
-    }
+function walk(dir, callback) {
+  fs.readdirSync(dir).forEach( f => {
+    let dirPath = path.join(dir, f);
+    let isDirectory = fs.statSync(dirPath).isDirectory();
+    isDirectory ? walk(dirPath, callback) : callback(path.join(dir, f));
+  });
+};
 
-    // Rough check for hardcoded strings in templates
-    if (file.endsWith('.vue')) {
-        const templateMatch = content.match(/<template>([\s\S]*)<\/template>/);
-        if (templateMatch) {
-            const template = templateMatch[1];
-            // Find text between tags that doesn't start with {{ and doesn't look like an icon or CSS
-            // This is very rough and will have many false positives, but helps
-            const textRegex = />\s*([A-Z][a-z0-9 ]{2,})\s*</g;
-            while ((match = textRegex.exec(template)) !== null) {
-                const text = match[1].trim();
-                if (text && !text.includes('fa-') && !text.startsWith('{{')) {
-                    potentialHardcoded.push({ file: path.basename(file), text });
-                }
-            }
+const tRegex = /\bt\(['"]([^'"]+)['"]\)/g;
+// Heuristic for hardcoded strings in Vue templates:
+// Look for text between tags that has at least one letter and isn't a variable/t() call.
+const vueTemplateRegex = /<template>([\s\S]*?)<\/template>/;
+const textNodeRegex = />([^<>{}\n\r\t]+)</g;
+
+const ignoreKeys = new Set(['#', '/', ':', '.', ' ', '|', '\n', ',']);
+
+walk(srcDir, (filePath) => {
+  if (!filePath.endsWith('.vue') && !filePath.endsWith('.ts')) return;
+  
+  const content = fs.readFileSync(filePath, 'utf8');
+  
+  // Find t() calls
+  let match;
+  while ((match = tRegex.exec(content)) !== null) {
+    const key = match[1];
+    if (key.length < 2 || key.includes('/') || key.includes('.') || ignoreKeys.has(key)) continue;
+    usedKeys.add(key);
+    locales.forEach(lang => {
+      if (translations[lang] && !translations[lang][key]) {
+        if (!missingKeys[lang]) missingKeys[lang] = new Set();
+        missingKeys[lang].add(key);
+      }
+    });
+  }
+
+  // Find hardcoded strings in Vue templates
+  if (filePath.endsWith('.vue')) {
+    const templateMatch = content.match(vueTemplateRegex);
+    if (templateMatch) {
+      const template = templateMatch[1];
+      let tNodeMatch;
+      while ((tNodeMatch = textNodeRegex.exec(template)) !== null) {
+        const text = tNodeMatch[1].trim();
+        if (text && /[a-zA-Z]/.test(text) && !text.includes('{{')) {
+           hardcodedStrings.push({ file: path.relative(__dirname, filePath), text });
         }
+      }
     }
+  }
 });
 
-// 3. Report
-console.log('--- TRANSLATION AUDIT ---');
-console.log(`Scanned ${files.length} files. Found ${usedKeys.size} unique keys used with t().\n`);
+console.log('=== TRANSLATION AUDIT ===\n');
 
-languages.forEach(lang => {
-    console.log(`[${lang.toUpperCase()}]`);
-    const missingInDict = [...usedKeys].filter(k => !dicts[lang].has(k));
-    const unusedInDict = [...dicts[lang]].filter(k => !usedKeys.has(k));
-    
-    if (missingInDict.length > 0) {
-        console.log(`  Missing in dictionary (${missingInDict.length}): ${missingInDict.join(', ')}`);
-    } else {
-        console.log('  No missing keys!');
-    }
-    
-    // console.log(`  Unused in dictionary (${unusedInDict.length}): ${unusedInDict.join(', ')}`);
-    console.log('');
+console.log('--- Missing Translations ---');
+locales.forEach(lang => {
+  if (missingKeys[lang] && missingKeys[lang].size > 0) {
+    console.log(`\n[${lang.toUpperCase()}] Missing keys:`);
+    missingKeys[lang].forEach(key => console.log(`  - ${key}`));
+  } else {
+    console.log(`\n[${lang.toUpperCase()}] No missing keys.`);
+  }
 });
 
-if (potentialHardcoded.length > 0) {
-    console.log('--- POTENTIAL HARDCODED STRINGS IN TEMPLATES ---');
-    // Group by file
-    const grouped = {};
-    potentialHardcoded.forEach(h => {
-        if (!grouped[h.file]) grouped[h.file] = new Set();
-        grouped[h.file].add(h.text);
-    });
-    Object.keys(grouped).forEach(f => {
-        console.log(`${f}: ${[...grouped[f]].join(' | ')}`);
-    });
+console.log('\n--- Unused Translations (in en.json) ---');
+const enKeys = Object.keys(translations['en'] || {});
+let unusedCount = 0;
+enKeys.forEach(key => {
+  if (!usedKeys.has(key)) {
+    console.log(`  - ${key}`);
+    unusedCount++;
+  }
+});
+if (unusedCount === 0) console.log('  None.');
+
+console.log('\n--- Potential Hardcoded Strings (Vue Templates) ---');
+if (hardcodedStrings.length > 0) {
+  hardcodedStrings.slice(0, 50).forEach(item => {
+    console.log(`  [${item.file}] ${item.text}`);
+  });
+  if (hardcodedStrings.length > 50) console.log(`  ... and ${hardcodedStrings.length - 50} more.`);
+} else {
+  console.log('  None found.');
 }

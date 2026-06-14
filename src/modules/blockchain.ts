@@ -1,13 +1,11 @@
 import { reactive } from 'vue';
 import * as dblurt from '@beblurt/dblurt';
-import { BFUtils } from './utils';
-import { Parser } from './parser';
-import type { Post, RawPost, Beneficiary, GlobalProps, AuthUser, ActiveVote, RewardFund, ChainProperties, MediaEntryMirror } from '../types';
+import type { AuthUser, ChainProperties } from '../types';
 
 /**
  * Blockchain module for BlurtForum.
  * Handles interactions with the Blurt blockchain, including broadcasting,
- * fee estimation, and post normalization.
+ * fee estimation, and post fetching.
  */
 export const Blockchain = {
   feeInfo: reactive({
@@ -15,6 +13,13 @@ export const Blockchain = {
     bwFee: 0.150,
     loaded: false
   }),
+
+  _estCache: {
+    acc: null as any,
+    fund: null as any,
+    props: null as any,
+    last: 0
+  },
 
   /** Fetches current chain properties to estimate transaction fees */
   async fetchFeeInfo(client: any): Promise<void> {
@@ -38,107 +43,6 @@ export const Blockchain = {
     return ((this.feeInfo.flatFee * numOps) + (totalBytes / 1024) * this.feeInfo.bwFee).toFixed(3);
   },
 
-  /** Normalizes a raw blockchain post into the application's Post format */
-  normalizePost(p: any, context?: { 
-    currentUser?: string | null, 
-    followingSet?: Set<string>, 
-    readStatusMap?: Record<string, number>,
-    canMute?: boolean 
-  }): Post {
-    let tags: string[] = [];
-    try {
-      const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata || '{}') : p.json_metadata;
-      if (meta && (meta as Record<string, unknown>).tags) {
-        tags = (meta as Record<string, string[]>).tags;
-      }
-    } catch { /* ignore */ }
-
-    const pending = BFUtils.parsePayout(p.pending_payout_value);
-    const total = BFUtils.parsePayout(p.total_payout_value) + BFUtils.parsePayout((p as any).curator_payout_value);
-    const bridgePayout = typeof p.payout === 'number' ? p.payout : BFUtils.parsePayout(p.payout);
-    
-    const lastActAuthor = p.last_activity_author || p.author;
-    const activityTs = new Date((p.last_activity || p.created).endsWith('Z') ? (p.last_activity || p.created) : (p.last_activity || p.created) + 'Z').getTime();
-    
-    // Read status
-    let isRead = false;
-    if (context?.readStatusMap) {
-      const lastReadTs = context.readStatusMap[`${p.author}/${p.permlink}`] || 0;
-      isRead = !!(lastReadTs >= activityTs || (context.currentUser && lastActAuthor === context.currentUser));
-    }
-
-    const createdDate = new Date((p.created.endsWith('Z') ? p.created : p.created + 'Z'));
-    const ageDays = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
-    let isPaid = total > 0 || ageDays > 7.5;
-    if (p.cashout_time?.startsWith('1970')) isPaid = true;
-
-    const post: Post = {
-      author: p.author,
-      permlink: p.permlink,
-      title: p.title || '(no title)',
-      body: p.body,
-      created: p.created,
-      url: p.url,
-      category: p.category,
-      parent_author: p.parent_author || '',
-      parent_permlink: p.parent_permlink || '',
-      lastActivity: p.last_activity || p.created,
-      lastAuthor: lastActAuthor,
-      pendingPayout: pending,
-      totalPayout: total,
-      payout: bridgePayout || (pending + total),
-      vote_count: p.active_votes ? p.active_votes.length : (p.net_votes || 0),
-      active_votes: p.active_votes || [],
-      net_rshares: parseFloat(String(p.net_rshares || 0)),
-      beneficiaries: (p.beneficiaries || []) as Beneficiary[],
-      json_metadata: p.json_metadata,
-      media: null,
-      mirrors: [],
-      isUnread: !isRead,
-      isRead: isRead,
-      isFollowing: !!(context?.currentUser && context?.followingSet?.has(p.author)),
-      isMuted: !!(p.stats?.is_muted || p.stats?.hide),
-      isPaid,
-      isCollapsed: !!(p.body && p.body.startsWith('Supporting original content by @')),
-      replyCount: p.children || p.reply_count || 0,
-      tags,
-      lastActivityTs: activityTs,
-    };
-
-    // Extract all media mirrors
-    const allMedia = Parser.extractAllMedia(p.body);
-    if (allMedia.length > 0) {
-      post.mirrors = allMedia.map(m => ({
-        author: post.author,
-        permlink: post.permlink,
-        title: post.title,
-        sources: [{
-          type: m.type,
-          id: m.id,
-          src: m.src,
-          host: m.host,
-          thumb: m.cover
-        }],
-        activeSourceIndex: -1,
-        pending: m.pending,
-        cover: m.cover
-      }));
-      post.media = post.mirrors[0];
-    }
-
-    // If we detected media but it has no cover, try to use the first image from metadata
-    if (post.media && !post.media.cover && p.json_metadata) {
-      try {
-        const meta = typeof p.json_metadata === 'string' ? JSON.parse(p.json_metadata) : p.json_metadata;
-        if (meta.image && Array.isArray(meta.image) && meta.image.length > 0) {
-          post.media.cover = meta.image[0];
-        }
-      } catch { /* ignore */ }
-    }
-    
-    return post;
-  },
-
   /** Broadcasts operations to the blockchain using either private key or WhaleVault */
   async broadcast(client: any, user: AuthUser, ops: any[], authority: 'Posting' | 'Active' = 'Posting'): Promise<void> {
     if (user.type === 'key') {
@@ -147,30 +51,18 @@ export const Blockchain = {
       await client.broadcast.sendOperations(ops, privKey);
     } else {
       await new Promise<void>((resolve, reject) => {
-        if (!window.blurt_keychain) {
-          return reject(new Error('WhaleVault (Blurt Keychain) not available'));
+        const wv = (window as any).blurt_keychain;
+        if (!wv) {
+          return reject(new Error('WhaleVault not installed'));
         }
-        (window.blurt_keychain as any).requestBroadcast(
-          user.username,
-          ops,
-          authority,
-          (res: { success: boolean; message?: string }) => {
-            if (res?.success) resolve();
-            else reject(new Error(res.message || 'WhaleVault broadcast error'));
-          }
-        );
+        wv.requestBroadcast(user.username, ops, authority, (response: any) => {
+          if (response.success) resolve();
+          else reject(new Error(response.message || 'WhaleVault broadcast failed'));
+        });
       });
     }
   },
 
-  _estCache: {
-    acc: null as any,
-    fund: null as any,
-    props: null as any,
-    last: 0
-  },
-
-  /** Estimates the value of a vote based on current reward fund and voting power */
   async estimateVoteValue(client: any, username: string, weight: number): Promise<{ vpCostPct: string; vpAfter: string; voteValue: string; fee: string } | null> {
     const now = Date.now();
     
@@ -231,6 +123,206 @@ export const Blockchain = {
     } catch (e) {
       console.warn('Vote estimate calculation error:', e);
       return null;
+    }
+  },
+
+  async getVestingDelegations(client: any, account: string, startAccount = '', limit = 1000): Promise<any[]> {
+    try {
+      const res = await client.call('condenser_api', 'get_vesting_delegations', [account, startAccount, limit]);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('get_vesting_delegations error:', e);
+      return [];
+    }
+  },
+
+  async getIncomingVestingDelegations(client: any, account: string, startAccount = '', limit = 1000): Promise<any[]> {
+    try {
+      const res = await client.call('condenser_api', 'get_incoming_vesting_delegations', [account, startAccount, limit]);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('get_incoming_vesting_delegations error:', e);
+      return [];
+    }
+  },
+
+  async getExpiringVestingDelegations(client: any, account: string, afterTime?: string): Promise<any[]> {
+    try {
+      const time = afterTime || new Date().toISOString().split('.')[0];
+      const res = await client.call('condenser_api', 'get_expiring_vesting_delegations', [account, time]);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('get_expiring_vesting_delegations error:', e);
+      return [];
+    }
+  },
+
+  async getAccount(client: any, account: string): Promise<any | null> {
+    try {
+      const res = await client.condenser.getAccounts([account]);
+      return (res && res[0]) ? res[0] : null;
+    } catch (e) {
+      console.warn('getAccount error:', e);
+      return null;
+    }
+  },
+
+  async getWitnessByAccount(client: any, account: string): Promise<any | null> {
+    try {
+      return await client.call('condenser_api', 'get_witness_by_account', [account]);
+    } catch (e) {
+      console.warn('get_witness_by_account error:', e);
+      return null;
+    }
+  },
+
+  async getContent(client: any, author: string, permlink: string): Promise<any | null> {
+    try {
+      return await client.condenser.getContent(author, permlink);
+    } catch (e) {
+      console.warn('getContent error:', e);
+      return null;
+    }
+  },
+
+  async getAccountHistory(client: any, account: string, start = -1, limit = 100, bitmask?: [number, number]): Promise<any[]> {
+    try {
+      const res = await client.condenser.getAccountHistory(account, start, limit, bitmask);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getAccountHistory error:', e);
+      return [];
+    }
+  },
+
+  async getDynamicGlobalProperties(client: any): Promise<any | null> {
+    try {
+      return await client.condenser.getDynamicGlobalProperties();
+    } catch (e) {
+      console.warn('getDynamicGlobalProperties error:', e);
+      return null;
+    }
+  },
+
+  async getFollowCount(client: any, account: string): Promise<any | null> {
+    try {
+      return await client.call('bridge', 'get_follow_count', { account });
+    } catch (e) {
+      console.warn('getFollowCount error:', e);
+      return null;
+    }
+  },
+
+  async getAccountPosts(client: any, sort: string, account: string, limit = 20, start_author?: string, start_permlink?: string): Promise<any[]> {
+    try {
+      const params: any = { sort, account, limit };
+      if (start_author) params.start_author = start_author;
+      if (start_permlink) params.start_permlink = start_permlink;
+      const res = await client.call('bridge', 'get_account_posts', params);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getAccountPosts error:', e);
+      return [];
+    }
+  },
+
+  async getForumPosts(client: any, community: string, limit = 20, sort = 'trending', observer?: string, start_author?: string, start_permlink?: string, tags_any?: string[]): Promise<any[]> {
+    try {
+      const params: any = { community, limit, sort };
+      if (observer) params.observer = observer;
+      if (start_author) params.start_author = start_author;
+      if (start_permlink) params.start_permlink = start_permlink;
+      if (tags_any) params.tags_any = tags_any;
+      const res = await client.call('bridge', 'get_forum_posts', params);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getForumPosts error:', e);
+      return [];
+    }
+  },
+
+  async getNotifications(client: any, account: string, limit = 20): Promise<any[]> {
+    try {
+      const res = await client.call('bridge', 'account_notifications', { account, limit });
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getNotifications error:', e);
+      return [];
+    }
+  },
+
+  async getFollowing(client: any, follower: string, startAccount = '', type = 'blog', limit = 1000): Promise<any[]> {
+    try {
+      const res = await client.call('condenser_api', 'get_following', [follower, startAccount, type, limit]);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getFollowing error:', e);
+      return [];
+    }
+  },
+
+  async getContentReplies(client: any, author: string, permlink: string): Promise<any[]> {
+    try {
+      const res = await client.condenser.getContentReplies(author, permlink);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getContentReplies error:', e);
+      return [];
+    }
+  },
+
+  async listSubscriptions(client: any, account: string): Promise<any[]> {
+    try {
+      let res = await client.call('bridge', 'list_all_subscriptions', { account });
+      if (!res?.length) {
+        res = await client.call('condenser_api', 'list_all_subscriptions', [account]);
+      }
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('listSubscriptions error:', e);
+      return [];
+    }
+  },
+
+  async getCommunity(client: any, account: string): Promise<any | null> {
+    try {
+      return await client.call('bridge', 'get_community', { name: account });
+    } catch (e) {
+      console.warn('getCommunity error:', e);
+      return null;
+    }
+  },
+
+  async listCommunityRoles(client: any, community: string): Promise<any[]> {
+    try {
+      const res = await client.call('bridge', 'list_community_roles', { community });
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('listCommunityRoles error:', e);
+      return [];
+    }
+  },
+
+  async getRankedPosts(client: any, sort: string, tag = '', limit = 20, start_author?: string, start_permlink?: string): Promise<any[]> {
+    try {
+      const params: any = { sort, tag, limit };
+      if (start_author) params.start_author = start_author;
+      if (start_permlink) params.start_permlink = start_permlink;
+      const res = await client.call('bridge', 'get_ranked_posts', params);
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('getRankedPosts error:', e);
+      return [];
+    }
+  },
+
+  async listCommunities(client: any, last = '', limit = 20, query = ''): Promise<any[]> {
+    try {
+      const res = await client.call('bridge', 'list_communities', { last, limit, query });
+      return Array.isArray(res) ? res : (res?.result || []);
+    } catch (e) {
+      console.warn('listCommunities error:', e);
+      return [];
     }
   }
 };
