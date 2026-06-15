@@ -3,6 +3,7 @@ import type { Post, Delegation } from '../types';
 import * as Earnings from '../modules/earnings';
 import * as dblurt from '@beblurt/dblurt';
 import { Blockchain } from '../modules/blockchain';
+import { BFPlayer } from '../modules/player';
 
 /**
  * Composable for managing user profile state and logic.
@@ -178,6 +179,7 @@ export function useProfile(
   };
 
   const openProfile = async (username: string): Promise<void> => {
+    BFPlayer.clearTracks();
     profileUser.username = username;
     profileUser.loading = true;
     profileUser.data = null;

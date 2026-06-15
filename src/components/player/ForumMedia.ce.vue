@@ -87,6 +87,7 @@ const emit = defineEmits<{
 const resolvedTrack = ref<MediaTrack | null>(null);
 const isResolving = ref(false);
 const lastResolvedId = ref<string | null>(null);
+const isUnmounted = ref(false);
 
 const isSunoUuid = (type: string, id: string) => type === 'audio' && id.length >= 32;
 
@@ -286,17 +287,20 @@ const syncTrack = () => {
 onMounted(() => {
   console.log(`[ForumMedia] Mounted: ${props.author}/${props.permlink}/${trackData.value.subId} (Initial ID: ${trackData.value.sources[0]?.id}, Pending: ${trackData.value.pending})`);
   resolveIfNeeded().then(() => {
+    if (isUnmounted.value) return;
     console.log(`[ForumMedia] Resolution finished for ${props.author}/${props.permlink}/${trackData.value.subId}. Final ID: ${trackData.value.sources[0]?.id}`);
     syncTrack();
   });
 });
 
 watch(() => [trackData.value.pending, trackData.value.sources[0]?.id, trackData.value.subId], (newVal, oldVal) => {
+  if (isUnmounted.value) return;
   console.log(`[ForumMedia] Watch triggered: ${props.author}/${props.permlink}/${trackData.value.subId}. Old: ${oldVal}, New: ${newVal}`);
   syncTrack();
 });
 
 onUnmounted(() => {
+  isUnmounted.value = true;
   if (registeredId && registeredType) {
     unregisterTrack(registeredId, registeredType, trackData.value.author, trackData.value.permlink, registeredSubId);
   }

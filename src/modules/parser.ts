@@ -32,11 +32,14 @@ export const Parser = {
 
       let processedText = text;
 
-      // 0. Protect HTML tags that often wrap Markdown
+      // 0. Protect HTML tags that often wrap Markdown or contain URLs (img, a, etc.)
       // We tokenize them so marked treats the content between them as Markdown
-      const tagsToTokenize = ['center', 'sub', 'sup', 'strong', 'em', 'b', 'i', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'blockquote', 'p'];
+      // and our raw URL regex won't touch their attributes (like src or href).
+      const tagsToTokenize = ['center', 'sub', 'sup', 'strong', 'em', 'b', 'i', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'blockquote', 'p', 'img', 'a', 'video', 'audio', 'source'];
       tagsToTokenize.forEach(tag => {
-        const startRegex = new RegExp(`<${tag}(?:\\s+[^>]*)?>`, 'gi');
+        // Match start tags (including attributes and self-closing)
+        const startRegex = new RegExp(`<${tag}(?:\\s+[^>]*)?\\/?>`, 'gi');
+        // Match end tags
         const endRegex = new RegExp(`</${tag}>`, 'gi');
         processedText = processedText.replace(startRegex, (m) => tokenize(m));
         processedText = processedText.replace(endRegex, (m) => tokenize(m));
@@ -186,7 +189,7 @@ export const Parser = {
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
     if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
     const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch|videos\/embed)\/([a-zA-Z0-9-]+)/);
-    if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1] };
+    if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1], pending: true };
     const audioMatch = text.match(/https?:\/\/[^\s\)]+\.(mp3|wav|ogg|m4a|flac)(\?.*)?/i);
     if (audioMatch) {
       const url = audioMatch[0].replace(/[).,;]$/, '');

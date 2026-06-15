@@ -448,7 +448,13 @@ export function useApp() {
     });
   };
 
-  const changePage = async (dir: 'next' | 'prev') => { if (activeForum.value) { await loadData(dir, activeForum.value); syncUrl(); } };
+  const changePage = async (dir: 'next' | 'prev') => { 
+    if (activeForum.value) { 
+      BFPlayer.clearTracks();
+      await loadData(dir, activeForum.value); 
+      syncUrl(); 
+    } 
+  };
   const loadMorePosts = async (): Promise<void> => {
 
     if (!activeForum.value) return;
@@ -584,6 +590,7 @@ export function useApp() {
   };
 
   const openTopic = async (topic: Post): Promise<void> => {
+    BFPlayer.clearTracks();
     if (!topic.payout && !topic.body) {
       loading.value = true;
       try {
@@ -625,6 +632,7 @@ export function useApp() {
   };
 
   const openCommunities = (): void => {
+    BFPlayer.clearTracks();
     view.value = 'communities';
     currentTagFilter.value = '';
     syncUrl();
