@@ -16,12 +16,63 @@ export const notifModal = reactive({
   initializing: true,
   list: [] as Notification[],
   lastReadIds: safeParse('bf_last_notif_ids', {}),
+  lastReadHistoryIds: safeParse('bf_last_history_ids', {}),
   hasNew: false,
-  clickedIds: safeParse('bf_clicked_notif_ids', [])
+  clickedIds: safeParse('bf_clicked_notif_ids', []),
+  pushSupported: 'Notification' in window,
+  pushEnabled: safeParse('bf_push_enabled', false)
 });
 
-export const useNotifications = (client: any, auth: any) => {
+export const useNotifications = (client: any, auth: any, t: (k: string) => string) => {
   const { setTitleIcon } = useTitle();
+
+  const togglePushNotifications = async () => {
+    // 1. Check basic support
+    if (!notifModal.pushSupported) {
+      alert(t('notifUnsupported'));
+      return;
+    }
+
+    // 2. Check Secure Context (HTTPS/localhost)
+    // IMPORTANT: Browsers return 'denied' immediately if not secure!
+    if (!window.isSecureContext) {
+      alert(t('notifInsecureContext'));
+      return;
+    }
+    
+    if (notifModal.pushEnabled) {
+      notifModal.pushEnabled = false;
+      localStorage.setItem('bf_push_enabled', 'false');
+    } else {
+      // 3. Check current permission status via Permissions API if available
+      if ((navigator as any).permissions) {
+        try {
+          const status = await (navigator as any).permissions.query({ name: 'notifications' });
+          if (status.state === 'denied') {
+            alert(t('notifPermissionDenied'));
+            return;
+          }
+        } catch (e) { /* ignore if query fails */ }
+      }
+
+      try {
+        console.log('[DEBUG] Requesting notification permission...');
+        // Directly call to preserve "user gesture" context
+        const result = await Notification.requestPermission();
+        console.log('[DEBUG] Permission result:', result);
+
+        if (result === 'granted') {
+          notifModal.pushEnabled = true;
+          localStorage.setItem('bf_push_enabled', 'true');
+          new Notification('BlurtForum', { body: t('notifEnabledBody'), icon: '/favicon.svg' });
+        } else if (result === 'denied') {
+          alert(t('notifPermissionDenied'));
+        }
+      } catch (err) {
+        console.error('Notification permission error:', err);
+      }
+    }
+  };
 
   watch(() => notifModal.hasNew, (hasNew) => {
     setTitleIcon('notif', hasNew ? '🔔' : null);
@@ -36,11 +87,48 @@ export const useNotifications = (client: any, auth: any) => {
     try {
       let hasAnyNew = false;
       for (const account of auth.accounts) {
+        // 1. Check standard notifications (limit 2)
         const lastReadId = notifModal.lastReadIds[account.username] || 0;
-        const list = await Blockchain.getNotifications(client, account.username, 1);
-        if (list?.length && Number(list[0].id) > lastReadId) {
-          hasAnyNew = true;
-          break;
+        const list = await Blockchain.getNotifications(client, account.username, 2);
+        if (list?.length) {
+          const maxId = Number(list[0].id);
+          if (maxId > lastReadId) {
+            hasAnyNew = true;
+            if (notifModal.pushEnabled && !isInitial && !notifModal.show) {
+              list.filter((n: any) => Number(n.id) > lastReadId).forEach((n: any) => {
+                new Notification(`Blurt: @${n.author || 'system'}`, { body: n.msg || n.type, icon: '/favicon.svg' });
+              });
+              notifModal.lastReadIds[account.username] = maxId;
+              localStorage.setItem('bf_last_notif_ids', JSON.stringify(notifModal.lastReadIds));
+            }
+          }
+        }
+
+        // 2. Check transfers in history (limit 3)
+        const lastHistoryId = notifModal.lastReadHistoryIds[account.username] || 0;
+        const history = await Blockchain.getAccountHistory(client, account.username, -1, 3);
+        if (history?.length) {
+          const maxHId = history[history.length - 1][0]; // last item index
+          if (maxHId > lastHistoryId) {
+            const newTransfers = history.filter((item: any) => {
+              const idx = item[0];
+              const op = item[1].op;
+              return idx > lastHistoryId && op[0] === 'transfer' && op[1].to === account.username;
+            });
+            
+            if (newTransfers.length > 0) {
+              hasAnyNew = true;
+              if (notifModal.pushEnabled && !isInitial && !notifModal.show) {
+                newTransfers.forEach((item: any) => {
+                  const tx = item[1].op[1];
+                  new Notification(`Received ${tx.amount}`, { body: `From: @${tx.from}${tx.memo ? ': ' + tx.memo : ''}`, icon: '/favicon.svg' });
+                });
+              }
+            }
+            // Always update lastHistoryId to avoid re-scanning old transactions
+            notifModal.lastReadHistoryIds[account.username] = maxHId;
+            localStorage.setItem('bf_last_history_ids', JSON.stringify(notifModal.lastReadHistoryIds));
+          }
         }
       }
       notifModal.hasNew = hasAnyNew;
@@ -176,5 +264,5 @@ export const useNotifications = (client: any, auth: any) => {
     callbacks.loading.value = false;
   };
 
-  return { notifModal, checkNewNotifications, openNotifModal, openNotification, startPolling };
+  return { notifModal, checkNewNotifications, openNotifModal, openNotification, startPolling, togglePushNotifications };
 };

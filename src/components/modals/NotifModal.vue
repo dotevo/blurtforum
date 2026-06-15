@@ -6,6 +6,8 @@ defineProps<{
     show: boolean; loading: boolean;
     list: Notification[]; lastReadIds: Record<string, number>;
     clickedIds: (number | string)[];
+    pushSupported: boolean;
+    pushEnabled: boolean;
   };
   auth: { user: any };
   t: (k: string) => string;
@@ -17,6 +19,7 @@ const emit = defineEmits<{
   close: [];
   openNotification: [notif: Notification];
   openProfile: [username: string];
+  togglePushNotifications: [];
 }>();
 </script>
 
@@ -29,6 +32,15 @@ const emit = defineEmits<{
       <button class="modal-close" @click="emit('close')">✕</button>
     </div>
     <div class="modal-body" style="padding: 0;">
+      <!-- Local notification toggle -->
+      <div v-if="notifModal.pushSupported" class="notif-settings-row">
+        <span>{{ t('browserNotifications') }}</span>
+        <label class="switch">
+          <input type="checkbox" :checked="notifModal.pushEnabled" @change="emit('togglePushNotifications')">
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
       <div v-if="notifModal.loading" class="loader"><span class="spin"></span>{{ t('loading') }}</div>
       <div v-else>
         <div v-for="n in notifModal.list" :key="n.id" class="notif-item row-hover" 
@@ -68,3 +80,59 @@ const emit = defineEmits<{
   </div>
 </div>
 </template>
+
+<style scoped>
+.notif-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  border-bottom: 1px solid var(--border-main);
+  background: var(--bg-r1);
+  font-size: 13px;
+}
+
+/* TOGGLE SWITCH */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider-toggle {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--bg-r3);
+  transition: .4s;
+  border-radius: 20px;
+  border: 1px solid var(--border-main);
+}
+.slider-toggle:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-muted);
+  transition: .4s;
+  border-radius: 50%;
+}
+input:checked + .slider-toggle {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+input:checked + .slider-toggle:before {
+  transform: translateX(14px);
+  background-color: white;
+}
+</style>

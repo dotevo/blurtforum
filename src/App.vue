@@ -53,7 +53,7 @@ const {
   community, communityRewards,
   doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
   changePage,
-  submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+  submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal, togglePushNotifications,
   walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
   walletAuthModal,
   followModal, confirmToggleFollow,
@@ -485,11 +485,11 @@ const {
     :notif-modal="notifModal"
     :auth="auth"
     :t="t"
-
     :time-ago="timeAgo"
     :get-notif-icon="getNotifIcon"
     @close="notifModal.show = false"
     @open-notification="openNotification"
+    @toggle-push-notifications="togglePushNotifications"
   />
 
   <StructureDocs
@@ -588,10 +588,6 @@ const {
     </div>
   </div>
 
-  <!-- Player spacer -->
-  <div class="player-spacer"
-       :style="{ height: (player.state.active && !player.state.minimized) ? (player.state.expanded ? player.state.expandedHeight + 'px' : '100px') : '0px' }">
-  </div>
 
 </div><!-- /root -->
 </template>

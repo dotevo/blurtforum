@@ -1332,7 +1332,7 @@ export function useApp() {
 
   const handleWalletSubmit = (data: any) => _handleWalletSubmit(data, globalProps);
 
-  const { openNotifModal, openNotification: _openNotification, startPolling: startNotifPolling } = useNotifications(client, auth);
+  const { openNotifModal, openNotification: _openNotification, startPolling: startNotifPolling, togglePushNotifications } = useNotifications(client, auth, t);
 
   const openNotification = (notif: Notification) => _openNotification(notif, {
     openTopic, openProfile, normalizePost, client, config, targetNotifPermlink,
@@ -1493,7 +1493,7 @@ export function useApp() {
     community: BFCommunity, communityRewards,
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
     changePage,
-    submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal,
+    submitVote, hasVoted, openPayoutModal, payoutModal, openNotifModal, notifModal, togglePushNotifications,
     walletModal, openWalletModal, handleWalletSubmit, cancelDelegation,
     walletAuthModal,
     followModal, confirmToggleFollow,
