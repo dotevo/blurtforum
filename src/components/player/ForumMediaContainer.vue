@@ -15,6 +15,14 @@ const isActive = computed(() => {
   return (current.author === props.post.author && current.permlink === props.post.permlink);
 });
 
+const currentInPost = computed(() => {
+  const current = state.currentTrack;
+  if (current && current.author === props.post.author && current.permlink === props.post.permlink) {
+    return current;
+  }
+  return props.post.media || props.post.tracks?.[0] || null;
+});
+
 const isPlaying = computed(() => isActive.value && state.playing);
 
 const handlePlay = async () => {
@@ -22,7 +30,7 @@ const handlePlay = async () => {
     togglePlay();
   } else {
     // Micro mode logic: pick best source
-    await playTrack(props.post.media || props.post.tracks![0], false);
+    if (currentInPost.value) await playTrack(currentInPost.value, false);
   }
 };
 
@@ -45,20 +53,20 @@ const handleSwitch = async () => {
 };
 
 const handleQueue = () => {
-  addToQueue(props.post.media || props.post.tracks![0]);
+  if (currentInPost.value) addToQueue(currentInPost.value);
 };
 
-const hasMirrors = computed(() => (props.post.tracks?.length || 0) > 1);
+const hasMirrors = computed(() => (currentInPost.value?.sources?.length || 0) > 1);
 
 </script>
 
 <template>
-  <div class="forum-media-container mode-micro">
-    <!-- Hidden mirrors for registration -->
+  <div v-if="post.tracks && post.tracks.length" class="forum-media-container mode-micro">
+    <!-- Hidden tracks for registration -->
     <template v-if="post.tracks && post.tracks.length">
       <ForumMedia 
         v-for="m in post.tracks" 
-        :key="`${post.author}/${post.permlink}/${m.sources[0].id}`"
+        :key="`${post.author}/${post.permlink}/${m.sources[0]?.id || m.subId}`"
         :media="m"
         mode="unvisible"
       />
@@ -67,7 +75,7 @@ const hasMirrors = computed(() => (props.post.tracks?.length || 0) > 1);
     <div class="forum-media-micro">
       <!-- PLAY / PAUSE -->
       <span class="media-icon" @click.stop="handlePlay" :title="post.title" :class="{ 'is-active': isActive, 'is-playing': isPlaying }">
-        <i :class="isPlaying ? 'fa-solid fa-pause' : (post.media?.sources[0]?.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play')"></i>
+        <i :class="isPlaying ? 'fa-solid fa-pause' : (currentInPost?.sources[0]?.type === 'audio' ? 'fa-solid fa-music' : 'fa-solid fa-circle-play')"></i>
       </span>
 
       <!-- SWITCH (only if mirrors exist) -->
