@@ -3,8 +3,8 @@
  */
 import { reactive } from 'vue';
 
-export type Lang = 'en' | 'pl' | 'eo';
-export const LANGS: Lang[] = ['en', 'pl', 'eo'];
+export type Lang = 'en' | 'pl' | 'eo' | 'de' | 'fr' | 'es';
+export const LANGS: Lang[] = ['en', 'pl', 'eo', 'de', 'fr', 'es'];
 
 // Reactive object to hold current translations
 export const TR = reactive<Record<string, string>>({});

@@ -4,7 +4,7 @@ const path = require('path');
 const localesDir = path.join(__dirname, 'public/locales');
 const srcDir = path.join(__dirname, 'src');
 
-const locales = ['en', 'pl', 'eo'];
+const locales = ['en', 'pl', 'eo', 'de', 'fr', 'es'];
 const translations = {};
 
 // Load translations
