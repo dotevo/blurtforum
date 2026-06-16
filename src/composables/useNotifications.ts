@@ -17,6 +17,8 @@ export const notifModal = reactive({
   list: [] as Notification[],
   lastReadIds: safeParse('bf_last_notif_ids', {}),
   lastReadHistoryIds: safeParse('bf_last_history_ids', {}),
+  lastPushedIds: safeParse('bf_last_pushed_ids', {}),
+  lastPushedHistoryIds: safeParse('bf_last_pushed_history_ids', {}),
   hasNew: false,
   clickedIds: safeParse('bf_clicked_notif_ids', []),
   pushSupported: 'Notification' in window,
@@ -89,45 +91,58 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
       for (const account of auth.accounts) {
         // 1. Check standard notifications (limit 2)
         const lastReadId = notifModal.lastReadIds[account.username] || 0;
+        const lastPushedId = notifModal.lastPushedIds[account.username] || lastReadId;
         const list = await Blockchain.getNotifications(client, account.username, 2);
+        
         if (list?.length) {
           const maxId = Number(list[0].id);
-          if (maxId > lastReadId) {
-            hasAnyNew = true;
-            if (notifModal.pushEnabled && !isInitial && !notifModal.show) {
-              list.filter((n: any) => Number(n.id) > lastReadId).forEach((n: any) => {
-                new Notification(`Blurt: @${n.author || 'system'}`, { body: n.msg || n.type, icon: '/favicon.svg' });
-              });
-              notifModal.lastReadIds[account.username] = maxId;
-              localStorage.setItem('bf_last_notif_ids', JSON.stringify(notifModal.lastReadIds));
-            }
+          if (maxId > lastReadId) hasAnyNew = true;
+          
+          if (maxId > lastPushedId && notifModal.pushEnabled && !isInitial && !notifModal.show) {
+            list.filter((n: any) => Number(n.id) > lastPushedId).forEach((n: any) => {
+              new Notification(`Blurt: @${n.author || 'system'}`, { body: n.msg || n.type, icon: '/favicon.svg' });
+            });
+            notifModal.lastPushedIds[account.username] = maxId;
+            localStorage.setItem('bf_last_pushed_ids', JSON.stringify(notifModal.lastPushedIds));
           }
         }
 
         // 2. Check transfers in history (limit 3)
-        const lastHistoryId = notifModal.lastReadHistoryIds[account.username] || 0;
+        const lastReadHId = notifModal.lastReadHistoryIds[account.username] || 0;
+        const lastPushedHId = notifModal.lastPushedHistoryIds[account.username] || lastReadHId;
         const history = await Blockchain.getAccountHistory(client, account.username, -1, 3);
+        
         if (history?.length) {
-          const maxHId = history[history.length - 1][0]; // last item index
-          if (maxHId > lastHistoryId) {
-            const newTransfers = history.filter((item: any) => {
+          const maxHId = history[history.length - 1][0];
+          
+          // Check for unread transfers (to trigger bell)
+          const hasUnreadTransfers = history.some((item: any) => {
+            const idx = item[0];
+            const op = item[1].op;
+            return idx > lastReadHId && op[0] === 'transfer' && op[1].to === account.username;
+          });
+          if (hasUnreadTransfers) hasAnyNew = true;
+
+          // Check for unpushed transfers (to show notification)
+          if (maxHId > lastPushedHId && notifModal.pushEnabled && !isInitial && !notifModal.show) {
+            const newToPush = history.filter((item: any) => {
               const idx = item[0];
               const op = item[1].op;
-              return idx > lastHistoryId && op[0] === 'transfer' && op[1].to === account.username;
+              return idx > lastPushedHId && op[0] === 'transfer' && op[1].to === account.username;
             });
             
-            if (newTransfers.length > 0) {
-              hasAnyNew = true;
-              if (notifModal.pushEnabled && !isInitial && !notifModal.show) {
-                newTransfers.forEach((item: any) => {
-                  const tx = item[1].op[1];
-                  new Notification(`Received ${tx.amount}`, { body: `From: @${tx.from}${tx.memo ? ': ' + tx.memo : ''}`, icon: '/favicon.svg' });
-                });
-              }
+            if (newToPush.length > 0) {
+              newToPush.forEach((item: any) => {
+                const tx = item[1].op[1];
+                new Notification(`Received ${tx.amount}`, { body: `From: @${tx.from}${tx.memo ? ': ' + tx.memo : ''}`, icon: '/favicon.svg' });
+              });
+              notifModal.lastPushedHistoryIds[account.username] = maxHId;
+              localStorage.setItem('bf_last_pushed_history_ids', JSON.stringify(notifModal.lastPushedHistoryIds));
+            } else if (maxHId > lastPushedHId) {
+              // Even if no new transfers to push, we update lastPushedHId to avoid re-checking same non-transfer history
+              notifModal.lastPushedHistoryIds[account.username] = maxHId;
+              localStorage.setItem('bf_last_pushed_history_ids', JSON.stringify(notifModal.lastPushedHistoryIds));
             }
-            // Always update lastHistoryId to avoid re-scanning old transactions
-            notifModal.lastReadHistoryIds[account.username] = maxHId;
-            localStorage.setItem('bf_last_history_ids', JSON.stringify(notifModal.lastReadHistoryIds));
           }
         }
       }
@@ -146,16 +161,24 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
     notifModal.loading = true;
     try {
       const allNotifications: Notification[] = [];
+      const maxIdsFound: Record<string, { notif: number, history: number }> = {};
       
       await Promise.all(auth.accounts.map(async (account: any) => {
         try {
           const list = await Blockchain.getNotifications(client, account.username, 20);
+          let maxNotifId = 0;
           if (Array.isArray(list)) {
-            list.forEach(n => { n.account = account.username; allNotifications.push(n); });
+            list.forEach(n => { 
+              n.account = account.username; 
+              allNotifications.push(n);
+              if (typeof n.id === 'number' && n.id > maxNotifId) maxNotifId = n.id;
+            });
           }
           
           const history = await Blockchain.getAccountHistory(client, account.username, -1, 20);
+          let maxHistoryId = 0;
           if (Array.isArray(history)) {
+            if (history.length > 0) maxHistoryId = history[history.length - 1][0];
             history.forEach(item => {
               const op = item[1].op;
               if (op[0] === 'transfer' && op[1].to === account.username) {
@@ -171,6 +194,7 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
               }
             });
           }
+          maxIdsFound[account.username] = { notif: maxNotifId, history: maxHistoryId };
         } catch (e) { console.warn(`Notif fetch error for ${account.username}:`, e); }
       }));
 
@@ -180,12 +204,14 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
       // Update last read IDs for all accounts
       let changed = false;
       auth.accounts.forEach((account: any) => {
-        const accountNotifs = notifModal.list.filter(n => n.account === account.username && typeof n.id === 'number');
-        if (accountNotifs.length > 0) {
-          const maxId = Math.max(...accountNotifs.map(n => n.id as number));
-          const currentMax = notifModal.lastReadIds[account.username] || 0;
-          if (maxId > currentMax) {
-            notifModal.lastReadIds[account.username] = maxId;
+        const found = maxIdsFound[account.username];
+        if (found) {
+          if (found.notif > (notifModal.lastReadIds[account.username] || 0)) {
+            notifModal.lastReadIds[account.username] = found.notif;
+            changed = true;
+          }
+          if (found.history > (notifModal.lastReadHistoryIds[account.username] || 0)) {
+            notifModal.lastReadHistoryIds[account.username] = found.history;
             changed = true;
           }
         }
@@ -193,6 +219,7 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
 
       if (changed) {
         localStorage.setItem('bf_last_notif_ids', JSON.stringify(notifModal.lastReadIds));
+        localStorage.setItem('bf_last_history_ids', JSON.stringify(notifModal.lastReadHistoryIds));
         notifModal.hasNew = false;
       }
     } catch (err) {
