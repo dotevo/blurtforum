@@ -394,7 +394,7 @@ export function useApp() {
         } else if (vf.id === 'global-new') {
           rawPosts = await Blockchain.getRankedPosts(forumClient, 'created', currentTagFilter.value as string, fetchLimit, params.start_author as string, params.start_permlink as string);
         } else if (vf.id === 'global-activity') {
-          rawPosts = await Blockchain.getForumPosts(forumClient, '', fetchLimit, 'activity', undefined, params.start_author as string, params.start_permlink as string);
+          rawPosts = await Blockchain.getForumPosts(forumClient, '', fetchLimit, 'activity', undefined, params.start_author as string, params.start_permlink as string, params.tags_any as string[]);
         }
       } else {
         rawPosts = await Blockchain.getForumPosts(forumClient, params.community as string, fetchLimit, 'activity', undefined, params.start_author as string, params.start_permlink as string, params.tags_any as string[]);
