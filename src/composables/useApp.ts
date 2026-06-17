@@ -595,8 +595,8 @@ export function useApp() {
     window.history.pushState({ path: window.location.pathname + '?' + params.toString() }, '', window.location.pathname + '?' + params.toString());
   };
 
-  const applyTagFilter = async () => { syncUrl(); await loadData('current', activeForum.value); };
-  const clearTagFilter = async () => { currentTagFilter.value = ''; syncUrl(); await loadData('current', activeForum.value); };
+  const applyTagFilter = async () => { BFPlayer.clearTracks(); syncUrl(); await loadData('current', activeForum.value); };
+  const clearTagFilter = async () => { BFPlayer.clearTracks(); currentTagFilter.value = ''; syncUrl(); await loadData('current', activeForum.value); };
 
   const goHome = (): void => {
     BFPlayer.clearTracks();
@@ -610,9 +610,9 @@ export function useApp() {
     syncUrl();
     loadData('current');
   };
-      BFPlayer.clearTracks();
 
   const openForum = (forum: Forum): void => {
+    BFPlayer.clearTracks();
     // Aggressively reset all pagination markers for this forum
     forum.lastAuthor = ''; 
     forum.lastPermlink = ''; 
