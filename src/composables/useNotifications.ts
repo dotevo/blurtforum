@@ -80,6 +80,16 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
     setTitleIcon('notif', hasNew ? '🔔' : null);
   }, { immediate: true });
 
+  // Tab synchronization: update local state when another tab saves to localStorage
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'bf_last_pushed_ids' && e.newValue) {
+      notifModal.lastPushedIds = JSON.parse(e.newValue);
+    }
+    if (e.key === 'bf_last_pushed_history_ids' && e.newValue) {
+      notifModal.lastPushedHistoryIds = JSON.parse(e.newValue);
+    }
+  });
+
   const checkNewNotifications = async (isInitial = false): Promise<void> => {
     if (auth.accounts.length === 0 || notifModal.show) {
       notifModal.initializing = false;
@@ -91,7 +101,11 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
       for (const account of auth.accounts) {
         // 1. Check standard notifications (limit 2)
         const lastReadId = notifModal.lastReadIds[account.username] || 0;
+        
+        // Always re-read from localStorage before checking to get latest from other tabs
+        notifModal.lastPushedIds = safeParse('bf_last_pushed_ids', {});
         const lastPushedId = notifModal.lastPushedIds[account.username] || lastReadId;
+        
         const list = await Blockchain.getNotifications(client, account.username, 2);
         
         if (list?.length) {
@@ -99,23 +113,32 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
           if (maxId > lastReadId) hasAnyNew = true;
           
           if (maxId > lastPushedId && notifModal.pushEnabled && !isInitial && !notifModal.show) {
-            list.filter((n: any) => Number(n.id) > lastPushedId).forEach((n: any) => {
-              new Notification(`Blurt: @${n.author || 'system'}`, { body: n.msg || n.type, icon: '/favicon.svg' });
-            });
-            notifModal.lastPushedIds[account.username] = maxId;
-            localStorage.setItem('bf_last_pushed_ids', JSON.stringify(notifModal.lastPushedIds));
+            const toPush = list.filter((n: any) => Number(n.id) > lastPushedId);
+            if (toPush.length > 0) {
+              // SAVE FIRST to lock for other tabs
+              notifModal.lastPushedIds[account.username] = maxId;
+              localStorage.setItem('bf_last_pushed_ids', JSON.stringify(notifModal.lastPushedIds));
+              
+              // THEN SHOW
+              toPush.forEach((n: any) => {
+                new Notification(`Blurt: @${n.author || 'system'}`, { body: n.msg || n.type, icon: '/favicon.svg' });
+              });
+            }
           }
         }
 
         // 2. Check transfers in history (limit 3)
         const lastReadHId = notifModal.lastReadHistoryIds[account.username] || 0;
+        
+        // Re-read history pushed IDs
+        notifModal.lastPushedHistoryIds = safeParse('bf_last_pushed_history_ids', {});
         const lastPushedHId = notifModal.lastPushedHistoryIds[account.username] || lastReadHId;
+        
         const history = await Blockchain.getAccountHistory(client, account.username, -1, 3);
         
         if (history?.length) {
           const maxHId = history[history.length - 1][0];
           
-          // Check for unread transfers (to trigger bell)
           const hasUnreadTransfers = history.some((item: any) => {
             const idx = item[0];
             const op = item[1].op;
@@ -123,7 +146,6 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
           });
           if (hasUnreadTransfers) hasAnyNew = true;
 
-          // Check for unpushed transfers (to show notification)
           if (maxHId > lastPushedHId && notifModal.pushEnabled && !isInitial && !notifModal.show) {
             const newToPush = history.filter((item: any) => {
               const idx = item[0];
@@ -131,17 +153,15 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
               return idx > lastPushedHId && op[0] === 'transfer' && op[1].to === account.username;
             });
             
+            // ALWAYS UPDATE lastPushedHId if maxHId is newer to avoid race conditions
+            notifModal.lastPushedHistoryIds[account.username] = maxHId;
+            localStorage.setItem('bf_last_pushed_history_ids', JSON.stringify(notifModal.lastPushedHistoryIds));
+
             if (newToPush.length > 0) {
               newToPush.forEach((item: any) => {
                 const tx = item[1].op[1];
                 new Notification(`Received ${tx.amount}`, { body: `From: @${tx.from}${tx.memo ? ': ' + tx.memo : ''}`, icon: '/favicon.svg' });
               });
-              notifModal.lastPushedHistoryIds[account.username] = maxHId;
-              localStorage.setItem('bf_last_pushed_history_ids', JSON.stringify(notifModal.lastPushedHistoryIds));
-            } else if (maxHId > lastPushedHId) {
-              // Even if no new transfers to push, we update lastPushedHId to avoid re-checking same non-transfer history
-              notifModal.lastPushedHistoryIds[account.username] = maxHId;
-              localStorage.setItem('bf_last_pushed_history_ids', JSON.stringify(notifModal.lastPushedHistoryIds));
             }
           }
         }
@@ -153,7 +173,11 @@ export const useNotifications = (client: any, auth: any, t: (k: string) => strin
 
   const startPolling = () => {
     checkNewNotifications(true);
-    setInterval(checkNewNotifications, 60000);
+    // Use a random offset (0-10s) to prevent all tabs from hitting the API at the exact same millisecond
+    const offset = Math.floor(Math.random() * 10000);
+    setTimeout(() => {
+      setInterval(checkNewNotifications, 60000);
+    }, offset);
   };
 
   const openNotifModal = async (): Promise<void> => {
