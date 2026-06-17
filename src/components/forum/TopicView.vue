@@ -132,16 +132,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                   <span v-if="activeTopic.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                  <PayoutBadge :post="activeTopic" :show-currency="true" @click="emit('openPayoutModal', activeTopic)" />
                   
-                  <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
-
-                  <VoteButton 
-                    :voted="hasVoted(activeTopic)" 
-                    :count="activeTopic.vote_count" 
-                    @vote="emit('submitVote', activeTopic)" 
-                    style="font-size: 16px;"
-                  />
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
@@ -175,17 +166,12 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                         style="width:auto; margin:0; padding:2px 6px !important;">
                   <i class="fa-solid" :class="followingSet.has(activeTopic.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                 </button>
-                <VoteButton :voted="hasVoted(activeTopic)" :count="activeTopic.vote_count" @vote="emit('submitVote', activeTopic)" />
               </div>
 
               <!-- Mobile Header Stats (OP) -->
               <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <PayoutBadge :post="activeTopic" @click="emit('openPayoutModal', activeTopic)" />
-                  
-                  
                   <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
-                  
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
@@ -291,10 +277,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     </span>
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                       <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                      <PayoutBadge :post="r" :precision="3" @click="emit('openPayoutModal', r)" />
                       <PostBeneficiaries :beneficiaries="r.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
-                      <VoteButton :voted="hasVoted(r)" :count="r.vote_count" @vote="emit('submitVote', r)" />
-
                       <template v-if="canMute && isPostInCommunity(r)">
                         <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
                         <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
@@ -328,25 +311,20 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                             style="width:auto; margin:0; padding:2px 6px !important;">
                       <i class="fa-solid" :class="followingSet.has(r.author) ? 'fa-user-check' : 'fa-user-plus'"></i>
                     </button>
-                    <VoteButton 
-                      :voted="hasVoted(r)" 
-                      :count="r.vote_count" 
-                      @vote="emit('submitVote', r)" 
-                    />
+
+                      <template v-if="canMute && isPostInCommunity(r)">
+                        <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
+                        <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
+                      </template>
+
                   </div>
 
                   <!-- Mobile Header Stats (payout/votes) -->
                   <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                      <PayoutBadge :post="r" :precision="3" @click="emit('openPayoutModal', r)" />
-                      
 
                       <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
                       
-                      <template v-if="canMute && isPostInCommunity(r)">
-                        <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
-                        <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
-                      </template>
                     </div>
                     <div v-if="(r.depth ?? 0) > 1" class="depth-badge">↳ {{ t('nested') }}</div>
                   </div>
