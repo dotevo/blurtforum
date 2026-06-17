@@ -111,7 +111,7 @@ const finalTags = computed(() => {
 
     <div style="margin-bottom:10px">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <label class="form-label" style="margin:0">{{ (mode === 'post' || mode === 'edit') ? t('postBody') + ' (Markdown)' : '' }}</label>
+        <label class="form-label" style="margin:0">{{ (mode === 'post' || mode === 'edit') ? t('postBody'): '' }}</label>
         <div style="display:flex; gap:6px; align-items:center;">
           <!-- Image upload button -->
           <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: imgUpload ? 0.5 : 1}">
