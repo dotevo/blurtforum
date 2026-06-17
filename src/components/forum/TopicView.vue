@@ -205,12 +205,23 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
               </ForumMedia>
               <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
-              <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
-                <template v-if="auth.user">
-                  <button class="btn btn-sm" @click="emit('startReply', activeTopic)">{{ t('reply') }}</button>
-                  <button v-if="auth.user.username === activeTopic.author" class="btn btn-sm btn-ghost" @click="emit('startEdit', activeTopic)">{{ t('edit') }}</button>
-                </template>
-                <span v-else class="gs" style="font-weight: bold;">{{ t('loginToReply') }}</span>
+              <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 10px;">
+                  <template v-if="auth.user">
+                    <button class="btn btn-sm" @click="emit('startReply', activeTopic)">{{ t('reply') }}</button>
+                    <button v-if="auth.user.username === activeTopic.author" class="btn btn-sm btn-ghost" @click="emit('startEdit', activeTopic)">{{ t('edit') }}</button>
+                  </template>
+                  <span v-else class="gs" style="font-weight: bold;">{{ t('loginToReply') }}</span>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                  <PayoutBadge :post="activeTopic" :show-currency="true" @click="emit('openPayoutModal', activeTopic)" />
+                  <VoteButton 
+                    :voted="hasVoted(activeTopic)" 
+                    :count="activeTopic.vote_count" 
+                    @vote="emit('submitVote', activeTopic)" 
+                    style="font-size: 16px;"
+                  />
+                </div>
               </div>
             </td>
           </tr>
@@ -363,11 +374,21 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   </ForumMedia>
                   <div v-else class="post-body" v-html="renderMD(r.body, r)"></div>
     
-                  <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; gap: 10px;">
-                    <template v-if="auth.user">
-                      <button class="btn btn-sm" @click="emit('startReply', r)">{{ t('reply') }}</button>
-                      <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="emit('startEdit', r)">{{ t('edit') }}</button>
-                    </template>
+                  <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; gap: 10px;">
+                      <template v-if="auth.user">
+                        <button class="btn btn-sm" @click="emit('startReply', r)">{{ t('reply') }}</button>
+                        <button v-if="auth.user.username === r.author" class="btn btn-sm btn-ghost" @click="emit('startEdit', r)">{{ t('edit') }}</button>
+                      </template>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                      <PayoutBadge :post="r" :precision="3" @click="emit('openPayoutModal', r)" />
+                      <VoteButton 
+                        :voted="hasVoted(r)" 
+                        :count="r.vote_count" 
+                        @vote="emit('submitVote', r)" 
+                      />
+                    </div>
                   </div>
                 </td>
               </tr>
