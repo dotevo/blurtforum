@@ -135,6 +135,7 @@
   "draftRestored": "Brouillon restauré",
   "clearDraft": "Effacer le brouillon",
   "addImage": "Ajouter une image",
+  "quickReply": "Réponse rapide",
   "write": "Écrire",
   "preview": "Aperçu",
   "rpcSettings": "Paramètres RPC",
@@ -311,5 +312,8 @@
   "block": "BLOC",
   "blurt": "BLURT",
   "blurtPower": "BLURT POWER",
-  "bp": "BP"
+  "bp": "BP",
+  "whalevault": "WhaleVault",
+  "help": "Aide",
+  "rpc": "RPC"
 }

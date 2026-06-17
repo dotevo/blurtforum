@@ -136,6 +136,7 @@
   "draftRestored": "Malneto restaŭrita",
   "clearDraft": "Forigi malneton",
   "addImage": "Aldoni bildon",
+  "quickReply": "Rapida respondo",
   "write": "Skribi",
   "preview": "Antaŭvido",
   "rpcSettings": "Agordoj RPC",
@@ -309,5 +310,8 @@
   "block": "BLOKO",
   "blurt": "BLURT",
   "blurtPower": "BLURT-POTENCO",
-  "bp": "BP"
+  "bp": "BP",
+  "whalevault": "WhaleVault",
+  "help": "Helpo",
+  "rpc": "RPC"
 }

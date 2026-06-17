@@ -41,7 +41,7 @@ const emit = defineEmits<{
                  @change="emit('update:rpcDataCustom', ($event.target as HTMLInputElement).value); emit('applyRpcSettings')">
         </div>
 
-        <label style="display:block; font-size:11px; font-weight:bold; margin-bottom:5px;">🗄 {{ t('rpcForum') }} (Nexus)</label>
+        <label style="display:block; font-size:11px; font-weight:bold; margin-bottom:5px;">🗄 {{ t('rpcForum') }}</label>
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
           <select :value="rpcForumNode" @change="emit('update:rpcForumNode', ($event.target as HTMLSelectElement).value); emit('applyRpcSettings')"
                   style="width:100%; padding:10px; font-size:12px; border:1px solid var(--border-main); background:var(--bg-r1); color:var(--text); border-radius:4px;">

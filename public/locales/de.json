@@ -135,6 +135,7 @@
   "draftRestored": "Entwurf wiederhergestellt",
   "clearDraft": "Entwurf löschen",
   "addImage": "Bild hinzufügen",
+  "quickReply": "Schnelle Antwort",
   "write": "Schreiben",
   "preview": "Vorschau",
   "rpcSettings": "RPC-Einstellungen",
@@ -311,5 +312,8 @@
   "block": "BLOCK",
   "blurt": "BLURT",
   "blurtPower": "BLURT POWER",
-  "bp": "BP"
+  "bp": "BP",
+  "whalevault": "WhaleVault",
+  "help": "Hilfe",
+  "rpc": "RPC"
 }

@@ -30,7 +30,7 @@ const emit = defineEmits<{
           <span v-if="structureForm.loading" class="spin"></span>{{ t('save') }}
         </button>
         <button class="btn btn-ghost" @click="emit('close')">{{ t('cancel') }}</button>
-        <button class="btn btn-sm btn-hdr" style="margin-left: auto;" @click="emit('close')">ℹ️ Help</button>
+        <button class="btn btn-sm btn-hdr" style="margin-left: auto;" @click="emit('showDocs')">ℹ️ {{ t('help') }}</button>
       </div>
     </div>
   </div>

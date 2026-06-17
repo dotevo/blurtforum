@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, onMounted, onUpdated, defineAsyncComponent } from 'vue';
+import { reactive, onMounted, defineAsyncComponent, watch, nextTick } from 'vue';
 import { dispatchScanView } from '../../modules/player';
 import { BFUtils } from '../../modules/utils';
 const OldContentModal = defineAsyncComponent(() => import('../modals/OldContentModal.vue'));
@@ -8,13 +8,8 @@ import PostBeneficiaries from '../layout/PostBeneficiaries.vue';
 import ForumMedia from '../player/ForumMedia.ce.vue';
 import PayoutBadge from '../layout/PayoutBadge.vue';
 import UserAvatar from '../layout/UserAvatar.vue';
+import PostEditor from '../layout/PostEditor.vue';
 import type { Post, AuthUser, RawPost, Beneficiary } from '../../types';
-
-// ... (props remains same) ...
-
-// ... (emits remains same) ...
-
-// ... (logic remains same) ...
 
 const props = defineProps<{
   activeTopic: Post;
@@ -30,6 +25,7 @@ const props = defineProps<{
   replyPreview: boolean;
   replyImgUpload: boolean;
   replyFeeEstimate: string | null;
+  quickReplyBody: string;
   followingSet: Set<string>;
   canMute: boolean;
   t: (k: string) => string;
@@ -44,9 +40,28 @@ const props = defineProps<{
   broadcast: (ops: any[]) => Promise<void>;
   waitAndReload: (isTopic: boolean, author?: string, permlink?: string, pollFn?: any, label?: string) => Promise<void>;
   checkLock: (fn: any) => boolean;
+  config: { communityAccount: string };
 }>();
 
-// ... (emits remains same) ...
+const emit = defineEmits<{
+  openProfile: [username: string];
+  openPayoutModal: [post: Post];
+  submitVote: [post: Post];
+  startReply: [post: Post];
+  startEdit: [post: Post];
+  toggleFollow: [username: string];
+  mutePost: [post: Post, mute: boolean];
+  switchCommunity: [account: string];
+  loadTopicContext: [];
+  handleMediaAction: [type: string, id: string, host: string, action: string, data: any];
+  submitReply: [data?: any];
+  onReplySaveDraft: [data: { author: string; permlink: string; body: string }];
+  onReplyImagePick: [event: Event];
+  onReplyPaste: [event: ClipboardEvent];
+  scheduleReplyFeeUpdate: [content: string];
+  'update:replyPreview': [value: boolean];
+  'update:replyTarget': [value: Post | null];
+}>();
 
 // ── Support Old Content ───────────────────────────────────────────────────
 const oldContentModal = reactive({
@@ -81,37 +96,14 @@ const submitSupportComment = async (): Promise<void> => {
   oldContentModal.loading = false;
 };
 
-// ... (rest of logic) ...
-
-
-const emit = defineEmits<{
-  openProfile: [username: string];
-  openPayoutModal: [post: Post];
-  submitVote: [post: Post];
-  startReply: [post: Post];
-  startEdit: [post: Post];
-  toggleFollow: [username: string];
-  mutePost: [post: Post, mute: boolean];
-  switchCommunity: [account: string];
-  loadTopicContext: [];
-  handleMediaAction: [type: string, id: string, host: string, action: string, data: any];
-  submitReply: [];
-  onReplyImagePick: [event: Event];
-  onReplyPaste: [event: ClipboardEvent];
-  scheduleReplyFeeUpdate: [];
-  'update:replyPreview': [value: boolean];
-  'update:replyTarget': [value: Post | null];
-}>();
-
-// After each render-pass, the player scans this view.
-// nextTick ensures that forum-media tags are already in the DOM.
 const triggerScan = () => {
-  // We pass a specific container — the player doesn't have to scan the entire document.
   const container = document.querySelector('.topic-view-root');
-  dispatchScanView(container);
+  if (container) dispatchScanView(container);
 };
 onMounted(triggerScan);
-onUpdated(triggerScan);
+watch(() => [props.activeTopic.permlink, props.replies.length], () => {
+  nextTick(triggerScan);
+});
 </script>
 
 <template>
@@ -222,45 +214,29 @@ onUpdated(triggerScan);
               </div>
             </td>
           </tr>
-          <!-- Inline reply form for main post -->
+          <!-- Unified PostEditor for main post -->
           <tr v-if="replyTarget && replyTarget.permlink===activeTopic.permlink">
             <td colspan="2" style="padding:0">
-              <div class="write-form" style="margin:0;border:none;border-radius:0;">
-                <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
-                  {{ t('replyTo') }}: <i>{{ activeTopic.title }}</i>
-                </div>
-                <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
-                  <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
-                    <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
-                    <input type="file" accept="image/*" style="display:none" @change="emit('onReplyImagePick', $event)">
-                  </label>
-                  <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="emit('update:replyPreview', false)">{{ t('write') }}</button>
-                  <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="emit('update:replyPreview', true)">{{ t('preview') }}</button>
-                </div>
-                <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="emit('onReplyPaste', $event)"></textarea>
-                <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
-                <div style="margin-top:10px">
-                  <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                    <input type="checkbox" v-model="replyForm.devTip"> {{ t('devTip') }}
-                  </label>
-                </div>
-                <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
-                  <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
-                  <div class="ben-form-row">
-                    <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
-                    <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
-                    <span class="gs ben-pct-label">%</span>
-                  </div>
-                </div>
-                <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
-                <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
-                <div style="margin-top:10px;display:flex;gap:10px">
-                  <button class="btn btn-primary btn-sm" @click="emit('submitReply')" :disabled="replyForm.loading">
-                    <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
-                  </button>
-                  <button class="btn btn-sm" @click="emit('update:replyTarget', null)"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
-                </div>
-              </div>
+              <PostEditor
+                mode="reply"
+                :parent="activeTopic"
+                :auth="auth"
+                :t="t"
+                :renderMD="renderMD"
+                :loading="replyForm.loading"
+                :error="replyForm.error"
+                :success="replyForm.success"
+                :initialBody="replyForm.body"
+                :imgUpload="replyImgUpload"
+                :feeEstimate="replyFeeEstimate"
+                @submit="(data) => emit('submitReply', data)"
+                @cancel="emit('update:replyTarget', null)"
+                @imagePick="(e) => emit('onReplyImagePick', e)"
+                @paste="(e) => emit('onReplyPaste', e)"
+                @saveDraft="(d) => emit('onReplySaveDraft', { author: activeTopic.author, permlink: activeTopic.permlink, body: d.body })"
+                @scheduleFeeUpdate="(c) => emit('scheduleReplyFeeUpdate', c)"
+                style="margin:0; border:none; border-radius:0;"
+              />
             </td>
           </tr>
         </tbody>
@@ -395,53 +371,62 @@ onUpdated(triggerScan);
                   </div>
                 </td>
               </tr>
-              <!-- Inline reply form for this comment -->
+              <!-- Unified PostEditor for this comment -->
               <tr v-if="replyTarget && replyTarget.permlink===r.permlink">
                 <td colspan="2" style="padding:0">
-                  <div class="write-form" style="margin:0;border:none;border-radius:0;">
-                    <div style="font-weight:bold;color:var(--primary);margin-bottom:10px">
-                      {{ t('replyTo') }}: <b>@{{ r.author }}</b>
-                    </div>
-                    <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:4px;">
-                      <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: replyImgUpload ? 0.5 : 1}">
-                        <span v-if="replyImgUpload" class="spin"></span><span v-else>📎</span>
-                        <input type="file" accept="image/*" style="display:none" @change="emit('onReplyImagePick', $event)">
-                      </label>
-                      <button class="btn btn-sm" :class="replyPreview ? 'btn-ghost' : 'btn-primary'" @click="emit('update:replyPreview', false)">{{ t('write') }}</button>
-                      <button class="btn btn-sm" :class="replyPreview ? 'btn-primary' : 'btn-ghost'" @click="emit('update:replyPreview', true)">{{ t('preview') }}</button>
-                    </div>
-                    <textarea v-if="!replyPreview" v-model="replyForm.body" :placeholder="t('writeReply')" @paste="emit('onReplyPaste', $event)"></textarea>
-                    <div v-else class="post-body" style="min-height:80px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="replyForm.body ? renderMD(replyForm.body) : '<span style=&quot;opacity:0.4&quot;>...</span>'"></div>
-                    
-                    <div style="margin-top:10px">
-                      <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                        <input type="checkbox" v-model="replyForm.devTip"> {{ t('devTip') }}
-                      </label>
-                    </div>
-                    <div style="margin-top:8px; padding:8px 10px; border:1px dashed var(--border-main); border-radius:4px;">
-                      <div class="gs" style="font-weight:bold; margin-bottom:5px;">👥 {{ t('addBeneficiary') }}</div>
-                      <div class="ben-form-row">
-                        <input type="text" v-model="replyForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
-                        <input type="number" v-model="replyForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
-                        <span class="gs ben-pct-label">%</span>
-                      </div>
-                    </div>
-                    <div v-if="replyForm.error" class="alert alert-error" style="margin-top:10px">{{ replyForm.error }}</div>
-                    <div v-if="replyForm.success" class="alert alert-success" style="margin-top:10px">{{ replyForm.success }}</div>
-
-                    <div style="margin-top:10px; display:flex; gap:10px;">
-                      <button class="btn btn-primary btn-sm" @click="emit('submitReply')" :disabled="replyForm.loading">
-                        <span v-if="replyForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('send') }}
-                      </button>
-                      <button class="btn btn-sm btn-ghost" @click="emit('update:replyTarget', null)"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
-                    </div>
-                  </div>
+                  <PostEditor
+                    mode="reply"
+                    :parent="r"
+                    :auth="auth"
+                    :t="t"
+                    :renderMD="renderMD"
+                    :loading="replyForm.loading"
+                    :error="replyForm.error"
+                    :success="replyForm.success"
+                    :initialBody="replyForm.body"
+                    :imgUpload="replyImgUpload"
+                    :feeEstimate="replyFeeEstimate"
+                    @submit="(data) => emit('submitReply', data)"
+                    @cancel="emit('update:replyTarget', null)"
+                    @imagePick="(e) => emit('onReplyImagePick', e)"
+                    @paste="(e) => emit('onReplyPaste', e)"
+                    @saveDraft="(d) => emit('onReplySaveDraft', { author: r.author, permlink: r.permlink, body: d.body })"
+                    @scheduleFeeUpdate="(c) => emit('scheduleReplyFeeUpdate', c)"
+                    style="margin:0; border:none; border-radius:0;"
+                  />
                 </td>
               </tr>
             </tbody>
           </table>
         </template>
       </template>
+ 
+      <!-- QUICK REPLY (ALWAYS VISIBLE AT BOTTOM) -->
+      <div v-if="auth.user" class="quick-reply-area" style="margin-top: 20px;">
+        <div class="forumline" style="padding: 0;">
+          <PostEditor
+            mode="reply"
+            :parent="activeTopic"
+            :auth="auth"
+            :t="t"
+            :renderMD="renderMD"
+            :loading="replyForm.loading"
+            :error="replyForm.error"
+            :success="replyForm.success"
+            :initialBody="quickReplyBody"
+            :imgUpload="replyImgUpload"
+            :feeEstimate="replyFeeEstimate"
+            :hide-cancel="true"
+            @submit="(data) => emit('submitReply', { ...data, _target: activeTopic })"
+            @cancel="() => {}"
+            @imagePick="(e) => emit('onReplyImagePick', e)"
+            @paste="(e) => emit('onReplyPaste', e)"
+            @saveDraft="(d) => emit('onReplySaveDraft', { author: activeTopic.author, permlink: activeTopic.permlink, body: d.body })"
+            @scheduleFeeUpdate="(c) => emit('scheduleReplyFeeUpdate', c)"
+            style="margin:0; border:none; border-radius:0;"
+          />
+        </div>
+      </div>
  
     <!-- /topic -->
     <OldContentModal
@@ -453,4 +438,3 @@ onUpdated(triggerScan);
     />
   </div>
 </template>
-

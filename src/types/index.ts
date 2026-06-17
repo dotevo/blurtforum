@@ -174,6 +174,7 @@ export interface ActivityItem {
   is_post: boolean;
   isRead: boolean;
   lastActivityTs: number;
+  comment_permlink?: string;
 }
 
 export interface MediaEntryMirror {

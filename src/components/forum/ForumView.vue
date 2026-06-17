@@ -6,6 +6,7 @@ import VoteButton from '../layout/VoteButton.vue';
 import ForumMediaContainer from '../player/ForumMediaContainer.vue';
 import PayoutBadge from '../layout/PayoutBadge.vue';
 import UserAvatar from '../layout/UserAvatar.vue';
+import PostEditor from '../layout/PostEditor.vue';
 
 const props = defineProps<{
   activeForum: Forum;
@@ -36,12 +37,12 @@ const emit = defineEmits<{
   openPayoutModal: [post: Post];
   submitVote: [post: Post];
   handleMediaAction: [type: string, id: string, host: string, action: string, data: any];
-  submitPost: [];
-  saveDraft: [];
+  submitPost: [data?: any];
+  saveDraft: [data?: any];
   clearDraft: [];
   onPostImagePick: [event: Event];
   onPostPaste: [event: ClipboardEvent];
-  schedulePostFeeUpdate: [];
+  schedulePostFeeUpdate: [content: string];
   'update:postPreview': [value: boolean];
   'update:showNewPostForm': [value: boolean];
   changePage: [dir: 'next' | 'prev'];
@@ -68,89 +69,36 @@ onUpdated(triggerScan);
         <span v-else class="gs" style="font-weight: bold;">{{ t('loginToPost') }}</span>
       </div>
  
-      <!-- NEW POST FORM -->
-      <div v-if="showNewPostForm && auth.user" class="write-form">
-        <div style="font-weight:bold;color:var(--primary);margin-bottom:10px;border-bottom:1px solid #D1D7DC;padding-bottom:10px;font-size:14px">
-          {{ t('newPost') }}
-        </div>
-        <div style="margin-bottom:10px">
-          <label class="form-label">{{ t('postTitle') }}</label>
-          <input type="text" v-model="postForm.title" :placeholder="t('postTitle')" @input="$emit('saveDraft')">
-        </div>
-        <!-- Draft notice -->
+      <!-- NEW POST FORM (Unified) -->
+      <div v-if="showNewPostForm && auth.user" style="margin-bottom: 20px;">
+        <!-- Draft notice (outside editor as it affects editor state) -->
         <div v-if="postForm.hasDraft" style="background:var(--bg2); border:1px solid var(--accent); border-radius:4px; padding:8px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:12px;">
           <span>📝 {{ t('draftRestored') }}</span>
           <button class="btn btn-sm btn-ghost" @click="postForm.title=''; postForm.body=''; $emit('clearDraft')">🗑 {{ t('clearDraft') }}</button>
         </div>
 
-        <div style="margin-bottom:10px">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <label class="form-label" style="margin:0">{{ t('postBody') }} (Markdown)</label>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <!-- Image upload button -->
-              <label v-if="auth.user" class="btn btn-sm btn-ghost" style="cursor:pointer; margin:0; padding:3px 8px;" :style="{opacity: postImgUpload ? 0.5 : 1}">
-                <span v-if="postImgUpload" class="spin"></span><span v-else>📎</span> {{ t('addImage') }}
-                <input type="file" accept="image/*" style="display:none" @change="$emit('onPostImagePick', $event)">
-              </label>
-              <!-- Write / Preview toggle -->
-              <button class="btn btn-sm" :class="postPreview ? 'btn-ghost' : 'btn-primary'" @click="$emit('update:postPreview', false); $emit('saveDraft')">{{ t('write') }}</button>
-              <button class="btn btn-sm" :class="postPreview ? 'btn-primary' : 'btn-ghost'" @click="$emit('update:postPreview', true); $emit('saveDraft')">{{ t('preview') }}</button>
-            </div>
-          </div>
-          <textarea v-if="!postPreview" v-model="postForm.body" :placeholder="t('writePost')" @input="$emit('saveDraft'); $emit('schedulePostFeeUpdate')" @paste="$emit('onPostPaste', $event)"></textarea>
-          <div v-else class="post-body" style="min-height:120px; border:1px solid var(--input-border); border-radius:4px; padding:10px; background:var(--input-bg);" v-html="postForm.body ? renderMD(postForm.body) : '<span style=&quot;opacity:0.4&quot;>...' + t('writePost') + '...</span>'"></div>
-        </div>
-
-        <!-- TAG SELECTOR -->
-        <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
-          <div class="gs" style="font-weight:bold; margin-bottom:8px;">🏷️ {{ t('tags') }}</div>
-          <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px;">
-            <div>
-              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('category') }}</label>
-              <select v-model="postForm.selectedTag" @change="$emit('saveDraft')"
-                      style="padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px;">
-                <option v-for="tag in activeForum.targetTags" :key="tag" :value="tag">#{{ tag }}</option>
-              </select>
-            </div>
-            <div style="flex:1; min-width:150px;">
-              <label class="gs" style="display:block; font-size:11px; margin-bottom:3px;">{{ t('customTags') }}</label>
-              <input type="text" v-model="postForm.customTags" placeholder="np. fotografia, plener" @input="$emit('saveDraft')"
-                     style="width:100%; padding:5px 8px; border:1px solid var(--input-border); background:var(--input-bg); color:var(--text); font-size:12px; border-radius:3px; box-sizing:border-box;">
-            </div>
-          </div>
-          <!-- live preview of final tags -->
-          <div class="gs" style="font-size:11px;">
-            {{ t('sentTags') }}:
-            <template v-for="tag in [config.communityAccount, postForm.selectedTag, ...postForm.customTags.split(',').map(s=>s.trim().toLowerCase().replace(/[^a-z0-9-]/g,'')).filter(Boolean)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5)" :key="tag">
-              <span style="display:inline-block; background:var(--primary); color:#fff; border-radius:3px; padding:1px 6px; margin:2px 2px 0 0; font-size:10px;">#{{ tag }}</span>
-            </template>
-            <span style="opacity:0.5">{{ t('max5') }}</span>
-          </div>
-        </div>
-        <div style="margin-bottom:10px">
-          <label class="gs" style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-            <input type="checkbox" v-model="postForm.devTip"> {{ t('devTip') }}
-          </label>
-        </div>
-        <div style="margin-bottom:10px; padding:10px; border:1px dashed var(--border-main); border-radius:4px;">
-          <div class="gs" style="font-weight:bold; margin-bottom:6px;">👥 {{ t('addBeneficiary') }}</div>
-          <div class="ben-form-row">
-            <input type="text" v-model="postForm.beneficiary.account" :placeholder="t('beneficiaryAccount')" class="ben-input-account">
-            <input type="number" v-model="postForm.beneficiary.weight" min="1" max="100" :placeholder="t('beneficiaryWeight')" class="ben-input-pct">
-            <span class="gs ben-pct-label">%</span>
-          </div>
-        </div>
-        <div v-if="postForm.error" class="alert alert-error">{{ postForm.error }}</div>
-        <div v-if="postForm.success" class="alert alert-success">{{ postForm.success }}</div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <button class="btn btn-primary" @click="$emit('submitPost')" :disabled="postForm.loading">
-            <span v-if="postForm.loading" class="spin"></span><i v-else class="fa-solid fa-paper-plane"></i> {{ t('submit') }}
-          </button>
-          <button class="btn btn-ghost" @click="$emit('update:showNewPostForm', false); $emit('clearDraft')"><i class="fa-solid fa-xmark"></i> {{ t('cancel') }}</button>
-          <span v-if="postFeeEstimate" style="font-size:11px; color:var(--text-muted); margin-left:4px;">
-            💸 ~{{ postFeeEstimate }} BLURT
-          </span>
-        </div>
+        <PostEditor
+          mode="post"
+          :parent="activeForum"
+          :auth="auth"
+          :t="t"
+          :renderMD="renderMD"
+          :loading="postForm.loading"
+          :error="postForm.error"
+          :success="postForm.success"
+          :initialTitle="postForm.title"
+          :initialBody="postForm.body"
+          :imgUpload="postImgUpload"
+          :feeEstimate="postFeeEstimate"
+          :config="config"
+          @submit="(data) => emit('submitPost', data)"
+          @cancel="emit('update:showNewPostForm', false)"
+          @imagePick="(e) => emit('onPostImagePick', e)"
+          @paste="(e) => emit('onPostPaste', e)"
+          @scheduleFeeUpdate="(c) => emit('schedulePostFeeUpdate', c)"
+          @saveDraft="(data) => emit('saveDraft', data)"
+          @clearDraft="emit('clearDraft')"
+        />
       </div>
  
       <table class="forumline post-list-table">
@@ -208,7 +156,7 @@ onUpdated(triggerScan);
               <PayoutBadge :post="post" @click="$emit('openPayoutModal', post)" />
             </td>
             <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
-              <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br>
+              <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br/>
               <a href="#" @click.stop.prevent="$emit('openProfile', post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
               <span class="gs" style="font-size: 10px; opacity: 0.8;">💬 {{ post.replyCount }} {{ t('replies') }}</span>
             </td>

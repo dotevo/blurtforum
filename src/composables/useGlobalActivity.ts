@@ -38,6 +38,7 @@ export function useGlobalActivity(
               permlink: normalized.permlink, root_author: normalized.author, root_permlink: normalized.permlink,
               is_post: normalized.author === normalized.lastAuthor && normalized.created === normalized.lastActivity,
               isRead: normalized.isRead, lastActivityTs: normalized.lastActivityTs!,
+              comment_permlink: p.last_reply_permlink
             });
           });
         }

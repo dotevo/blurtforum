@@ -73,6 +73,8 @@ const {
   claimRewards,
   postPreview, replyPreview, saveDraft, clearDraft,
   imgUploads, onImagePick, onPaste,
+  saveReplyDraft,
+  quickReplyBody,
   rpcMenuOpen, rpcDataNode, rpcForumNode, rpcDataCustom, rpcForumCustom, applyRpcSettings,
   getNotifIcon,
   loadTopicContext,
@@ -244,7 +246,7 @@ const {
 
     <!-- Blockchain wait queue panel -->
     <div v-if="bcWaitQueue.length > 0" class="bc-queue-panel"
-         :style="{ bottom: (player.state.active && !player.state.minimized) ? (player.state.expanded ? player.state.expandedHeight + 'px' : '100px') : '0' }">
+         :style="{ bottom: (player.state.active && !player.state.minimized && player.state.expanded) ? player.state.expandedHeight + 'px' : '' }">
       <div class="bc-queue-inner">
         <template v-for="entry in (bcQueueExpanded ? bcWaitQueue : bcWaitQueue.slice(0, 3))" :key="entry.id">
           <div class="bc-queue-item">
@@ -328,7 +330,7 @@ const {
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"
         @submit-post="submitPost"
-        @save-draft="saveDraft"
+        @save-draft="saveDraft($event)"
         @clear-draft="clearDraft"
         @on-post-image-pick="onImagePick('post', $event)"
         @on-post-paste="onPaste('post', $event)"
@@ -345,11 +347,14 @@ const {
         :replies="replies"
         :replies-loading="repliesLoading"
         :auth="auth"
+        :config="config"
         :reply-target="replyTarget"
+        @update:reply-target="replyTarget = $event"
         :reply-form="replyForm"
         :reply-preview="replyPreview"
         :reply-img-upload="imgUploads.reply"
         :reply-fee-estimate="feeEstimates.reply"
+        :quick-reply-body="quickReplyBody"
         :following-set="followingSet"
         :can-mute="canMute"
         :t="t"
@@ -374,11 +379,15 @@ const {
         @switch-community="switchCommunity"
         @load-topic-context="loadTopicContext"
         @submit-reply="submitReply"
+        @on-reply-save-draft="(d) => { 
+          saveReplyDraft(d.author, d.permlink, d.body); 
+          if (activeTopic && d.author === activeTopic.author && d.permlink === activeTopic.permlink) quickReplyBody = d.body;
+          if (replyTarget && d.author === replyTarget.author && d.permlink === replyTarget.permlink) replyForm.body = d.body;
+        }"
         @on-reply-image-pick="onImagePick('reply', $event)"
         @on-reply-paste="onPaste('reply', $event)"
         @schedule-reply-fee-update="scheduleFeeUpdate('reply')"
         @update:reply-preview="replyPreview = $event"
-        @update:reply-target="replyTarget = $event"
       />
 
       <CommunitiesView
@@ -509,12 +518,15 @@ const {
   <EditModal
     v-if="editModal.show"
     :edit-modal="editModal"
+    :auth="auth"
     :t="t"
     :render-m-d="(s: string, ctx?: unknown) => renderMD(s, ctx as Record<string,unknown> | null)"
+    :img-upload="imgUploads.post"
     @close="editModal.show = false"
     @submit-edit="submitEdit"
+    @image-pick="onImagePick('post', $event)"
+    @paste="onPaste('post', $event)"
   />
-
   <PinModal
     v-if="pinModal.show"
     :pin-modal="pinModal"

@@ -3,7 +3,7 @@
  * Ports the entire app.js setup() logic into a typed Vue 3 composable.
  */
 import {
-  ref, reactive, computed, onMounted, nextTick,
+  ref, reactive, computed, onMounted, nextTick, watch,
 } from 'vue';
 import CryptoJS from 'crypto-js';
 import { useNotifications, notifModal } from './useNotifications';
@@ -150,6 +150,12 @@ export function useApp() {
   };
 
   const replyTarget = ref<Post | null>(null);
+  const quickReplyBody = ref('');
+  watch(replyTarget, (newVal) => {
+    if (!newVal && activeTopic.value) {
+      replyForm.body = loadReplyDraft(activeTopic.value.author, activeTopic.value.permlink);
+    }
+  });
   const replyForm   = reactive({ body: '', loading: false, error: '', success: '', beneficiary: { account: '', weight: '' } });
 
   const showNewPostForm = ref(false);
@@ -157,11 +163,44 @@ export function useApp() {
   const replyPreview = ref(false);
 
   const getDraftKey = () => `bf-draft-${config.communityAccount}-${activeForum.value?.id || 'x'}`;
-  const saveDraft = () => {
+  const saveDraft = (data?: any) => {
+    if (data) {
+      postForm.title = data.title; postForm.body = data.body;
+      if (data.selectedTag) postForm.selectedTag = data.selectedTag;
+      if (data.customTags !== undefined) postForm.customTags = data.customTags;
+    }
     if (!postForm.title && !postForm.body) return;
-    localStorage.setItem(getDraftKey(), JSON.stringify({ title: postForm.title, body: postForm.body, selectedTag: postForm.selectedTag, customTags: postForm.customTags }));
+    localStorage.setItem(getDraftKey(), JSON.stringify({ title: postForm.title, body: postForm.body, selectedTag: postForm.selectedTag, customTags: postForm.customTags, ts: Date.now() }));
   };
   const clearDraft = () => { localStorage.removeItem(getDraftKey()); postForm.hasDraft = false; };
+  
+  const getReplyDraftKey = (author: string, permlink: string) => `bf-reply-draft-${author}-${permlink}`;
+  const cleanupDrafts = () => {
+    const now = Date.now(); const month = 30 * 24 * 60 * 60 * 1000;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('bf-reply-draft-')) {
+          const d = JSON.parse(localStorage.getItem(key)!);
+          if (now - (d.ts || 0) > month) { localStorage.removeItem(key); i--; }
+        }
+      }
+    } catch { /* ignore */ }
+  };
+  const saveReplyDraft = (author: string, permlink: string, body: string) => {
+    if (!body) { localStorage.removeItem(getReplyDraftKey(author, permlink)); return; }
+    localStorage.setItem(getReplyDraftKey(author, permlink), JSON.stringify({ body, ts: Date.now() }));
+    if (Math.random() < 0.1) cleanupDrafts();
+  };
+  const loadReplyDraft = (author: string, permlink: string) => {
+    try {
+      const d = localStorage.getItem(getReplyDraftKey(author, permlink));
+      if (d) return JSON.parse(d).body;
+    } catch { /* ignore */ }
+    return '';
+  };
+  const clearReplyDraft = (author: string, permlink: string) => localStorage.removeItem(getReplyDraftKey(author, permlink));
+
   const loadDraft = () => {
     try {
       const d = localStorage.getItem(getDraftKey());
@@ -251,8 +290,13 @@ export function useApp() {
       loadData();
     }
     markTopicAsRead({ author: act.root_author, permlink: act.root_permlink, lastActivityTs: act.lastActivityTs });
-    if (!act.is_post) { targetNotifMatch.value = { author: act.author, ts: act.lastActivityTs }; }
-    else { targetNotifPermlink.value = act.permlink; }
+    if (act.comment_permlink) {
+      targetNotifPermlink.value = act.comment_permlink;
+    } else if (!act.is_post) {
+      targetNotifMatch.value = { author: act.author, ts: act.lastActivityTs };
+    } else {
+      targetNotifPermlink.value = act.permlink;
+    }
     openTopic({ author: act.root_author, permlink: act.root_permlink } as Post);
   };
 
@@ -500,7 +544,12 @@ export function useApp() {
     replies.value = [...flat, ...stillPending].sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
 
     if (targetNotifMatch.value) {
-      const match = flat.find(r => r.author === targetNotifMatch.value!.author && new Date(r.created).getTime() === targetNotifMatch.value!.ts);
+      const targetTs = targetNotifMatch.value.ts;
+      const targetAuthor = targetNotifMatch.value.author;
+      const match = flat.find(r => 
+        r.author === targetAuthor && 
+        Math.abs((r.lastActivityTs || 0) - targetTs) < 5000
+      );
       if (match) targetNotifPermlink.value = match.permlink;
       targetNotifMatch.value = null;
     }
@@ -508,14 +557,17 @@ export function useApp() {
     if (!keepState) {
       repliesLoading.value = false;
       if (targetNotifPermlink.value) {
+        const target = targetNotifPermlink.value;
+        targetNotifPermlink.value = null;
         nextTick(() => {
-          const el = document.getElementById('post-' + targetNotifPermlink.value);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('highlighted-post');
-            setTimeout(() => el.classList.remove('highlighted-post'), 3000);
-          }
-          targetNotifPermlink.value = null;
+          setTimeout(() => {
+            const el = document.getElementById('post-' + target);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('highlighted-post');
+              setTimeout(() => el.classList.remove('highlighted-post'), 3000);
+            }
+          }, 500);
         });
       }
     }
@@ -601,6 +653,10 @@ export function useApp() {
     }
     activeTopic.value = { ...topic, beneficiaries: topic.beneficiaries || [] };
     bodyCache[`${topic.author}/${topic.permlink}`] = topic.body;
+    replyTarget.value = null;
+    replyForm.body = '';
+    quickReplyBody.value = loadReplyDraft(topic.author, topic.permlink);
+    replyForm.error = replyForm.success = '';
     view.value = 'topic';
     syncUrl();
     markTopicAsRead(activeTopic.value);
@@ -754,8 +810,25 @@ export function useApp() {
     return data.url;
   };
 
+  const lastTextarea = ref<HTMLTextAreaElement | null>(null);
+
   const insertImageIntoBody = (target: 'post' | 'reply', imgUrl: string): void => {
     const md = `\n![image](${imgUrl})\n`;
+    
+    // Try to insert at cursor in the last focused textarea
+    if (lastTextarea.value && document.contains(lastTextarea.value)) {
+      const el = lastTextarea.value;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const val = el.value;
+      el.value = val.substring(0, start) + md + val.substring(end);
+      el.selectionStart = el.selectionEnd = start + md.length;
+      el.dispatchEvent(new Event('input'));
+      el.focus();
+      return;
+    }
+
+    if (editModal.show) { editModal.body += md; return; }
     if (target === 'post') { postForm.body += md; saveDraft(); }
     else replyForm.body += md;
   };
@@ -781,6 +854,7 @@ export function useApp() {
     finally { imgUploads[target] = false; }
   };
   const onPaste = async (target: 'post' | 'reply', e: ClipboardEvent) => {
+    if (e.target instanceof HTMLTextAreaElement) lastTextarea.value = e.target;
     for (const item of Array.from(e.clipboardData?.items ?? [])) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
@@ -911,52 +985,99 @@ export function useApp() {
     }
     return bens.sort((a, b) => a.account.localeCompare(b.account));
   };
-  const submitReply = async (): Promise<void> => {
-    if (checkLock(submitReply)) return;
-    if (!auth.user || !replyTarget.value) return;
-    const body = replyForm.body.trim();
+  const submitReply = async (data?: any): Promise<void> => {
+    const target = data?._target || replyTarget.value;
+    if (checkLock(() => submitReply(data))) return;
+    if (!auth.user || !target) return;
+
+    // Use provided data or fallback to global state
+    const body = (data?.body || replyForm.body).trim();
     if (!body) { replyForm.error = 'Reply cannot be empty.'; return; }
+
     replyForm.loading = true; replyForm.error = ''; replyForm.success = '';
-    const communityAcc = activeTopic.value?.category || replyTarget.value.category;
-    const beneficiaries = prepareBeneficiaries(replyForm.beneficiary, communityAcc);
-    const op = ['comment', { parent_author: replyTarget.value.author, parent_permlink: replyTarget.value.permlink, author: auth.user.username, permlink: BFUtils.genPermlink('re-' + replyTarget.value.author), title: '', body, json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: [communityAcc || config.communityAccount], format: 'markdown' }) }];
-    const options = ['comment_options', { author: auth.user.username, permlink: (op[1] as Record<string, string>).permlink, max_accepted_payout: '1000000.000 BLURT', percent_steem_dollars: 10000, allow_votes: true, allow_curation_rewards: true, extensions: beneficiaries.length > 0 ? [[0, { beneficiaries }]] : [] }];
+    const communityAcc = activeTopic.value?.category || target.category;
+    const beneficiaries = prepareBeneficiaries(data?.beneficiary || replyForm.beneficiary, communityAcc);
+
+    const op = ['comment', {
+      parent_author: target.author,
+      parent_permlink: target.permlink,
+      author: auth.user.username,
+      permlink: BFUtils.genPermlink('re-' + target.author),
+      title: '',
+      body,
+      json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: [communityAcc || config.communityAccount], format: 'markdown' })
+    }];
+
+    const options = ['comment_options', {
+      author: auth.user.username,
+      permlink: (op[1] as Record<string, string>).permlink,
+      max_accepted_payout: '1000000.000 BLURT',
+      percent_steem_dollars: 10000,
+      allow_votes: true,
+      allow_curation_rewards: true,
+      extensions: beneficiaries.length > 0 ? [[0, { beneficiaries }]] : []
+    }];
+
     try {
       await broadcast([op, options]);
       replyForm.success = t('replySuccess');
+      clearReplyDraft(target.author, target.permlink);
+      if (data) { data.body = ''; data.title = ''; data.success = t('replySuccess'); }
+
+      if (target.permlink === activeTopic.value?.permlink) quickReplyBody.value = '';
+      else replyForm.body = '';
+
       const parentPermlink = (op[1] as Record<string, string>).parent_permlink;
       const parentReply = replies.value.find(r => r.permlink === parentPermlink);
       const optimisticDepth = parentReply ? (parentReply.depth ?? 0) + 1 : 1;
       const optimistic: Post = { author: auth.user.username, permlink: (op[1] as Record<string, string>).permlink, parent_author: (op[1] as Record<string, string>).parent_author, parent_permlink: parentPermlink, body, created: new Date().toISOString().slice(0, 19), depth: optimisticDepth, pendingPayout: 0, totalPayout: 0, payout: 0, vote_count: 0, active_votes: [], net_rshares: 0, beneficiaries, _qOpen: false, _pending: 'sending', media: null, title: '', url: '', category: '', lastActivity: '', lastAuthor: '', isUnread: false, isRead: true, isFollowing: false, isMuted: false, isPaid: false, isCollapsed: false, replyCount: 0, tags: [] };
       replies.value = [...replies.value, optimistic];
-      replyForm.body = ''; replyTarget.value = null;
+      replyTarget.value = null;
       await waitAndReload(true, auth.user.username, (op[1] as Record<string, string>).permlink);
-    } catch (err) { console.error('Reply error:', err); replyForm.error = t('replyError') + ' (' + ((err as Error).message || '') + ')'; }
+    } catch (err) {
+      console.error('Reply error:', err); 
+      replyForm.error = t('replyError') + ' (' + ((err as Error).message || '') + ')'; 
+      if (data) data.error = replyForm.error;
+    }
     replyForm.loading = false;
   };
 
-  const submitPost = async (): Promise<void> => {
-    if (checkLock(submitPost)) return;
+  const submitPost = async (data?: any): Promise<void> => {
+    if (checkLock(() => submitPost(data))) return;
     if (!auth.user || !activeForum.value) return;
-    const title = postForm.title.trim(); const body = postForm.body.trim();
+    
+    const title = (data?.title || postForm.title).trim();
+    const body = (data?.body || postForm.body).trim();
     if (!title || !body) { postForm.error = 'Title and body are required.'; return; }
+    
     postForm.loading = true; postForm.error = ''; postForm.success = '';
-    const customTagsList = postForm.customTags.split(',').map(s => s.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
+    
+    const customTagsVal = data?.customTags ?? postForm.customTags;
+    const selectedTagVal = data?.selectedTag ?? postForm.selectedTag;
+    const beneficiaryVal = data?.beneficiary ?? postForm.beneficiary;
+
+    const customTagsList = customTagsVal.split(',').map((s: string) => s.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
     const targetCommunity = config.communityAccount.startsWith('blurt-') ? config.communityAccount : null;
-    const primaryTag = targetCommunity || postForm.selectedTag || customTagsList[0] || 'blurt';
+    const primaryTag = targetCommunity || selectedTagVal || customTagsList[0] || 'blurt';
     const tags = [primaryTag];
-    if (postForm.selectedTag && !tags.includes(postForm.selectedTag)) tags.push(postForm.selectedTag);
+    if (selectedTagVal && !tags.includes(selectedTagVal)) tags.push(selectedTagVal);
     for (const ct of customTagsList) { if (tags.length >= 5) break; if (!tags.includes(ct)) tags.push(ct); }
-    const beneficiaries = prepareBeneficiaries(postForm.beneficiary, targetCommunity);
+    
+    const beneficiaries = prepareBeneficiaries(beneficiaryVal, targetCommunity);
     const op = ['comment', { parent_author: '', parent_permlink: primaryTag, author: auth.user.username, permlink: BFUtils.genPermlink(title), title, body, json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags, format: 'markdown', community: targetCommunity || undefined }) }];
     const options = ['comment_options', { author: auth.user.username, permlink: (op[1] as Record<string, string>).permlink, max_accepted_payout: '1000000.000 BLURT', percent_steem_dollars: 10000, allow_votes: true, allow_curation_rewards: true, extensions: beneficiaries.length > 0 ? [[0, { beneficiaries }]] : [] }];
     try {
       await broadcast([op, options]);
       postForm.title = ''; postForm.body = '';
+      if (data) { data.title = ''; data.body = ''; }
       clearDraft(); showNewPostForm.value = false;
       showStatus(t('newPost'), t('postSuccess'), 'success');
       waitAndReload(false, auth.user.username, (op[1] as Record<string, string>).permlink);
-    } catch (err) { console.error('Post error:', err); showStatus(t('newPost'), (t('postError') || 'Error: ') + ((err as Error).message || err), 'error'); }
+    } catch (err) {
+ 
+      console.error('Post error:', err); 
+      showStatus(t('newPost'), (t('postError') || 'Error: ') + ((err as Error).message || err), 'error'); 
+    }
     postForm.loading = false;
   };
 
@@ -1020,7 +1141,9 @@ export function useApp() {
   };
 
   const startReply = (target: Post): void => {
-    replyTarget.value = target; replyForm.body = replyForm.error = replyForm.success = '';
+    replyTarget.value = target; 
+    replyForm.body = loadReplyDraft(target.author, target.permlink);
+    replyForm.error = replyForm.success = '';
     fetchFeeInfo().then(() => { feeEstimates.reply = estimateTxFee(2, 0); });
   };
 
@@ -1136,20 +1259,27 @@ export function useApp() {
     editModal.error = ''; editModal.success = ''; editModal.loading = false; editModal.show = true;
   };
 
-  const submitEdit = async (): Promise<void> => {
-    if (checkLock(submitEdit)) return;
+  const submitEdit = async (data?: any): Promise<void> => {
+    if (checkLock(() => submitEdit(data))) return;
     if (!auth.user || !editModal.target) return;
     editModal.loading = true; editModal.error = ''; editModal.success = '';
+    
+    const body = (data?.body ?? editModal.body).trim();
+    const title = (data?.title ?? editModal.title).trim();
+
     let meta = editModal.target.json_metadata || '';
     if (typeof meta !== 'string') { try { meta = JSON.stringify(meta); } catch { meta = ''; } }
-    const op = ['comment', { parent_author: editModal.target.parent_author || '', parent_permlink: editModal.target.parent_permlink || config.communityAccount, author: auth.user.username, permlink: editModal.permlink, title: editModal.title, body: editModal.body, json_metadata: meta }];
+    const op = ['comment', { parent_author: editModal.target.parent_author || '', parent_permlink: editModal.target.parent_permlink || config.communityAccount, author: auth.user.username, permlink: editModal.permlink, title, body, json_metadata: meta }];
     try {
       await broadcast([op]);
       editModal.success = t('updateSuccess');
       const editedPermlink = editModal.permlink; const editedAuthor = editModal.author; const wasInTopic = view.value === 'topic';
       editModal.show = false;
       waitAndReload(wasInTopic, editedAuthor, editedPermlink);
-    } catch (err) { console.error('Edit error:', err); editModal.error = t('updateError') + ' (' + ((err as Error).message || '') + ')'; }
+    } catch (err) { 
+      console.error('Edit error:', err); 
+      editModal.error = t('updateError') + ' (' + ((err as Error).message || '') + ')'; 
+    }
     editModal.loading = false;
   };
 
@@ -1346,6 +1476,11 @@ export function useApp() {
     BFPlayer.registerPlugin(BlurtPlayerPlugin(client, auth));
     setTheme(theme.value);
     window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('focusin', (e) => {
+      if (e.target instanceof HTMLTextAreaElement) {
+        lastTextarea.value = e.target;
+      }
+    });
     startNotifPolling();
 
     document.addEventListener('click', (e: MouseEvent) => {
@@ -1485,7 +1620,7 @@ export function useApp() {
     lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
     activeForum, activeTopic, replies, repliesLoading, moderators, communityInfo,
     structureNote, selectedCommunity, currentTagFilter, applyTagFilter, clearTagFilter, customTag, allCommunities, userSubscriptions, auth, showLoginModal, loginTab,
-    loginForm, loginErr, loginBusy, wvAvailable, loginOptions, replyTarget, replyForm,
+    loginForm, loginErr, loginBusy, wvAvailable, loginOptions, replyTarget, quickReplyBody, replyForm,
     showNewPostForm, openNewPostForm, postForm, fmtDate, timeAgo, forumHasUnread, renderMD, isNestedReply, getParentBody,
     goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,
     switchAccount, removeAccount, showSwitchAccountModal, openSwitchAccountModal,
@@ -1512,6 +1647,7 @@ export function useApp() {
     claimRewards,
     postPreview, replyPreview, saveDraft, clearDraft,
     imgUploads, onImagePick, onPaste,
+    saveReplyDraft,
     rpcMenuOpen, rpcDataNode, rpcForumNode, rpcDataCustom, rpcForumCustom, applyRpcSettings,
     getNotifIcon,
     loadTopicContext,

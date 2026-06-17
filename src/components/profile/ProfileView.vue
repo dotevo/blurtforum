@@ -322,7 +322,7 @@ const barSeries = computed(() => {
                 <thead>
                   <tr>
                     <td class="thHead" style="text-align:left;padding-left:10px">{{ t('delegatee') }}</td>
-                    <td class="thHead" align="right">BP</td>
+                    <td class="thHead" align="right">{{ t('bp') }}</td>
                     <td class="thHead" align="center" width="50" v-if="auth.user?.username === profileUser.username"></td>
                   </tr>
                 </thead>
@@ -331,7 +331,7 @@ const barSeries = computed(() => {
                     <td class="row1"><b>@{{ del.delegatee }}</b></td>
                     <td class="row2" align="right" style="font-weight:bold;">{{ del.bp }}</td>
                     <td class="row1" align="center" v-if="auth.user?.username === profileUser.username">
-                      <button class="btn-icon-only" @click="$emit('cancelDelegation', del.delegatee)" title="Cancel">
+                      <button class="btn-icon-only" @click="$emit('cancelDelegation', del.delegatee)" :title="t('cancel')">
                         <i class="fa-solid fa-trash-can"></i>
                       </button>
                     </td>
@@ -353,7 +353,7 @@ const barSeries = computed(() => {
                 <thead>
                   <tr>
                     <td class="thHead" style="text-align:left;padding-left:10px">{{ t('delegator') }}</td>
-                    <td class="thHead" align="right">BP</td>
+                    <td class="thHead" align="right">{{ t('bp') }}</td>
                   </tr>
                 </thead>
                 <tbody>
@@ -369,17 +369,16 @@ const barSeries = computed(() => {
                 </tbody>
               </table>
             </div>
-          </div>
+            </div>
 
-          <!-- Wallet History -->
-          <div style="margin-top: 30px;">
+            <!-- Wallet History -->
+            <div style="margin-top: 30px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
               <h4 style="color: var(--primary); margin:0; display:flex; align-items:center; gap:8px;">
                 <i class="fa-solid fa-clock-rotate-left"></i> {{ t('recentWalletTransactions') }}
               </h4>
-              <div class="gs" style="font-size:10px;">{{ t('last') || 'Last' }} 500</div>
+              <div class="gs" style="font-size:10px;">{{ t('last') }} 500</div>
             </div>
-            
             <div class="forumline" style="overflow: hidden; border-radius: 4px;">
               <table class="profile-list-table tight-history">
                 <thead>

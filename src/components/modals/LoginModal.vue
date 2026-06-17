@@ -34,7 +34,7 @@ const emit = defineEmits<{
  
       <div class="tabs">
         <button class="tab-btn" :class="{active:loginTab==='key'}" @click="emit('update:loginTab', 'key')">{{ t('privateKey') }}</button>
-        <button class="tab-btn" :class="{active:loginTab==='wv'}" @click="emit('update:loginTab', 'wv')">WhaleVault</button>
+        <button class="tab-btn" :class="{active:loginTab==='wv'}" @click="emit('update:loginTab', 'wv')">{{ t('whalevault') }}</button>
       </div>
  
       <template v-if="loginTab==='key'">

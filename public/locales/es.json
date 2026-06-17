@@ -135,6 +135,7 @@
   "draftRestored": "Borrador restaurado",
   "clearDraft": "Borrar borrador",
   "addImage": "Añadir imagen",
+  "quickReply": "Respuesta rápida",
   "write": "Escribir",
   "preview": "Vista previa",
   "rpcSettings": "Ajustes RPC",
@@ -311,5 +312,8 @@
   "block": "BLOQUE",
   "blurt": "BLURT",
   "blurtPower": "BLURT POWER",
-  "bp": "BP"
+  "bp": "BP",
+  "whalevault": "WhaleVault",
+  "help": "Ayuda",
+  "rpc": "RPC"
 }

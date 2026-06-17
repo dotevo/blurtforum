@@ -31,8 +31,8 @@ const emit = defineEmits<{
         <option v-for="l in (langs as any)" :key="l.code || l" :value="l.code || l">{{ l.name || l.toUpperCase() }}</option>
       </select>
     </div>
-    <button class="lang-btn rpc-btn" @click="emit('openRpc')" title="RPC settings">
-      <i class="fa-solid fa-gear"></i> <span v-if="!mobile">RPC</span>
+    <button class="lang-btn rpc-btn" @click="emit('openRpc')" :title="t('rpcSettings')">
+      <i class="fa-solid fa-gear"></i> <span v-if="!mobile">{{ t('rpc') }}</span>
     </button>
   </div>
 </template>
