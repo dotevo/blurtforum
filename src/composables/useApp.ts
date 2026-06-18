@@ -8,6 +8,7 @@ import {
 import CryptoJS from 'crypto-js';
 import { useNotifications, notifModal } from './useNotifications';
 import { BFUtils } from '../modules/utils';
+import { trackPageView } from '../modules/analytics';
 import { Blockchain } from '../modules/blockchain';
 import { useVote } from './useVote';
 import { useWallet } from './useWallet';
@@ -581,8 +582,8 @@ export function useApp() {
     if (view.value === 'forum' && activeForum.value) {
       params.set('forum', activeForum.value.id);
       if (activeForum.value.start_author && activeForum.value.start_permlink) {
-        params.set('start_author', activeForum.value.start_author);
-        params.set('start_permlink', activeForum.value.start_permlink);
+        params.set('author', activeForum.value.start_author);
+        params.set('permlink', activeForum.value.start_permlink);
       }
     } else if (view.value === 'topic' && activeTopic.value) {
       if (activeForum.value) params.set('forum', activeForum.value.id);
@@ -592,7 +593,14 @@ export function useApp() {
       params.set('user', profileUser.username);
       if (profileTab.value !== 'posts') params.set('tab', profileTab.value);
     }
-    window.history.pushState({ path: window.location.pathname + '?' + params.toString() }, '', window.location.pathname + '?' + params.toString());
+    const fullPath = window.location.pathname + '?' + params.toString();
+    window.history.pushState({ path: fullPath }, '', fullPath);
+
+    // Google Analytics Virtual Page View
+    trackPageView(fullPath, document.title, {
+      view: view.value,
+      community: config.communityAccount
+    });
   };
 
   const applyTagFilter = async () => { BFPlayer.clearTracks(); syncUrl(); await loadData('current', activeForum.value); };

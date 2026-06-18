@@ -2,6 +2,7 @@
  * BlurtForum Utility Functions
  */
 import type { ForumCategory, Forum } from '../types';
+import { trackEvent } from './analytics';
 
 type TranslateFn = (key: string) => string;
 
@@ -39,7 +40,9 @@ export const BFUtils = {
       .trim()
       .replace(/\s+/g, '-')
       .substring(0, 200);
-    return `${slug}-${Date.now().toString(36)}`;
+    const permlink = `${slug}-${Date.now().toString(36)}`;
+    trackEvent('generate_permlink', 'content', title);
+    return permlink;
   },
 
   parsePayout(val: string | number | undefined): number {
