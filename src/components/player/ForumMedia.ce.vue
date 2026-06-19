@@ -4,6 +4,10 @@ import { registerTrack, unregisterTrack, playTrack, togglePlay, addToQueue, stat
 import { Parser } from '../../modules/parser';
 import type { MediaTrack, MediaEntryMirror } from '../../types';
 
+
+
+
+
 export const handleMediaAction = async (type: string, id: string, host: string, action: string, trackData: Partial<MediaTrack> = {}): Promise<void> => {
   const trackCover = trackData.cover || (type === 'youtube' ? `https://img.youtube.com/vi/${id}/0.jpg` : '');
 
@@ -209,7 +213,7 @@ const resolveIfNeeded = async () => {
     if (isSunoPending) {
        // Suno resolution via Proxy
       const url = `https://suno.com/s/${currentId}`;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+      const proxyUrl = `https://patient-firefly-be68.dotevo.workers.dev/?url=${encodeURIComponent(url)}`;
       const response = await fetch(proxyUrl);
       const text = await response.text();
       const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
@@ -233,7 +237,7 @@ const resolveIfNeeded = async () => {
     } else if (isPeertubeNeeded) {
       const host = primary?.host || 'blurt.media';
       const apiUrl = `https://${host}/api/v1/videos/${currentId}`;
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
+      const proxyUrl = `https://patient-firefly-be68.dotevo.workers.dev/?url=${encodeURIComponent(apiUrl)}`;
       const response = await fetch(proxyUrl);
       if (response.ok) {
         const data = await response.json();
