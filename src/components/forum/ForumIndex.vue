@@ -61,7 +61,7 @@ const emit = defineEmits<{
                     style="position:absolute;top:6px;right:6px;width:8px;height:8px;background:#ff4400;border-radius:50%;border:1px solid #fff;display:block;box-shadow:0 0 4px rgba(0,0,0,0.2);"></span>
             </td>
             <td class="row1">
-              <a href="#" @click.stop.prevent="emit('openForum', forum)"
+              <a :href="'?community=' + communityAccount + '&view=forum&forum=' + forum.id" @click.stop.prevent="emit('openForum', forum)"
                  :style="{ fontSize: forum.posts.length === 0 && !forum.hasMore ? '11px' : '13px', fontWeight: forumHasUnread(forum) ? 'bold' : 'normal' }">{{ forum.name }}</a><br>
               <span v-if="forum.targetTags.length > 0" class="gs">{{ t('tags') }}: {{ forum.targetTags.join(', ') }}</span>
               <span v-if="forum.desc" class="gs"> — {{ forum.desc }}</span>
@@ -69,7 +69,7 @@ const emit = defineEmits<{
             <td class="row1" align="center">
               <template v-if="forum.posts.length>0">
                 <span class="gs">{{ timeAgo(forum.posts[0].lastActivity) }}<br>
-                <a href="#" @click.stop.prevent="emit('openProfile', forum.posts[0].lastAuthor || forum.posts[0].author)">@{{ forum.posts[0].lastAuthor || forum.posts[0].author }}</a></span>
+                <a :href="'?community=' + communityAccount + '&view=profile&user=' + (forum.posts[0].lastAuthor || forum.posts[0].author)" @click.stop.prevent="emit('openProfile', forum.posts[0].lastAuthor || forum.posts[0].author)">@{{ forum.posts[0].lastAuthor || forum.posts[0].author }}</a></span>
               </template>
               <div v-else-if="loading" class="spin" style="width:16px; height:16px; border-width:2px; margin:0 auto;"></div>
               <span v-else class="gs" style="color:var(--text-muted);">—</span>
@@ -97,7 +97,7 @@ const emit = defineEmits<{
         </div>
         <div class="mods-body">
           <div v-for="m in moderators" :key="m.account" class="mod-badge">
-            <span><a href="#" @click.prevent="emit('openProfile', m.account)">@{{ m.account }}</a></span>
+            <span><a :href="'?community=' + communityAccount + '&view=profile&user=' + m.account" @click.prevent="emit('openProfile', m.account)">@{{ m.account }}</a></span>
             <span class="mod-role" :style="{color: ['owner', 'admin'].includes(m.role) ? '#e74c3c' : 'var(--primary)'}">{{ m.role }}</span>
           </div>
         </div>
@@ -129,12 +129,12 @@ const emit = defineEmits<{
               <span style="font-size:18px; opacity:0.7;"><i class="fa-solid fa-earth-americas"></i></span>
             </td>
             <td class="row1">
-              <a href="#" @click.stop.prevent="emit('openForum', vf)" style="font-weight: bold;">{{ t(vf.nameKey ?? '') }}</a>
+              <a :href="'?community=' + communityAccount + '&view=forum&forum=' + vf.id" @click.stop.prevent="emit('openForum', vf)" style="font-weight: bold;">{{ t(vf.nameKey ?? '') }}</a>
             </td>
             <td class="row1" align="center">
               <template v-if="vf.posts && vf.posts.length > 0">
                 <span class="gs">{{ timeAgo(vf.posts[0].lastActivity) }}<br>
-                <a href="#" @click.stop.prevent="emit('openProfile', vf.posts[0].lastAuthor || vf.posts[0].author)">@{{ vf.posts[0].lastAuthor || vf.posts[0].author }}</a></span>
+                <a :href="'?community=' + communityAccount + '&view=profile&user=' + (vf.posts[0].lastAuthor || vf.posts[0].author)" @click.stop.prevent="emit('openProfile', vf.posts[0].lastAuthor || vf.posts[0].author)">@{{ vf.posts[0].lastAuthor || vf.posts[0].author }}</a></span>
               </template>
               <div v-else-if="explorationForm.loading" class="spin" style="width:16px; height:16px; border-width:2px; margin:0 auto;"></div>
               <span v-else class="gs" style="color:var(--text-muted);">—</span>

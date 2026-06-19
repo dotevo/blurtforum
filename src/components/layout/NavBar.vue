@@ -23,7 +23,7 @@ const emit = defineEmits<{
   <!-- NAV BAR -->
   <div class="nav-bar">
     <div class="nav-links">
-      <a class="nav-link" href="#" @click.prevent="emit('goHome')"><i class="fa-solid fa-house"></i> {{ t('home') }}</a>
+      <a class="nav-link" :href="'?community=' + communityAccount" @click.prevent="emit('goHome')"><i class="fa-solid fa-house"></i> {{ t('home') }}</a>
       <a class="nav-link" href="#" @click.prevent="emit('loadData')"><i class="fa-solid fa-arrows-rotate"></i> {{ t('refresh') }}</a>
       <a class="nav-link" href="#" v-if="auth.user && view==='forum' && activeForum"
          @click.prevent="emit('openNewPostForm')"><i class="fa-solid fa-plus"></i> {{ t('newPost') }}</a>
@@ -33,9 +33,9 @@ const emit = defineEmits<{
 
   <!-- BREADCRUMB -->
   <div class="breadcrumb">
-    <a href="#" @click.prevent="emit('goHome')">{{ t('siteTitle') || 'BlurtForum' }}</a>
+    <a :href="'?community=' + communityAccount" @click.prevent="emit('goHome')">{{ t('siteTitle') || 'BlurtForum' }}</a>
     <template v-if="view==='communities'"> &raquo; {{ t('exploreCommunities') }}</template>
-    <template v-if="activeForum"> &raquo; <a href="#" @click.prevent="emit('openForum', activeForum!)">{{ activeForum.name }}</a></template>
+    <template v-if="activeForum"> &raquo; <a :href="'?community=' + communityAccount + '&view=forum&forum=' + activeForum.id" @click.prevent="emit('openForum', activeForum!)">{{ activeForum.name }}</a></template>
     <template v-if="activeTopic"> &raquo; {{ activeTopic.title }}</template>
     <template v-if="view==='newpost'"> &raquo; {{ t('newPost') }}</template>
   </div>

@@ -5,6 +5,7 @@ defineProps<{
   beneficiaries: Beneficiary[];
   limit?: number;
   t: (k: string) => string;
+  communityAccount?: string;
 }>();
 
 const emit = defineEmits<{
@@ -16,7 +17,7 @@ const emit = defineEmits<{
   <div v-if="beneficiaries && beneficiaries.length > 0" class="beneficiaries-inline">
     <span class="ben-icon">👥</span>
     <template v-for="(b, bi) in beneficiaries.slice(0, limit || 3)" :key="b.account">
-      <a href="#" @click.prevent="emit('openProfile', b.account)" class="ben-link">@{{ b.account }}</a>
+      <a :href="communityAccount ? '?community=' + communityAccount + '&view=profile&user=' + b.account : '#'" @click.prevent="emit('openProfile', b.account)" class="ben-link">@{{ b.account }}</a>
       <span class="ben-pct">{{ ((b.weight || 0)/100).toFixed(0) }}%</span>
       <span v-if="bi < beneficiaries.slice(0, limit || 3).length-1" class="ben-sep">,</span>
     </template>

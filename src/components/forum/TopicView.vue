@@ -151,14 +151,14 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   {{ followingSet.has(activeTopic.author) ? t('followed') : t('follow') }}
                 </button>
               </div>
-              <div class="gs" style="margin-top:8px; font-weight: bold;"><a href="#" @click.prevent="emit('openProfile', activeTopic.author)">@{{ activeTopic.author }}</a><br>{{ t('blurtUser') }}</div>
+              <div class="gs" style="margin-top:8px; font-weight: bold;"><a :href="'?community=' + config.communityAccount + '&view=profile&user=' + activeTopic.author" @click.prevent="emit('openProfile', activeTopic.author)">@{{ activeTopic.author }}</a><br>{{ t('blurtUser') }}</div>
             </td>
             <td class="row1 post-body-cell">
               <!-- Mobile Header (OP) -->
               <div class="comment-mobile-header show-mobile">
                 <UserAvatar :username="activeTopic.author" size="xs" @click="emit('openProfile', activeTopic.author)" />
                 <div style="flex:1">
-                  <div style="font-weight:bold; font-size:14px;"><a href="#" @click.prevent="emit('openProfile', activeTopic.author)">@{{ activeTopic.author }}</a></div>
+                  <div style="font-weight:bold; font-size:14px;"><a :href="'?community=' + config.communityAccount + '&view=profile&user=' + activeTopic.author" @click.prevent="emit('openProfile', activeTopic.author)">@{{ activeTopic.author }}</a></div>
                   <div class="gs" style="font-size:10px;">{{ fmtDate(activeTopic.created) }}</div>
                 </div>
                 <button v-if="auth.user && auth.user.username !== activeTopic.author" 
@@ -171,7 +171,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
               <!-- Mobile Header Stats (OP) -->
               <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
+                  <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" :community-account="config.communityAccount" @open-profile="(u) => emit('openProfile', u)" />
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
@@ -265,7 +265,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                  :style="{ opacity: r.isMuted ? 0.5 : 1 }">
             <thead>
               <tr class="hide-mobile">
-                <td class="row3 post-profile"><b><a href="#" @click.prevent="emit('openProfile', r.author)">@{{ r.author }}</a></b></td>
+                <td class="row3 post-profile"><b><a :href="'?community=' + config.communityAccount + '&view=profile&user=' + r.author" @click.prevent="emit('openProfile', r.author)">@{{ r.author }}</a></b></td>
                 <td class="row3">
                   <div class="post-header">
                     <span class="gs">
@@ -277,7 +277,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     </span>
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                       <span v-if="r.isMuted" style="color:var(--error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :t="t" @open-profile="(u) => emit('openProfile', u)" />
+                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :t="t" :community-account="config.communityAccount" @open-profile="(u) => emit('openProfile', u)" />
                       <template v-if="canMute && isPostInCommunity(r)">
                         <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
                         <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
@@ -302,7 +302,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   <div class="comment-mobile-header show-mobile">
                     <UserAvatar :username="r.author" size="xs" @click="emit('openProfile', r.author)" />
                     <div style="flex:1">
-                      <div style="font-weight:bold; font-size:13px;"><a href="#" @click.prevent="emit('openProfile', r.author)">@{{ r.author }}</a></div>
+                      <div style="font-weight:bold; font-size:13px;"><a :href="'?community=' + config.communityAccount + '&view=profile&user=' + r.author" @click.prevent="emit('openProfile', r.author)">@{{ r.author }}</a></div>
                       <div class="gs" style="font-size:10px;">#{{ i+1 }} · {{ fmtDate(r.created) }}</div>
                     </div>
                     
@@ -323,7 +323,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
 
-                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" @open-profile="(u) => emit('openProfile', u)" />
+                      <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" :community-account="config.communityAccount" @open-profile="(u) => emit('openProfile', u)" />
                       
                     </div>
                     <div v-if="(r.depth ?? 0) > 1" class="depth-badge">↳ {{ t('nested') }}</div>
@@ -332,7 +332,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
 
                   <div v-if="isNestedReply(r)" class="quote-box">
-                    <span style="font-weight: bold;">{{ t('replyTo') }}: <a href="#" @click.prevent="emit('openProfile', r.parent_author)">@{{ r.parent_author }}</a></span>
+                    <span style="font-weight: bold;">{{ t('replyTo') }}: <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + r.parent_author" @click.prevent="emit('openProfile', r.parent_author)">@{{ r.parent_author }}</a></span>
                     <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
                       [{{ r._qOpen ? t('hide') : t('show') }}]
                     </span>

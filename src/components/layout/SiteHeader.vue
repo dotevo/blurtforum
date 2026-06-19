@@ -27,13 +27,13 @@ const emit = defineEmits<{
 <!-- HEADER -->
 <div class="site-header">
   <div class="header-inner">
-    <div class="logo" @click="emit('goHome')">
+    <a :href="'?community=' + communityAccount" class="logo" @click.prevent="emit('goHome')" style="text-decoration: none; color: inherit; display: block;">
       <div class="logo-title">Blurt<em>Forum</em></div>
       <div class="logo-sub">{{ t('siteSubtitle') || 'BLOCKCHAIN-POWERED COMMUNITY PLATFORM • BLURT NETWORK' }}</div>
       <div class="active-community-badge">
         🏛️ {{ communityTitle || communityAccount }}
       </div>
-    </div>
+    </a>
     <div class="header-right">
       <div class="block-status hide-tablet">
         {{ t('online') || 'ONLINE' }} | {{ t('block') || 'BLOCK' }}: #{{ headBlockNumber || '…' }}

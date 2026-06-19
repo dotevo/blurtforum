@@ -56,6 +56,7 @@ const props = defineProps<{
   renderMD: (s: string) => string;
   player: { state: { enabled: boolean } };
   hasVoted: (p: Post) => boolean;
+  config: { communityAccount: string };
 }>();
 
 const emit = defineEmits<{
@@ -402,14 +403,14 @@ const barSeries = computed(() => {
                         <div class="tx-details">
                           <template v-if="tx.op[0] === 'transfer'">
                             <span class="tx-label">{{ tx.op[1].from === profileUser.username ? t('sentTo') : t('receivedFrom') }}</span>
-                            <b class="interactive-username" @click="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</b>
+                            <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + (tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)" class="interactive-username" @click.prevent="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</a>
                             <div v-if="tx.op[1].memo" class="tx-memo-v2">"{{ tx.op[1].memo }}"</div>
                           </template>
                           <template v-else-if="tx.op[0] === 'transfer_to_vesting'">
                             <span class="tx-label">{{ t('powerUp') }}</span>
                             <span v-if="tx.op[1].to !== tx.op[1].from">
                               {{ tx.op[1].from === profileUser.username ? 'to' : 'from' }}
-                              <b class="interactive-username" @click="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</b>
+                              <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + (tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)" class="interactive-username" @click.prevent="$emit('openProfile', tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from)">@{{ tx.op[1].from === profileUser.username ? tx.op[1].to : tx.op[1].from }}</a>
                             </span>
                           </template>
                           <template v-else-if="tx.op[0] === 'withdraw_vesting'">
@@ -417,7 +418,7 @@ const barSeries = computed(() => {
                           </template>
                           <template v-else-if="tx.op[0] === 'delegate_vesting_shares'">
                              <span class="tx-label">{{ tx.op[1].delegator === profileUser.username ? t('delegateTo') : t('receivedDelegationFrom') || 'Received delegation from' }}</span>
-                             <b class="interactive-username" @click="$emit('openProfile', tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator)">@{{ tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator }}</b>
+                             <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + (tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator)" class="interactive-username" @click.prevent="$emit('openProfile', tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator)">@{{ tx.op[1].delegator === profileUser.username ? tx.op[1].delegatee : tx.op[1].delegator }}</a>
                           </template>
                         </div>
                       </div>
@@ -555,7 +556,7 @@ const barSeries = computed(() => {
                     :permlink="post.permlink"
                     :t="t"
                   />
-                  <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
+                  <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + post.author + '&permlink=' + post.permlink" @click.stop.prevent="$emit('openTopic', post)" 
                      style="font-size: 12px; font-weight: normal;">{{ post.title }}</a>
                 </div>
               </td>
@@ -592,8 +593,10 @@ const barSeries = computed(() => {
                 <VoteButton :voted="hasVoted(c)" :count="c.vote_count" @vote="$emit('submitVote', c)" />
               </td>
               <td class="row1 row-hover" @click="$emit('openTopic', c)">
-                <span class="gs">RE: @{{ c.parent_author }}</span><br>
-                {{ c.body.substring(0, 100) }}...
+                <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + c.author + '&permlink=' + c.permlink" @click.stop.prevent="$emit('openTopic', c)" style="display:block; text-decoration:none; color:inherit;">
+                  <span class="gs">RE: @{{ c.parent_author }}</span><br>
+                  {{ c.body.substring(0, 100) }}...
+                </a>
               </td>
               <td class="row2" align="center">
                 <PayoutBadge :post="c" @click="$emit('openPayoutModal', c)" />
@@ -631,11 +634,13 @@ const barSeries = computed(() => {
               </td>
               <td class="row1" align="center">
                 <UserAvatar :username="r.author" size="xs" @click="$emit('openProfile', r.author)" />
-                <a href="#" @click.stop.prevent="$emit('openProfile', r.author)" style="font-size:11px;">@{{ r.author }}</a>
+                <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + r.author" @click.stop.prevent="$emit('openProfile', r.author)" style="font-size:11px;">@{{ r.author }}</a>
               </td>
               <td class="row1 row-hover" @click="$emit('openTopic', r)">
-                <div class="gs" style="font-size:10px; margin-bottom:4px;">RE: {{ r.title || r.parent_permlink }}</div>
-                {{ r.body.substring(0, 100) }}...
+                <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + r.author + '&permlink=' + r.permlink" @click.stop.prevent="$emit('openTopic', r)" style="display:block; text-decoration:none; color:inherit;">
+                  <div class="gs" style="font-size:10px; margin-bottom:4px;">RE: {{ r.title || r.parent_permlink }}</div>
+                  {{ r.body.substring(0, 100) }}...
+                </a>
               </td>
               <td class="row2" align="center">
                 <PayoutBadge :post="r" @click="$emit('openPayoutModal', r)" />

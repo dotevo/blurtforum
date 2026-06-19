@@ -137,7 +137,7 @@ onUpdated(triggerScan);
                 :t="t"
               />
 
-              <a href="#" @click.stop.prevent="$emit('openTopic', post)" 
+              <a :href="'?community=' + config.communityAccount + '&view=topic&forum=' + activeForum.id + '&author=' + post.author + '&permlink=' + post.permlink" @click.stop.prevent="$emit('openTopic', post)" 
                  :style="{ fontSize:'12px', fontWeight: post.isUnread ? 'bold' : 'normal' }">{{ post.title }}</a>
               <br>
               <span class="gs">
@@ -148,7 +148,7 @@ onUpdated(triggerScan);
             <td :class="i%2===0?'row2':'row1'" align="center" class="col-author">
               <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                 <UserAvatar :username="post.author" size="xs" @click="$emit('openProfile', post.author)" />
-                <a href="#" @click.stop.prevent="$emit('openProfile', post.author)">@{{ post.author }}</a>
+                <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + post.author" @click.stop.prevent="$emit('openProfile', post.author)">@{{ post.author }}</a>
                 <span v-if="post.isFollowing" class="gs" style="color:var(--accent); font-size:9px;" :title="t('followed')"><i class="fa-solid fa-user-check"></i></span>
               </div>
             </td>
@@ -157,7 +157,7 @@ onUpdated(triggerScan);
             </td>
             <td :class="i%2===0?'row1':'row2'" align="center" class="col-lastpost">
               <span class="gs">{{ fmtDate(post.lastActivity) }}</span><br/>
-              <a href="#" @click.stop.prevent="$emit('openProfile', post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
+              <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + post.lastAuthor" @click.stop.prevent="$emit('openProfile', post.lastAuthor)">@{{ post.lastAuthor }}</a><br/>
               <span class="gs" style="font-size: 10px; opacity: 0.8;">💬 {{ post.replyCount }} {{ t('replies') }}</span>
             </td>
           </tr>

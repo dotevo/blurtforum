@@ -31,9 +31,9 @@ const emit = defineEmits<{
         <option value="custom">— {{ t('custom') }} —</option>
       </select>
 
-      <button class="btn btn-sm btn-ghost cb-search-btn" @click="emit('openCommunities')" :title="t('exploreCommunities')">
+      <a :href="'?community=' + communityAccount + '&view=communities'" class="btn btn-sm btn-ghost cb-search-btn" @click.prevent="emit('openCommunities')" :title="t('exploreCommunities')" style="display: inline-flex; align-items: center; justify-content: center; text-decoration: none;">
         <i class="fa-solid fa-magnifying-glass"></i>
-      </button>
+      </a>
     </div>
 
     <div v-if="selectedCommunity==='custom'" class="cb-custom-tag">

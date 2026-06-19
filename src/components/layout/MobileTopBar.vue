@@ -19,6 +19,7 @@ const props = defineProps<{
   lang: string;
   langs: string[];
   rpcMenuOpen: boolean;
+  communityAccount: string;
 }>();
 
 const emit = defineEmits<{
@@ -47,9 +48,9 @@ const getLatestActivities = () => {
   <div class="mobile-top-bar" :class="{ 'is-expanded': expanded }">
     <!-- TOP LINE: Logo, User, Notifs -->
     <div class="mtb-main">
-      <div class="mtb-logo" @click="emit('goHome')">
+      <a :href="'?community=' + communityAccount" class="mtb-logo" @click.prevent="emit('goHome')" style="text-decoration: none; color: inherit; display: block;">
         <span class="logo-text">B<span>F</span></span>
-      </div>
+      </a>
 
       <div class="mtb-ticker" v-if="!expanded" @click="emit('update:expanded', true)">
         <div class="ticker-content-stack" v-if="getLatestActivities().length > 0">

@@ -36,7 +36,7 @@ const emit = defineEmits<{
           <div class="community-card-header">
             <div class="avatar-sm" :style="{backgroundImage: 'url(' + (c.avatar_url || 'https://imgp.blurt.blog/profileimage/' + c.name + '/64x64') + ')'}"></div>
             <div class="community-card-info">
-              <div class="community-card-title" @click="emit('switchCommunity', c.name)">{{ c.title }}</div>
+              <a :href="'?community=' + c.name" class="community-card-title" @click.prevent="emit('switchCommunity', c.name)" style="text-decoration: none; color: inherit; font-weight: bold; display: block;">{{ c.title }}</a>
               <div class="community-card-name">@{{ c.name }}</div>
             </div>
           </div>
