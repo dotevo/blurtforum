@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue';
+import { defineAsyncComponent, watch } from 'vue';
 import { useApp } from './composables/useApp';
 import { useTitle } from './composables/useTitle';
 
@@ -89,8 +89,22 @@ const {
   client,
   } = useApp();
 
-  const { initTitleWatcher } = useTitle();
+  const { initTitleWatcher, setPageTitle } = useTitle();
   initTitleWatcher();
+
+  watch([view, activeForum, activeTopic, () => profileUser.username], () => {
+    if (view.value === 'forum' && activeForum.value) {
+      setPageTitle(activeForum.value.name);
+    } else if (view.value === 'topic' && activeTopic.value) {
+      setPageTitle(activeTopic.value.title);
+    } else if (view.value === 'profile' && profileUser.username) {
+      setPageTitle(`@${profileUser.username}`);
+    } else if (view.value === 'communities') {
+      setPageTitle(t('exploreCommunities') || 'Explore Communities');
+    } else {
+      setPageTitle(null);
+    }
+  }, { immediate: true });
 </script>
 
 <template>

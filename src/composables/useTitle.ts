@@ -1,6 +1,7 @@
-import { reactive, watch } from 'vue';
+import { reactive, ref, watch } from 'vue';
 
 const titleIcons = reactive<Record<string, string>>({});
+const pageTitleText = ref('BlurtForum');
 
 /**
  * Composable for managing the document title with dynamic prefix icons.
@@ -15,13 +16,17 @@ export function useTitle() {
     }
   };
 
+  const setPageTitle = (title: string | null) => {
+    pageTitleText.value = title ? `${title} - BlurtForum` : 'BlurtForum';
+  };
+
   // This should be called once in the root component (App.vue)
   const initTitleWatcher = () => {
-    watch(titleIcons, (icons) => {
-      const prefix = Object.values(icons).join('');
-      document.title = (prefix ? prefix + ' ' : '') + 'BlurtForum';
+    watch([titleIcons, pageTitleText], () => {
+      const prefix = Object.values(titleIcons).join('');
+      document.title = (prefix ? prefix + ' ' : '') + pageTitleText.value;
     }, { deep: true, immediate: true });
   };
 
-  return { setTitleIcon, titleIcons, initTitleWatcher };
+  return { setTitleIcon, titleIcons, setPageTitle, initTitleWatcher };
 }
