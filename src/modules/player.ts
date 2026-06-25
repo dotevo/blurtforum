@@ -4,6 +4,8 @@
  */
 import { reactive, watch, nextTick, ref, computed } from 'vue';
 import type { MediaTrack, MediaEntryMirror, PlayerState, Playlist, PlaylistState, PlayerEvent, PlayerPlugin, BFPlayerAPI, PlayMode } from '../types';
+import { trackEvent } from './analytics';
+
 
 // Minimal YouTube IFrame API typings
 export interface YTPlayer {
@@ -459,6 +461,7 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
   state.loading = true;
   state.minimized = false;
   scrollToCurrent();
+  trackEvent('player:trackChange', 'title', state.currentTrack?.title);
   _emit('trackChange', track);
 
   if (isManual && manualIdx !== -1) {
