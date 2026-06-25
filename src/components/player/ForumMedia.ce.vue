@@ -214,6 +214,7 @@ const resolveIfNeeded = async () => {
        // Suno resolution via Proxy
       const url = `https://suno.com/s/${currentId}`;
       const proxyUrl = `https://patient-firefly-be68.dotevo.workers.dev/?url=${encodeURIComponent(url)}`;
+      console.log(proxyUrl);
       const response = await fetch(proxyUrl);
       const text = await response.text();
       const uuidMatch = text.match(/song\/([a-f0-9-]{36})/i);
@@ -238,6 +239,7 @@ const resolveIfNeeded = async () => {
       const host = primary?.host || 'blurt.media';
       const apiUrl = `https://${host}/api/v1/videos/${currentId}`;
       const proxyUrl = `https://patient-firefly-be68.dotevo.workers.dev/?url=${encodeURIComponent(apiUrl)}`;
+      console.log(proxyUrl);
       const response = await fetch(proxyUrl);
       if (response.ok) {
         const data = await response.json();
