@@ -86,7 +86,7 @@ const {
   toggleExploration,
   followingSet,
   player,
-  client,
+  client, navigateToPath
   } = useApp();
 
   const { initTitleWatcher, setPageTitle } = useTitle();
@@ -384,6 +384,7 @@ const {
         :broadcast="broadcast"
         :wait-and-reload="waitAndReload"
         :check-lock="checkLock"
+        :navigate-to-path="navigateToPath"
         @open-profile="openProfile"
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"

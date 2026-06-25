@@ -11,6 +11,41 @@ import UserAvatar from '../layout/UserAvatar.vue';
 import PostEditor from '../layout/PostEditor.vue';
 import type { Post, AuthUser, RawPost, Beneficiary } from '../../types';
 
+const handleLinkClick = (event: MouseEvent) => {
+  const target = (event.target as HTMLElement).closest('a[data-internal="true"]');
+  if (!target) return;
+
+  event.preventDefault();
+  const href = (target as HTMLAnchorElement).href;
+
+  try {
+    const url = new URL(href);
+
+    // Format Blurt: /@author/permlink → konwertuj na query params
+    const blurtMatch = url.pathname.match(/^\/@([^/]+)\/([^/]+)/);
+    if (blurtMatch) {
+      const [, author, permlink] = blurtMatch;
+      const currentParams = new URLSearchParams(window.location.search);
+      const newParams = new URLSearchParams();
+      newParams.set('view', 'topic');
+      newParams.set('author', author);
+      newParams.set('permlink', permlink);
+      const forum = currentParams.get('forum');
+      if (forum) newParams.set('forum', forum);
+      const community = currentParams.get('community');
+      if (community) newParams.set('community', community);
+      props.navigateToPath('?' + newParams.toString());
+      return;
+    }
+
+    // Format już z query params: ?view=topic&author=...
+    const path = url.pathname + url.search + url.hash;
+    props.navigateToPath(path);
+  } catch (e) {
+    console.warn('Nie udało się przetworzyć linku:', href, e);
+  }
+};
+
 const props = defineProps<{
   activeTopic: Post;
   replies: Post[];
@@ -41,6 +76,7 @@ const props = defineProps<{
   waitAndReload: (isTopic: boolean, author?: string, permlink?: string, pollFn?: any, label?: string) => Promise<void>;
   checkLock: (fn: any) => boolean;
   config: { communityAccount: string };
+  navigateToPath: (path: string) => void;
 }>();
 
 const emit = defineEmits<{
@@ -188,9 +224,9 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 :permlink="activeTopic.permlink"
                 :t="t"
               >
-                <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
+                <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
               </ForumMedia>
-              <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)"></div>
+              <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
               <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--bg-r3); display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; gap: 10px;">
                   <template v-if="auth.user">
@@ -336,7 +372,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     <span class="quote-toggle" @click="r._qOpen=!r._qOpen">
                       [{{ r._qOpen ? t('hide') : t('show') }}]
                     </span>
-                    <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))"></div>
+                    <div v-if="r._qOpen" class="quote-content post-body" v-html="renderMD(getParentBody(r))" @click="handleLinkClick"></div>
                   </div>
     
                   <ForumMedia 
@@ -348,9 +384,9 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     :permlink="r.permlink"
                     :t="t"
                   >
-                    <div class="post-body" v-html="renderMD(r.body, r)"></div>
+                    <div class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
                   </ForumMedia>
-                  <div v-else class="post-body" v-html="renderMD(r.body, r)"></div>
+                  <div v-else class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
     
                   <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--bg-r3); display: flex; justify-content: space-between; align-items: center;">
                     <div style="display: flex; gap: 10px;">

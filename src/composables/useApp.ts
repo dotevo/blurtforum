@@ -1291,6 +1291,11 @@ export function useApp() {
     editModal.loading = false;
   };
 
+  const navigateToPath = (path: string): void => {
+    window.history.pushState({ path }, '', path);
+    handleUrlChange();
+  };
+
   const handleUrlChange = (): void => {
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get('view') || 'index';
@@ -1633,6 +1638,8 @@ export function useApp() {
     goHome, openForum, openTopic, handleCommunityChange, switchCommunity, openCommunities, toggleCommunitySub, openLoginModal,
     switchAccount, removeAccount, showSwitchAccountModal, openSwitchAccountModal,
     syncUrl,
+    handleUrlChange,
+    navigateToPath,
     community: BFCommunity, communityRewards,
     doKeyLogin, doWVLogin, logout, startReply, submitReply, submitPost, loadData,
     changePage,

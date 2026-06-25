@@ -154,6 +154,31 @@ export const Parser = {
         '$1<a href="#" class="mention" data-user="$2">@$2</a>'
       );
 
+      html = html.replace(/<a\s+([^>]*)href=["']([^"']+)["']([^>]*)>/gi, (match, before, href, after) => {
+        if (href.startsWith('#') || before.includes('class="mention"')) return match;
+        let isInternal = false;
+        let relativePath = href;
+        if (href.startsWith('/') && !href.startsWith('//')) {
+          isInternal = true;
+        } 
+        else if (typeof window !== 'undefined') {
+          try {
+            const parsedUrl = new URL(href);
+            if (parsedUrl.hostname === window.location.hostname) {
+              isInternal = true;
+              relativePath = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+            }
+          } catch (e) {
+          }
+        }
+        
+        if (isInternal) {
+          return `<a href="${relativePath}" class="internal-link" data-internal="true" ${before} ${after}>`;
+        } else {
+          return `<a href="${href}" target="_blank" rel="noopener noreferrer" ${before} ${after}>`;
+        }
+      });
+
       // 8. Sanitize
       return DOMPurify.sanitize(html, {
         ADD_TAGS: ['button', 'img', 'forum-media', 'forum-iframe', 'sub', 'sup', 'center'],
