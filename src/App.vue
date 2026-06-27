@@ -37,6 +37,7 @@ const WalletModal = defineAsyncComponent(() => import('./components/modals/Walle
 const WalletAuthModal = defineAsyncComponent(() => import('./components/modals/WalletAuthModal.vue'));
 const RpcModal = defineAsyncComponent(() => import('./components/modals/RpcModal.vue'));
 const SwitchAccountModal = defineAsyncComponent(() => import('./components/modals/SwitchAccountModal.vue'));
+const OldContentModal = defineAsyncComponent(() => import('./components/modals/OldContentModal.vue'));
 
 const {
   lang, setLang, langs, t, theme, setTheme, themes, config, view, loading, globalProps, forumStructure,
@@ -66,6 +67,7 @@ const {
   globalActivity, activityTab, activityExpanded, activityFullList, mobileActivityExpanded, openActivity,
   editModal, startEdit, submitEdit,
   voteModal, submitVoteConfirmed, estimateVote,
+  supportModal, submitSupportComment,
   feeEstimates, scheduleFeeUpdate,
   bcWaitQueue, bcQueueExpanded,
   imgModal,
@@ -566,6 +568,14 @@ const {
     @close="voteModal.show = false"
     @confirm="submitVoteConfirmed"
     @estimate-vote="estimateVote"
+  />
+
+  <OldContentModal
+    v-if="supportModal.show"
+    :old-content-modal="supportModal"
+    :t="t"
+    @close="supportModal.show = false"
+    @submit="submitSupportComment"
   />
 
   <FollowModal

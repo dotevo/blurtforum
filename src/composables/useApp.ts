@@ -11,6 +11,7 @@ import { BFUtils } from '../modules/utils';
 import { trackPageView } from '../modules/analytics';
 import { Blockchain } from '../modules/blockchain';
 import { useVote } from './useVote';
+import { useSupport } from './useSupport';
 import { useWallet } from './useWallet';
 import { useProfile } from './useProfile';
 import { useAuth } from './useAuth';
@@ -1112,21 +1113,7 @@ export function useApp() {
     }
   };
 
-  const topicViewRef = ref<any>(null);
-
-  const submitVoteConfirmed = async () => {
-    if (checkLock(submitVoteConfirmed)) return;
-    try {
-      const oldPost = await _submitVoteConfirmed();
-      if (oldPost && (topicViewRef.value as any)?.triggerSupportLogic) {
-        (topicViewRef.value as any).triggerSupportLogic(oldPost, (voteModal.weight * 100));
-      }
-    } catch (err: any) {
-      showStatus('Error', 'Vote confirmation failed: ' + err.message, 'error');
-    }
-  };
-
-  const feeInfo = Blockchain.feeInfo;
+    const feeInfo = Blockchain.feeInfo;
   const fetchFeeInfo = () => Blockchain.fetchFeeInfo(client);
   const estimateTxFee = (numOps: number, payloadBytes: number) => Blockchain.estimateTxFee(numOps, payloadBytes);
   const feeEstimates = reactive({ post: null as string | null, reply: null as string | null });
@@ -1457,14 +1444,18 @@ export function useApp() {
     fetchEarningsHistory: _fetchEarningsHistory
   } = useProfile(client, globalProps, view, normalizePost);
 
+  const { supportModal, submitSupportComment, triggerSupport } = useSupport(
+    client, auth, broadcast as any, checkLock, showStatus, t
+  );
+
   const {
     voteModal,
     estimateVote,
     openVoteModal,
     hasVoted,
-    submitVoteConfirmed: _submitVoteConfirmed,
+    submitVoteConfirmed,
     submitVote: _submitVote
-  } = useVote(client, auth, broadcast as any, waitAndReload, t);
+  } = useVote(client, auth, broadcast as any, waitAndReload, t, triggerSupport);
 
   const {
     walletModal,
@@ -1668,7 +1659,7 @@ export function useApp() {
     loadTopicContext,
     isPostInCommunity,
     toggleFollow,
-    topicViewRef,
+    supportModal, submitSupportComment,
     broadcast, waitAndReload, checkLock,
     explorationExpanded,
     explorationForm,

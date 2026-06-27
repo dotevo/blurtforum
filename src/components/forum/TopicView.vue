@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { reactive, onMounted, defineAsyncComponent, watch, nextTick } from 'vue';
+import { reactive, onMounted, watch, nextTick } from 'vue';
 import { dispatchScanView } from '../../modules/player';
-import { BFUtils } from '../../modules/utils';
-const OldContentModal = defineAsyncComponent(() => import('../modals/OldContentModal.vue'));
 import VoteButton from '../layout/VoteButton.vue';
 import PostBeneficiaries from '../layout/PostBeneficiaries.vue';
 import ForumMedia from '../player/ForumMedia.ce.vue';
 import PayoutBadge from '../layout/PayoutBadge.vue';
 import UserAvatar from '../layout/UserAvatar.vue';
 import PostEditor from '../layout/PostEditor.vue';
-import type { Post, AuthUser, RawPost, Beneficiary } from '../../types';
+import type { Post, AuthUser } from '../../types';
 
 const handleLinkClick = (event: MouseEvent) => {
   const target = (event.target as HTMLElement).closest('a[data-internal="true"]');
@@ -99,38 +97,6 @@ const emit = defineEmits<{
   'update:replyTarget': [value: Post | null];
 }>();
 
-// ── Support Old Content ───────────────────────────────────────────────────
-const oldContentModal = reactive({
-  show: false,
-  author: '',
-  permlink: '',
-  beneficiaries: [] as Beneficiary[],
-  originalPost: null as RawPost | null,
-  weight: 0,
-  body: '',
-  status: '',
-  loading: false
-});
-
-const submitSupportComment = async (): Promise<void> => {
-  if (props.checkLock(submitSupportComment)) return;
-  if (!props.auth.user || !oldContentModal.author) return;
-  oldContentModal.loading = true; oldContentModal.status = props.t('supporting');
-  const permlink = BFUtils.genPermlink('support-' + oldContentModal.author);
-  const beneficiaries = oldContentModal.beneficiaries.length ? [...oldContentModal.beneficiaries].sort((a, b) => a.account.localeCompare(b.account)) : [{ account: oldContentModal.author, weight: 10000 }];
-  const op = ['comment', { parent_author: oldContentModal.author, parent_permlink: oldContentModal.permlink, author: props.auth.user.username, permlink, title: '', body: oldContentModal.body, json_metadata: JSON.stringify({ app: 'blurtforum/1.0', tags: ['blurt-140455'] }) }];
-  const options = ['comment_options', { author: props.auth.user.username, permlink, max_accepted_payout: '1000000.000 BLURT', percent_steem_dollars: 10000, allow_votes: true, allow_curation_rewards: true, extensions: [[0, { beneficiaries }]] }];
-  try {
-    await props.broadcast([op, options]);
-    oldContentModal.status = props.t('waitingForBlock');
-    await new Promise(r => setTimeout(r, 5000));
-    oldContentModal.status = props.t('votingOnSupport');
-    await props.broadcast([['vote', { voter: props.auth.user.username, author: props.auth.user.username, permlink, weight: oldContentModal.weight || 10000 }]]);
-    oldContentModal.status = props.t('supportSuccess');
-    setTimeout(() => { oldContentModal.show = false; }, 1500);
-  } catch (err) { console.error('Support error:', err); oldContentModal.status = 'Error: ' + (err as Error).message; }
-  oldContentModal.loading = false;
-};
 
 const triggerScan = () => {
   const container = document.querySelector('.topic-view-root');
@@ -464,12 +430,6 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
       </div>
  
     <!-- /topic -->
-    <OldContentModal
-      v-if="oldContentModal.show"
-      :old-content-modal="oldContentModal"
-      :t="t"
-      @close="oldContentModal.show = false"
-      @submit="submitSupportComment"
-    />
+
   </div>
 </template>
