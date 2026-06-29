@@ -1450,7 +1450,7 @@ export function useApp() {
   } = useProfile(client, globalProps, view, normalizePost);
 
   const { supportModal, submitSupportComment, triggerSupport } = useSupport(
-    client, auth, broadcast as any, checkLock, showStatus, t
+    client, auth, broadcast as any, checkLock, t
   );
 
   const {

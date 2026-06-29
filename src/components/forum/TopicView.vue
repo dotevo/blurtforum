@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, onMounted, watch, nextTick } from 'vue';
+import { onMounted, watch, nextTick } from 'vue';
 import { dispatchScanView } from '../../modules/player';
 import VoteButton from '../layout/VoteButton.vue';
 import PostBeneficiaries from '../layout/PostBeneficiaries.vue';

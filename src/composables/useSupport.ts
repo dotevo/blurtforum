@@ -16,7 +16,6 @@ export function useSupport(
   auth: { user: AuthUser | null },
   broadcast: (ops: any[]) => Promise<void>,
   checkLock: (fn: () => any) => boolean,
-  showStatus: (title: string, msg: string, type: string) => void,
   t: (k: string) => string
 ) {
   const modal = reactive({
