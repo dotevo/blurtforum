@@ -17,7 +17,7 @@ export function useTitle() {
   };
 
   const setPageTitle = (title: string | null) => {
-    pageTitleText.value = title ? `${title} - BlurtForum` : 'BlurtForum';
+    pageTitleText.value = title ? `BlurtForum | ${title}` : 'BlurtForum';
   };
 
   // This should be called once in the root component (App.vue)
@@ -28,5 +28,5 @@ export function useTitle() {
     }, { deep: true, immediate: true });
   };
 
-  return { setTitleIcon, titleIcons, setPageTitle, initTitleWatcher };
+  return { setTitleIcon, titleIcons, setPageTitle, initTitleWatcher, pageTitleText };
 }

@@ -598,7 +598,12 @@ export function useApp() {
     window.history.pushState({ path: fullPath }, '', fullPath);
 
     // Google Analytics Virtual Page View
-    trackPageView(fullPath, document.title, {
+    let gaTitle = 'BlurtForum';
+    if (view.value === 'forum' && activeForum.value) gaTitle = 'BlurtForum | ' + activeForum.value.name;
+    else if (view.value === 'topic' && activeTopic.value) gaTitle = 'BlurtForum | ' + activeTopic.value.title;
+    else if (view.value === 'profile' && profileUser.username) gaTitle = 'BlurtForum | @' + profileUser.username;
+    else if (view.value === 'communities') gaTitle = 'BlurtForum | Communities';
+    trackPageView(fullPath, gaTitle, {
       view: view.value,
       community: config.communityAccount
     });
