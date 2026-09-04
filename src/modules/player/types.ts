@@ -9,7 +9,7 @@ import type { Component } from 'vue';
 import type { WebtorrentStats, SeedManifestEntry } from './webtorrent-pool';
 
 export interface MediaEntryMirror {
-  type: 'audio' | 'youtube' | 'peertube' | 'webtorrent';
+  type: 'audio' | 'youtube' | 'peertube' | 'webtorrent' | 'suno';
   /** For type 'webtorrent', this holds the full magnet URI (must include xt=urn:btih:). */
   id: string;
   src?: string;

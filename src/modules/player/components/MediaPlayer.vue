@@ -6,7 +6,7 @@ import WebtorrentVideo from './WebtorrentVideo.vue';
 import WebtorrentStorage from './WebtorrentStorage.vue';
 import WebtorrentInfoTab from './WebtorrentInfoTab.vue';
 import type { MediaTrack, BFPlayerAPI, Playlist } from '../types';
-import { currentSource, CINEMA_HIDE_NATIVE_CONTROLS, stopAll } from '../player';
+import { currentSource, CINEMA_HIDE_NATIVE_CONTROLS, stopAll, SUNO_EMBED_BASE } from '../player';
 import { isTVPlatform } from '../../native/platform-info';
 import { activeProfile } from '../../device-profiles/device-profiles';
 
@@ -620,6 +620,17 @@ registerDockedBarElement(bfpBarEl);
             :src="currentSource?.type === 'peertube' ? `https://${currentSource.host}/videos/embed/${currentSource.id}?api=1${player.state.isAutoStarting ? '&autoplay=1' : ''}${(CINEMA_HIDE_NATIVE_CONTROLS && player.state.cinema) ? '&controls=0&title=0&warningTitle=0&peertubeLink=0' : ''}` : ''"
             frameborder="0" allowfullscreen 
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+            allow="autoplay"
+          ></iframe>
+        </div>
+
+        <div :class="{ 'bfp-media-hidden': currentSource?.type !== 'suno' }" class="bfp-video-iframe-wrap">
+          <iframe
+            id="bf-suno-player-iframe"
+            class="bfp-video-iframe"
+            :key="currentSource?.id"
+            :src="currentSource?.type === 'suno' ? `${SUNO_EMBED_BASE}/${currentSource.id}` : ''"
+            frameborder="0"
             allow="autoplay"
           ></iframe>
         </div>

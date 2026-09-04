@@ -84,7 +84,7 @@ export const state = reactive<PlayerState>({
 // back to our own bottom bar for every source, not just audio/webtorrent.
 export const CINEMA_HIDE_NATIVE_CONTROLS = true;
 
-const defaultPriorities = ['youtube', 'audio', 'peertube'];
+const defaultPriorities = ['youtube', 'audio', 'suno', 'peertube'];
 const getPriorities = () => JSON.parse(localStorage.getItem('bf-player-priorities') || JSON.stringify(defaultPriorities)) as string[];
 
 const findBestSourceIndex = (sources: MediaEntryMirror[]): number => {
@@ -264,7 +264,7 @@ const getRailItems = (): RailItemContribution[] => _railItems;
 const _playerButtons: PlayerButtonContribution[] = [];
 const _playerWidgets: PlayerWidgetContribution[] = [];
 
-const _matchesCurrentSource = (sourceTypes: ('audio' | 'youtube' | 'peertube' | 'webtorrent')[] | 'all'): boolean =>
+const _matchesCurrentSource = (sourceTypes: MediaEntryMirror['type'][] | 'all'): boolean =>
   sourceTypes === 'all' || (!!currentSource.value && sourceTypes.includes(currentSource.value.type));
 
 export const registerPlayerButton = (contribution: PlayerButtonContribution): void => {
@@ -1012,6 +1012,92 @@ export const playWebtorrentFile = (fileIndex: number): void => {
   }
 };
 
+// ─── Suno (custom Cloudflare Worker embed) ─────────────────────────────────
+//
+// Suno stopped allowing direct .mp3 downloads, so playback no longer goes
+// through an <audio> element -- it goes through our OWN worker's <iframe>
+// embed page instead, controlled with a small hand-rolled postMessage
+// protocol (there's no official SDK for this, unlike YouTube/PeerTube
+// above, so this plays the same structural role as ptPlayer/initPT() but
+// without a library to lean on).
+//
+// CONFIRMED: https://calm-darkness-5ea2.dotevo.workers.dev/embed/<id>
+export const SUNO_EMBED_BASE = 'https://calm-darkness-5ea2.dotevo.workers.dev/embed';
+
+const sunoSend = (action: string, payload: Record<string, unknown> = {}): void => {
+  const iframe = document.getElementById('bf-suno-player-iframe') as HTMLIFrameElement | null;
+  iframe?.contentWindow?.postMessage({ action, ...payload }, '*');
+};
+
+let sunoListenerAttached = false;
+
+// Attached once for the whole app lifetime (not per-track, unlike ptPlayer)
+// since it's just a window-level postMessage listener, not an object tied
+// to one iframe instance -- re-attaching per track would just pile up
+// duplicate listeners for no benefit.
+const attachSunoListener = (): void => {
+  if (sunoListenerAttached) return;
+  sunoListenerAttached = true;
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || msg.source !== 'suno-embed') return;
+    // Guard against messages arriving from an iframe we've already
+    // navigated away from (e.g. a slow 'timeupdate' landing right after the
+    // user skipped to a different track) -- same spirit as the
+    // mediaGeneration guards on YT/PT below, just keyed off currentSource
+    // directly since there's no async init chain here to race against.
+    if (currentSource.value?.type !== 'suno') return;
+
+    if (msg.type === 'play') {
+      state.playing = true; state.loading = false;
+    } else if (msg.type === 'pause') {
+      state.playing = false;
+    } else if (msg.type === 'ended') {
+      state.playing = false;
+      _emit('ended', state.currentTrack);
+      playNext(true);
+    } else if (msg.type === 'timeupdate') {
+      if (msg.duration > 0) {
+        state.duration = msg.duration;
+        state.progress = (msg.currentTime / msg.duration) * 100;
+      }
+    }
+    // The embed also reports msg.title / msg.imageUrl / msg.thumbnailUrl --
+    // not consumed here yet. That feeds the *card* thumbnail, which is a
+    // separate follow-up (per the "miniatury są zawsze te domyślne" bug
+    // filed alongside this one), not the player itself.
+  });
+};
+
+// Same race as initPT() (see its comment above): the iframe is keyed by
+// currentSource.id in MediaPlayer.vue, so Vue tears down and re-mounts a
+// brand new DOM node on every track switch rather than reusing one -- this
+// has to win that race on every single play, not just the first.
+const initSuno = (retriesLeft = 15, generation = mediaGeneration): void => {
+  if (generation !== mediaGeneration) return;
+  if (!currentSource.value || currentSource.value.type !== 'suno') return;
+
+  const iframe = document.getElementById('bf-suno-player-iframe') as HTMLIFrameElement | null;
+  if (!iframe) {
+    if (retriesLeft > 0) {
+      setTimeout(() => initSuno(retriesLeft - 1, generation), 200);
+    } else {
+      console.warn('[BFPlayer] initSuno: gave up waiting for Suno iframe');
+    }
+    return;
+  }
+
+  attachSunoListener();
+  state.loading = false;
+  sunoSend('setVolume', { volume: state.volume });
+  // Confirmed: the worker embed does NOT autoplay on load, unlike
+  // PeerTube's iframe. It starts paused, so toggle it once here to
+  // actually start playback -- this only runs once per track (from
+  // playTrack()'s 'suno' branch below), so there's no risk of this
+  // fighting with togglePlay()'s own later toggle() calls.
+  sunoSend('toggle');
+};
+
 const loadYTAPI = (): Promise<void> => {
   if (window.YT) return Promise.resolve();
   return new Promise(resolve => {
@@ -1149,6 +1235,12 @@ export const stopAll = (): void => {
   if (ytPlayer?.stopVideo) { try { ytPlayer.stopVideo(); } catch { /* ignore */ } }
   if (ptPlayer?.pause) { try { ptPlayer.pause(); } catch { /* ignore */ } }
   ptPlayer = null; // Important: reset PT player instance
+  // No object to null out for Suno (sunoSend() looks the iframe up by ID
+  // fresh every call, there's no cached instance like ptPlayer). The
+  // protocol only has 'toggle', not a dedicated pause, so only send it
+  // while we believe it's actually playing -- otherwise this would
+  // *resume* a track that's already paused, right as we're tearing down.
+  if (currentSource.value?.type === 'suno' && state.playing) { try { sunoSend('toggle'); } catch { /* ignore */ } }
   if (wtVideoEl && wtVideoEl.src) {
     console.log('[BFPlayer] stopAll: tearing down WebTorrent video element (had src =', wtVideoEl.src.slice(0, 80), ')');
     wtVideoEl.pause();
@@ -1333,6 +1425,14 @@ export const playTrack = async (track: MediaTrack, isManual = false, manualIdx =
       console.log('[BFPlayer] Triggering PT init after nextTick');
       setTimeout(() => initPT(), 1000); 
     });
+  } else if (activeSource.type === 'suno') {
+    console.log('[BFPlayer] Initializing Suno playback...', activeSource.id);
+    state.playing = true; state.loading = true;
+    state.isAutoStarting = true;
+    nextTick(() => {
+      console.log('[BFPlayer] Triggering Suno init after nextTick');
+      setTimeout(() => initSuno(), 1000);
+    });
   } else if (activeSource.type === 'webtorrent') {
     console.log('[BFPlayer] Initializing WebTorrent playback...', activeSource.id);
     void loadWebtorrentSource(activeSource, track);
@@ -1396,6 +1496,7 @@ const playNext = (isAuto = false): void => {
   if (audioObj) audioObj.pause();
   if (ytPlayer) ytPlayer.pauseVideo();
   if (ptPlayer) ptPlayer.pause();
+  if (currentSource.value?.type === 'suno' && state.playing) sunoSend('toggle');
 };
 
 const playPrev = (): void => {
@@ -1452,9 +1553,24 @@ export const togglePlay = (): void => {
     playTrack(state.currentTrack);
     return;
   }
+  if (currentSource.value.type === 'suno' && !document.getElementById('bf-suno-player-iframe')) {
+    initSuno();
+    return;
+  }
 
   if (currentSource.value.type === 'youtube' && ytPlayer?.getPlayerState) {
     state.playing = ytPlayer.getPlayerState() === window.YT!.PlayerState.PLAYING;
+  }
+
+  // Suno's worker protocol only exposes 'toggle' (see the reference embed
+  // snippet this was built from) -- no separate play()/pause() actions to
+  // call one-sided like every other source type here. So instead of
+  // splitting it across the two branches below, handle it once up front and
+  // trust state.playing (kept in sync by attachSunoListener()'s 'play'/
+  // 'pause' messages) to mean the toggle will land in the right direction.
+  if (currentSource.value.type === 'suno') {
+    sunoSend('toggle');
+    return;
   }
 
   if (state.playing) {
@@ -1478,6 +1594,10 @@ const seek = (pct: number): void => {
   else if (currentSource.value?.type === 'audio' && audioObj) audioObj.currentTime = time;
   else if (currentSource.value?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
   else if (currentSource.value?.type === 'webtorrent' && wtVideoEl) wtVideoEl.currentTime = time;
+  // Suno's protocol takes a 0-1 fraction ({progress}), not absolute seconds
+  // like every other source here -- pct/100 is exactly that, no need to
+  // divide through state.duration like `time` above does.
+  else if (currentSource.value?.type === 'suno') sunoSend('seek', { progress: pct / 100 });
 };
 
 export const addToQueue = (track: MediaTrack, position: 'start' | 'end' = 'end'): void => {
@@ -1733,6 +1853,7 @@ watch(() => state.volume, v => {
   if (ytPlayer) ytPlayer.setVolume(v * 100);
   if (ptPlayer) ptPlayer.setVolume(v);
   if (wtVideoEl) wtVideoEl.volume = v;
+  if (currentSource.value?.type === 'suno') sunoSend('setVolume', { volume: v });
   localStorage.setItem('bf-player-volume', String(v));
   _emit('volumeChange', v);
 });

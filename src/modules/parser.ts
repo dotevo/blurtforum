@@ -66,7 +66,7 @@ export const Parser = {
             if (seenMedia.has(mediaKey)) return '';
             seenMedia.add(mediaKey);
             typeCounters[media.type] = (typeCounters[media.type] || 0) + 1;
-            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type]));
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type], media.pending));
           }
           return tokenize(fullMatch);
         }
@@ -90,7 +90,7 @@ export const Parser = {
           if (seenMedia.has(mediaKey)) return match;
           seenMedia.add(mediaKey);
           typeCounters[media.type] = (typeCounters[media.type] || 0) + 1;
-          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type]));
+          return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type], media.pending));
         }
         return tokenize(this.getIframePlaceholder(src));
       });
@@ -122,7 +122,7 @@ export const Parser = {
             if (seenMedia.has(mediaKey)) return url; // Already embedded
             seenMedia.add(mediaKey);
             typeCounters[media.type] = (typeCounters[media.type] || 0) + 1;
-            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type]));
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type], media.pending));
           }
           
           // Image Check (naked URLs)
@@ -142,7 +142,7 @@ export const Parser = {
             if (seenMedia.has(mediaKey)) return uri;
             seenMedia.add(mediaKey);
             typeCounters[media.type] = (typeCounters[media.type] || 0) + 1;
-            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type]));
+            return tokenize(this.getExperimentalPlaceholder(media.type, media.id, media.host || '', context, currentGroup, typeCounters[media.type], media.pending));
           }
           return uri;
         });
@@ -256,10 +256,18 @@ export const Parser = {
       const id = ytMatch[1];
       return { type: 'youtube', id, thumb: `https://img.youtube.com/vi/${id}/0.jpg` };
     }
+    // Suno blocked direct .mp3 downloads (see cookie-consent-era postmortem
+    // for the unrelated GA saga -- this is a separate, newer break). Playback
+    // now goes through our own worker's <iframe> embed + postMessage
+    // protocol instead of an <audio> src -- see initSuno()/sunoSend() in
+    // player.ts. /song/ URLs already carry a directly-usable ID (no
+    // resolution needed); /s/ share links still need the existing
+    // resolveIfNeeded() proxy round-trip in ForumMedia.ce.vue to turn the
+    // share slug into that same kind of usable ID before the embed can load.
     const sunoSongMatch = text.match(/https?:\/\/(?:www\.)?suno.com\/song\/([a-zA-Z0-9-]+)/);
-    if (sunoSongMatch) return { type: 'audio', id: sunoSongMatch[1], src: `https://cdn1.suno.ai/${sunoSongMatch[1]}.mp3`, cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg` };
+    if (sunoSongMatch) return { type: 'suno', id: sunoSongMatch[1], cover: `https://cdn2.suno.ai/image_large_${sunoSongMatch[1]}.jpeg` };
     const sunoShareMatch = text.match(/https?:\/\/(?:www\.)?suno\.com\/s\/([a-zA-Z0-9]+)/);
-    if (sunoShareMatch) return { type: 'audio', id: sunoShareMatch[1], pending: true };
+    if (sunoShareMatch) return { type: 'suno', id: sunoShareMatch[1], pending: true };
     const ptMatch = text.match(/https?:\/\/([a-zA-Z0-9.-]+)\/(?:w|videos\/watch|videos\/embed)\/([a-zA-Z0-9-]+)/);
     if (ptMatch) return { type: 'peertube', id: ptMatch[2], host: ptMatch[1], pending: true };
     const audioMatch = text.match(/https?:\/\/[^\s\)]+\.(mp3|wav|ogg|m4a|flac)(\?.*)?/i);
@@ -341,11 +349,20 @@ export const Parser = {
     return results;
   },
 
-  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null, group: string = '', index: number = 0): string {
+  getExperimentalPlaceholder(type: string, id: string, host: string, context: ParseContext | null = null, group: string = '', index: number = 0, pending?: boolean): string {
     const title = (context?.title || 'Media Content').replace(/"/g, '&quot;');
     const author = context?.author || 'post';
     const permlink = context?.permlink || '';
-    const isPending = (type === 'audio' && id.length < 30) || (type === 'peertube');
+    // Prefer the real `pending` flag detectMedia() already computed for us
+    // (passed in by every caller that has a `media` object). The old
+    // length-based guess is kept only as a fallback for the explicit
+    // [[MEDIA:type:id:host]] syntax, which has no media object to read a
+    // real flag from. It used to (mostly by luck) also cover suno since
+    // suno was tagged type:'audio' back then; now that suno is its own
+    // type, it needs to be listed explicitly for that fallback to still work.
+    const isPending = typeof pending === 'boolean'
+      ? pending
+      : ((type === 'audio' || type === 'suno') && id.length < 30) || (type === 'peertube');
     // Magnet URIs contain raw & characters — escape for safe use inside an HTML attribute.
     const idAttr = id.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 

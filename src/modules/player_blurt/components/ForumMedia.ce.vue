@@ -69,7 +69,7 @@ import { getTorrent, parseInfoHash } from '../../player/webtorrent-pool';
 import { TR } from '../../translations';
 
 // Global cache for this session to persist resolutions across component unmounts
-const sunoCache = reactive<Record<string, { id: string, src: string, cover: string }>>({});
+const sunoCache = reactive<Record<string, { id: string, cover: string }>>({});
 const t = (k: string): string => {
   if (props.t) return props.t(k);
   return TR[k] || k;
@@ -182,7 +182,14 @@ const isResolving = ref(false);
 const lastResolvedId = ref<string | null>(null);
 const isUnmounted = ref(false);
 
-const isSunoUuid = (type: string, id: string) => type === 'audio' && id.length >= 32;
+// True once `id` is a fully-resolved Suno track id (the 36-char UUID either
+// came straight from a /song/ URL's slug being long enough, or -- more
+// commonly -- out of resolveIfNeeded()'s /s/ share-link proxy round-trip
+// below). At that point no further resolution is needed; the id is directly
+// usable to build the worker's iframe embed URL. Suno used to be tagged
+// type:'audio' (see parser.ts); it's its own 'suno' type now that playback
+// goes through an iframe instead of an <audio> element.
+const isSunoUuid = (type: string, id: string) => type === 'suno' && id.length >= 32;
 
 const trackData = computed<MediaTrack>(() => {
   // 1. Resolve base data (resolvedTrack > props.media > single props)
@@ -218,7 +225,8 @@ const trackData = computed<MediaTrack>(() => {
   let mediaThumb = '';
 
   if (isSunoUuid(type, id)) {
-    if (!src) src = `https://cdn1.suno.ai/${id}.mp3`;
+    // No more `src` fabrication here -- Suno playback isn't an <audio> src
+    // any more, it's the worker iframe embed (id alone is enough for that).
     mediaThumb = `https://cdn2.suno.ai/image_large_${id}.jpeg`;
     if (!cover) cover = mediaThumb;
   }
@@ -296,7 +304,7 @@ const resolveIfNeeded = async () => {
 
   isResolving.value = true;
   try {
-    const isSunoPending = currentType === 'audio' && trackData.value.pending;
+    const isSunoPending = currentType === 'suno' && trackData.value.pending;
     const isPeertubeNeeded = currentType === 'peertube' && !resolvedTrack.value;
 
     if (isSunoPending) {
@@ -313,15 +321,14 @@ const resolveIfNeeded = async () => {
         resolvedTrack.value = { 
           ...trackData.value, 
           sources: [{
-            type: 'audio',
+            type: 'suno',
             id: uuid,
-            src: `https://cdn1.suno.ai/${uuid}.mp3`,
             thumb: sunoCover
           }],
           cover: sunoCover,
           pending: false 
         };
-        sunoCache[currentId] = { id: uuid, src: resolvedTrack.value.sources[0].src!, cover: sunoCover };
+        sunoCache[currentId] = { id: uuid, cover: sunoCover };
         lastResolvedId.value = currentId;
       }
     } else if (isPeertubeNeeded) {
