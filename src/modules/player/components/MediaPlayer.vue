@@ -629,7 +629,7 @@ registerDockedBarElement(bfpBarEl);
             id="bf-suno-player-iframe"
             class="bfp-video-iframe"
             :key="currentSource?.id"
-            :src="currentSource?.type === 'suno' ? `${SUNO_EMBED_BASE}/${currentSource.id}` : ''"
+            :src="currentSource?.type === 'suno' ? `${SUNO_EMBED_BASE}/${currentSource.id}${player.state.isAutoStarting ? '?autoplay=1' : ''}` : ''"
             frameborder="0"
             allow="autoplay"
           ></iframe>

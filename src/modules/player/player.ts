@@ -1030,11 +1030,31 @@ const sunoSend = (action: string, payload: Record<string, unknown> = {}): void =
 };
 
 let sunoListenerAttached = false;
+// Which track's iframe has actually had setVolume/attachSunoListener/initial
+// play sent to it. This is the fix for: "restore last-played Suno track on
+// page load, hit the global play button -> audio genuinely starts (the
+// worker answers postMessage commands statelessly, no init needed for that
+// part) but status/seekbar never update". Root cause was two-fold:
+//   1) attachSunoListener() was only ever called from inside initSuno(),
+//      and initSuno() was only called from playTrack()'s 'suno' branch --
+//      which never runs on a page-load restore (that path only restores
+//      `state`/`currentSource`, it doesn't replay the original playTrack()
+//      call). So the window 'message' listener genuinely never existed yet.
+//   2) togglePlay()'s "was this restored-but-never-loaded?" guard checked
+//      `!document.getElementById('bf-suno-player-iframe')` -- but the
+//      iframe is always in the DOM (just CSS-hidden) as soon as
+//      currentSource is 'suno', restored or not, so that check was never
+//      true and initSuno() never got a second chance to run from there
+//      either.
+// Fixing (2) needs a real "have we actually initialized playback for this
+// exact track" flag instead of a DOM-presence check -- this is it.
+let sunoInitializedTrackId: string | null = null;
 
-// Attached once for the whole app lifetime (not per-track, unlike ptPlayer)
-// since it's just a window-level postMessage listener, not an object tied
-// to one iframe instance -- re-attaching per track would just pile up
-// duplicate listeners for no benefit.
+// Attached once for the whole app lifetime, unconditionally, at module load
+// -- not lazily from initSuno() any more (see the note above on why that
+// was the bug). It's just a window-level postMessage listener with no
+// per-track state of its own, so there's no cost to having it live from the
+// very first page load regardless of whether a Suno track ever plays.
 const attachSunoListener = (): void => {
   if (sunoListenerAttached) return;
   sunoListenerAttached = true;
@@ -1048,7 +1068,11 @@ const attachSunoListener = (): void => {
     // directly since there's no async init chain here to race against.
     if (currentSource.value?.type !== 'suno') return;
 
-    if (msg.type === 'play') {
+    if (msg.type === 'init' || msg.type === 'ready') {
+      // Fires once the embed has actually loaded the track -- gives us
+      // duration immediately instead of waiting for the first timeupdate.
+      if (msg.duration > 0) state.duration = msg.duration;
+    } else if (msg.type === 'play') {
       state.playing = true; state.loading = false;
     } else if (msg.type === 'pause') {
       state.playing = false;
@@ -1061,13 +1085,19 @@ const attachSunoListener = (): void => {
         state.duration = msg.duration;
         state.progress = (msg.currentTime / msg.duration) * 100;
       }
+    } else if (msg.type === 'volumechange') {
+      // The embed has its own volume control the user could touch directly
+      // inside the iframe -- reflect that back into our own slider instead
+      // of silently drifting out of sync with it.
+      if (typeof msg.volume === 'number') state.volume = msg.volume;
     }
-    // The embed also reports msg.title / msg.imageUrl / msg.thumbnailUrl --
-    // not consumed here yet. That feeds the *card* thumbnail, which is a
-    // separate follow-up (per the "miniatury są zawsze te domyślne" bug
-    // filed alongside this one), not the player itself.
+    // msg.title / msg.imageUrl / msg.thumbnailUrl also arrive on every
+    // message per the worker's README, but feed the *card* thumbnail,
+    // which is a separate follow-up (per the "miniatury są zawsze te
+    // domyślne" bug filed alongside this one), not the player itself.
   });
 };
+attachSunoListener();
 
 // Same race as initPT() (see its comment above): the iframe is keyed by
 // currentSource.id in MediaPlayer.vue, so Vue tears down and re-mounts a
@@ -1087,15 +1117,17 @@ const initSuno = (retriesLeft = 15, generation = mediaGeneration): void => {
     return;
   }
 
-  attachSunoListener();
+  sunoInitializedTrackId = currentSource.value.id;
   state.loading = false;
   sunoSend('setVolume', { volume: state.volume });
   // Confirmed: the worker embed does NOT autoplay on load, unlike
-  // PeerTube's iframe. It starts paused, so toggle it once here to
-  // actually start playback -- this only runs once per track (from
-  // playTrack()'s 'suno' branch below), so there's no risk of this
-  // fighting with togglePlay()'s own later toggle() calls.
-  sunoSend('toggle');
+  // PeerTube's iframe -- it starts paused, so this actually starts
+  // playback. Uses the explicit 'play' action (not 'toggle') now that the
+  // updated worker README confirms play/pause/toggle are all separately
+  // available -- 'play' is idempotent if something (e.g. ?autoplay=1 on
+  // the iframe src) already started it, whereas 'toggle' would have paused
+  // it right back out from under us in that case.
+  sunoSend('play');
 };
 
 const loadYTAPI = (): Promise<void> => {
@@ -1236,11 +1268,12 @@ export const stopAll = (): void => {
   if (ptPlayer?.pause) { try { ptPlayer.pause(); } catch { /* ignore */ } }
   ptPlayer = null; // Important: reset PT player instance
   // No object to null out for Suno (sunoSend() looks the iframe up by ID
-  // fresh every call, there's no cached instance like ptPlayer). The
-  // protocol only has 'toggle', not a dedicated pause, so only send it
-  // while we believe it's actually playing -- otherwise this would
-  // *resume* a track that's already paused, right as we're tearing down.
-  if (currentSource.value?.type === 'suno' && state.playing) { try { sunoSend('toggle'); } catch { /* ignore */ } }
+  // fresh every call, there's no cached instance like ptPlayer). Explicit
+  // 'pause' action now (not 'toggle') per the worker's updated README --
+  // safe to call unconditionally regardless of state.playing, unlike
+  // toggle would have been.
+  if (currentSource.value?.type === 'suno') { try { sunoSend('pause'); } catch { /* ignore */ } }
+  sunoInitializedTrackId = null;
   if (wtVideoEl && wtVideoEl.src) {
     console.log('[BFPlayer] stopAll: tearing down WebTorrent video element (had src =', wtVideoEl.src.slice(0, 80), ')');
     wtVideoEl.pause();
@@ -1496,7 +1529,7 @@ const playNext = (isAuto = false): void => {
   if (audioObj) audioObj.pause();
   if (ytPlayer) ytPlayer.pauseVideo();
   if (ptPlayer) ptPlayer.pause();
-  if (currentSource.value?.type === 'suno' && state.playing) sunoSend('toggle');
+  if (currentSource.value?.type === 'suno') sunoSend('pause');
 };
 
 const playPrev = (): void => {
@@ -1553,7 +1586,18 @@ export const togglePlay = (): void => {
     playTrack(state.currentTrack);
     return;
   }
-  if (currentSource.value.type === 'suno' && !document.getElementById('bf-suno-player-iframe')) {
+  // Real "restored on page load but never actually initialized" guard --
+  // the iframe itself is always in the DOM as soon as currentSource is
+  // 'suno' (just CSS-hidden), restored-from-boot or not, so checking for
+  // its presence (like the wtVideoEl/ptPlayer checks above do for their
+  // own objects) never actually caught this case. sunoInitializedTrackId
+  // is set by initSuno() itself, per track, so this only fires exactly
+  // once per genuinely-uninitialized track -- which was the whole bug:
+  // clicking play on a boot-restored Suno track sent commands to an iframe
+  // nobody had ever called attachSunoListener()/setVolume() for, so audio
+  // would actually start (the worker answers postMessage regardless) but
+  // status/seekbar never updated because nothing was listening yet.
+  if (currentSource.value.type === 'suno' && sunoInitializedTrackId !== currentSource.value.id) {
     initSuno();
     return;
   }
@@ -1562,22 +1606,12 @@ export const togglePlay = (): void => {
     state.playing = ytPlayer.getPlayerState() === window.YT!.PlayerState.PLAYING;
   }
 
-  // Suno's worker protocol only exposes 'toggle' (see the reference embed
-  // snippet this was built from) -- no separate play()/pause() actions to
-  // call one-sided like every other source type here. So instead of
-  // splitting it across the two branches below, handle it once up front and
-  // trust state.playing (kept in sync by attachSunoListener()'s 'play'/
-  // 'pause' messages) to mean the toggle will land in the right direction.
-  if (currentSource.value.type === 'suno') {
-    sunoSend('toggle');
-    return;
-  }
-
   if (state.playing) {
     if (currentSource.value.type === 'audio' && audioObj) audioObj.pause();
     if (currentSource.value.type === 'youtube' && ytPlayer) ytPlayer.pauseVideo();
     if (currentSource.value.type === 'peertube' && ptPlayer) ptPlayer.pause();
     if (currentSource.value.type === 'webtorrent' && wtVideoEl) wtVideoEl.pause();
+    if (currentSource.value.type === 'suno') sunoSend('pause');
   } else {
     if (currentSource.value.type === 'audio' && audioObj) audioObj.play();
     if (currentSource.value.type === 'youtube' && ytPlayer) ytPlayer.playVideo();
@@ -1585,6 +1619,7 @@ export const togglePlay = (): void => {
     if (currentSource.value.type === 'webtorrent' && wtVideoEl) {
       wtVideoEl.play().catch((err) => console.warn('[BFPlayer] WebTorrent: play() rejected:', err?.message || err));
     }
+    if (currentSource.value.type === 'suno') sunoSend('play');
   }
 };
 
@@ -1594,10 +1629,10 @@ const seek = (pct: number): void => {
   else if (currentSource.value?.type === 'audio' && audioObj) audioObj.currentTime = time;
   else if (currentSource.value?.type === 'peertube' && ptPlayer) ptPlayer.seek(time);
   else if (currentSource.value?.type === 'webtorrent' && wtVideoEl) wtVideoEl.currentTime = time;
-  // Suno's protocol takes a 0-1 fraction ({progress}), not absolute seconds
-  // like every other source here -- pct/100 is exactly that, no need to
-  // divide through state.duration like `time` above does.
-  else if (currentSource.value?.type === 'suno') sunoSend('seek', { progress: pct / 100 });
+  // Updated worker README confirms {time: seconds} is also supported (not
+  // just {progress}) -- use that instead now, consistent with every other
+  // source type in this function already working in absolute seconds.
+  else if (currentSource.value?.type === 'suno') sunoSend('seek', { time });
 };
 
 export const addToQueue = (track: MediaTrack, position: 'start' | 'end' = 'end'): void => {
