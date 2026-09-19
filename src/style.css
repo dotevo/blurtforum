@@ -1660,6 +1660,41 @@ a:hover { color: var(--link-hover-color); text-decoration: underline; }
    every theme block. */
 .btn-danger { background: var(--alert-error-text); color: #fff; border-color: var(--alert-error-text); }
 .btn-danger:hover { filter: brightness(1.1); }
+
+/* COAL warning: blurred content + explicit "I understand" button (see TopicView.vue/PostReplyThread.vue).
+   Click-to-reveal on purpose, not hover, since hover has no equivalent on touch/mobile. */
+.coal-blur-wrap { position: relative; }
+.coal-content.coal-blurred {
+  filter: blur(9px);
+  pointer-events: none;
+  user-select: none;
+  max-height: 220px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+.coal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  padding: 10px;
+}
+.coal-overlay-box {
+  background: var(--surface-1, #fff);
+  border: 2px solid var(--alert-error-text);
+  border-radius: var(--radius-sm);
+  padding: 16px 20px;
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+.coal-overlay-box i.fa-triangle-exclamation { color: var(--alert-error-text); font-size: 22px; margin-bottom: 6px; }
+.coal-overlay-title { font-weight: bold; color: var(--alert-error-text); margin-bottom: 6px; }
+.coal-overlay-text { font-size: 12px; color: var(--text-soft); margin-bottom: 10px; }
+.coal-overlay-link { display: block; font-size: 11px; text-decoration: underline; margin-bottom: 10px; }
 .btn-ghost { background: transparent; color: var(--btn-ghost-text); border: 1px solid var(--btn-ghost-border); }
 .btn-ghost:hover { background: var(--btn-ghost-hover-bg); color: var(--btn-ghost-hover-text); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }

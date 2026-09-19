@@ -124,16 +124,6 @@ const handleLinkClick = (event: MouseEvent) => {
         <span class="expand-btn">[{{ t('show') }}]</span>
       </div>
 
-      <!-- Compact Bar for Collapsed COAL-listed Comment (visible to everyone, just collapsed) -->
-      <div v-else-if="r.isCoalCollapsed" class="collapsed-support-bar collapsed-coal-bar" @click="r.isCoalCollapsed=false" style="cursor:pointer;" :title="r.coalInfo ? (r.coalInfo.reason + ': ' + r.coalInfo.notes) : ''">
-        <span class="vote-info" style="color:var(--alert-error-text);">
-          <i class="fa-solid fa-triangle-exclamation"></i>
-        </span>
-        <span class="gs">{{ t('coalWarningShort') }}</span>
-        <span class="author-tag">@{{ r.author }}</span>
-        <span class="expand-btn">[{{ t('show') }}]</span>
-      </div>
-
       <div v-else class="forumline-wrap" style="margin-bottom:5px" :style="{ opacity: r.isMuted ? 0.5 : 1 }">
       <table :id="'post-' + r.permlink" class="forumline topic-table">
         <thead>
@@ -216,6 +206,8 @@ const handleLinkClick = (event: MouseEvent) => {
               </div>
 
               <!-- Quote of parent comment (only when it's a nested reply, not a direct reply to OP) -->
+              <div class="coal-blur-wrap">
+              <div class="coal-content" :class="{ 'coal-blurred': r.isCoal && r.isCoalCollapsed }">
 
               <div v-if="isNestedReply(r)" class="quote-box">
                 <span style="font-weight: bold;">{{ t('replyTo') }}: <a :href="'?view=profile&user=' + r.parent_author" @click.prevent="emit('openProfile', r.parent_author)">@{{ r.parent_author }}</a></span>
@@ -237,6 +229,20 @@ const handleLinkClick = (event: MouseEvent) => {
                 <div class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
               </ForumMedia>
               <div v-else class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
+
+              </div>
+              <!-- COAL warning overlay: content is blurred until the reader explicitly acknowledges it -
+                   deliberately click-to-reveal rather than hover, since hover doesn't exist on mobile. -->
+              <div v-if="r.isCoal && r.isCoalCollapsed" class="coal-overlay">
+                <div class="coal-overlay-box">
+                  <i class="fa-solid fa-triangle-exclamation"></i>
+                  <div class="coal-overlay-title">{{ t('coalVoteWarningTitle') }}</div>
+                  <div class="coal-overlay-text">{{ r.coalInfo?.reason }}<span v-if="r.coalInfo?.notes"> — {{ r.coalInfo?.notes }}</span></div>
+                  <a href="https://coal.blurtwallet.com/" target="_blank" rel="noopener" class="coal-overlay-link" @click.stop>{{ t('coalVoteWarningLink') }}</a>
+                  <button class="btn btn-sm btn-accent" @click="r.isCoalCollapsed=false">{{ t('coalAcknowledge') }}</button>
+                </div>
+              </div>
+              </div>
 
               <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--surface-4); display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; gap: 10px;">

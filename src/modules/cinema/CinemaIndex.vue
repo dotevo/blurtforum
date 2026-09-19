@@ -11,6 +11,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { Blockchain } from '../blockchain';
 import { PostProcessor } from '../post-processor';
+import { isHiddenFromViewer } from '../visibility';
 import { state as playerState, playlistState, playTrack, togglePlay } from '../player/player';
 import ForumMedia from '../player_blurt/components/ForumMedia.ce.vue';
 import type { MediaTrack } from '../player/types';
@@ -21,10 +22,19 @@ const props = defineProps<{
   /** Reactive `{ user, accounts }` auth object from useAuth(), used to resolve the logged-in
    *  username for the "Feed" row and the per-person rows derived from it. */
   auth?: { user: { username: string } | null } | null;
+  // Same moderation data useApp.ts's normalizePost wrapper uses - see comments-plugin.ts for the
+  // identical pattern. Cinema pulls posts from many tags/accounts across possibly many
+  // communities, so community-role bans (getMutedAccounts) only apply when a post's own
+  // `category` matches config.communityAccount; the site-wide ban list and COAL apply always.
+  getCanMute?: () => boolean;
+  getCanBanUser?: () => boolean;
+  getMutedAccounts?: () => Set<string>;
+  getCoalMap?: () => Map<string, { reason: string; notes: string }>;
+  config?: { communityAccount: string };
 }>();
 
 interface CinemaCard {
-  post: { author: string; permlink: string; title: string };
+  post: { author: string; permlink: string; title: string; isCoal?: boolean; coalInfo?: { reason: string; notes: string } | null };
   track: MediaTrack;
 }
 
@@ -287,7 +297,11 @@ async function fetchMoreForCategory(cat: CinemaRow, target: number): Promise<voi
 
     let addedThisPage = 0;
     for (const r of raw) {
-      const post = PostProcessor.normalizePost(r);
+      const post = PostProcessor.normalizePost(r, {
+        canMute: props.getCanMute?.(),
+        mutedAccounts: props.getMutedAccounts?.(),
+        coalMap: props.getCoalMap?.()
+      });
       const postKey = `${post.author}/${post.permlink}`;
 
       // Deduplication check: skip if post is already present in this row
@@ -295,11 +309,21 @@ async function fetchMoreForCategory(cat: CinemaRow, target: number): Promise<voi
         continue;
       }
 
+      // Same visibility rule as everywhere else (see visibility.ts). Community-role bans/mutes
+      // only make sense to enforce for posts that actually belong to the configured community -
+      // a video tagged elsewhere isn't something this community's mods have any say over.
+      const inThisCommunity = post.category === props.config?.communityAccount;
+      const hidden = post.isGloballyBanned || (inThisCommunity && isHiddenFromViewer(post, {
+        canBanUser: props.getCanBanUser?.() ?? false,
+        canMute: props.getCanMute?.() ?? false
+      }));
+      if (hidden) continue;
+
       if (post.tracks && post.tracks.length) {
         const track = post.tracks[0] as unknown as MediaTrack;
         cat.seenKeys.add(postKey);
         cat.cards.push({
-          post: { author: post.author, permlink: post.permlink, title: post.title },
+          post: { author: post.author, permlink: post.permlink, title: post.title, isCoal: post.isCoal, coalInfo: post.coalInfo },
           track,
         });
         addedThisPage++;
@@ -618,6 +642,9 @@ watch(() => playerState.cinemaBrowseView, () => { hasAutoFocused = false; });
         :t="t"
       />
       <div class="cinema-hero-content">
+        <span v-if="currentCard.post.isCoal" class="cinema-coal-badge" :title="currentCard.post.coalInfo ? (currentCard.post.coalInfo.reason + ': ' + currentCard.post.coalInfo.notes) : ''">
+          <i class="fa-solid fa-triangle-exclamation"></i> {{ t('coalWarningShort') }}
+        </span>
         <h1 class="cinema-hero-title">{{ currentCard.post.title }}</h1>
         <div class="cinema-hero-meta">
           <span><i class="fa-solid fa-user-astronaut"></i> @{{ currentCard.post.author }}</span>
@@ -673,6 +700,9 @@ watch(() => playerState.cinemaBrowseView, () => { hasAutoFocused = false; });
               />
               <span v-if="cardSource(card)" class="cinema-card-badge" :title="cardSource(card)!.label">
                 <i :class="cardSource(card)!.icon"></i> {{ cardSource(card)!.label }}
+              </span>
+              <span v-if="card.post.isCoal" class="cinema-coal-badge cinema-coal-badge--corner" :title="card.post.coalInfo ? (card.post.coalInfo.reason + ': ' + card.post.coalInfo.notes) : ''">
+                <i class="fa-solid fa-triangle-exclamation"></i>
               </span>
             </div>
             <div class="cinema-card-info">
@@ -837,6 +867,27 @@ watch(() => playerState.cinemaBrowseView, () => { hasAutoFocused = false; });
   border-radius: 4px;
   letter-spacing: 0.3px;
   pointer-events: none;
+}
+
+/* COAL warning badge (coal.blurtwallet.com) - thumbnail/hero only get a small flag here, not
+   the full blur+acknowledge treatment used for post/comment bodies (see style.css), since
+   there's no long-form text to hide behind a click. */
+.cinema-coal-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--alert-error-text);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.cinema-coal-badge--corner {
+  position: absolute;
+  top: 6px; right: 6px;
+  padding: 3px 6px;
+  margin-bottom: 0;
+  pointer-events: auto;
 }
 
 .cinema-card-info { padding: 8px 10px; }

@@ -1736,7 +1736,7 @@ export function useApp() {
     walletAuthModal,
     followModal, confirmToggleFollow,
     openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
-    canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, editStructureMode, startEditStructure, saveStructure,
+    canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
     pinModal, handlePinSubmit,

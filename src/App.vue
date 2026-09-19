@@ -81,7 +81,7 @@ const {
   followModal, confirmToggleFollow,
 
   openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
-  canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, editStructureMode, startEditStructure, saveStructure,
+  canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
   forumPagination,
   pinModal, handlePinSubmit,
@@ -477,7 +477,10 @@ const {
 
       <!-- ── Views ───────────────────────────────────────────────── -->
 
-      <CinemaIndex v-if="cinemaMode" :client="client" :t="t" :auth="auth" />
+      <CinemaIndex v-if="cinemaMode" :client="client" :t="t" :auth="auth"
+        :get-can-mute="() => canMute" :get-can-ban-user="() => canBanUser"
+        :get-muted-accounts="() => mutedAccounts" :get-coal-map="() => coalMap"
+        :config="config" />
 
       <!-- While the TV-only device-profiles gate is up, render nothing here
            at all rather than falling through to the full forum UI

@@ -203,6 +203,8 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 </div>
               </div>
 
+              <div class="coal-blur-wrap">
+              <div class="coal-content" :class="{ 'coal-blurred': activeTopic.isCoal && activeTopic.isCoalCollapsed }">
               <ForumMedia 
                 v-if="activeTopic.media"
                 :hideButtons="true"
@@ -215,6 +217,19 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
               </ForumMedia>
               <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
+              </div>
+              <!-- COAL warning overlay: content is blurred until the reader explicitly acknowledges it -
+                   deliberately click-to-reveal rather than hover, since hover doesn't exist on mobile. -->
+              <div v-if="activeTopic.isCoal && activeTopic.isCoalCollapsed" class="coal-overlay">
+                <div class="coal-overlay-box">
+                  <i class="fa-solid fa-triangle-exclamation"></i>
+                  <div class="coal-overlay-title">{{ t('coalVoteWarningTitle') }}</div>
+                  <div class="coal-overlay-text">{{ activeTopic.coalInfo?.reason }}<span v-if="activeTopic.coalInfo?.notes"> — {{ activeTopic.coalInfo?.notes }}</span></div>
+                  <a href="https://coal.blurtwallet.com/" target="_blank" rel="noopener" class="coal-overlay-link" @click.stop>{{ t('coalVoteWarningLink') }}</a>
+                  <button class="btn btn-sm btn-accent" @click="activeTopic.isCoalCollapsed=false">{{ t('coalAcknowledge') }}</button>
+                </div>
+              </div>
+              </div>
               <div style="margin-top:15px;padding-top:10px;border-top:1px solid var(--surface-4); display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; gap: 10px;">
                   <template v-if="auth.user">
