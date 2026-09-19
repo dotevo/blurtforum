@@ -560,6 +560,7 @@ const barSeries = computed(() => {
                   />
                   <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + post.author + '&permlink=' + post.permlink" @click.stop.prevent="$emit('openTopic', post)" 
                      style="font-size: 12px; font-weight: normal;">{{ post.title }}</a>
+                  <span v-if="post.isCoal" class="gs" style="color:var(--alert-error-text);" :title="post.coalInfo ? (post.coalInfo.reason + ': ' + post.coalInfo.notes) : t('coalWarningShort')"><i class="fa-solid fa-triangle-exclamation"></i></span>
                 </div>
               </td>
               <td class="row2" align="center">
@@ -598,7 +599,8 @@ const barSeries = computed(() => {
               </td>
               <td class="row1 row-hover" @click="$emit('openTopic', c)">
                 <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + c.author + '&permlink=' + c.permlink" @click.stop.prevent="$emit('openTopic', c)" style="display:block; text-decoration:none; color:inherit;">
-                  <span class="gs">RE: @{{ c.parent_author }}</span><br>
+                  <span class="gs">RE: @{{ c.parent_author }}</span>
+                  <span v-if="c.isCoal" class="gs" style="color:var(--alert-error-text);" :title="c.coalInfo ? (c.coalInfo.reason + ': ' + c.coalInfo.notes) : t('coalWarningShort')"><i class="fa-solid fa-triangle-exclamation"></i></span><br>
                   {{ c.body.substring(0, 100) }}...
                 </a>
               </td>
@@ -641,6 +643,7 @@ const barSeries = computed(() => {
               <td class="row1" align="center">
                 <UserAvatar :username="r.author" size="xs" @click="$emit('openProfile', r.author)" />
                 <a :href="'?community=' + config.communityAccount + '&view=profile&user=' + r.author" @click.stop.prevent="$emit('openProfile', r.author)" style="font-size:11px;">@{{ r.author }}</a>
+                <span v-if="r.isCoal" class="gs" style="color:var(--alert-error-text);" :title="r.coalInfo ? (r.coalInfo.reason + ': ' + r.coalInfo.notes) : t('coalWarningShort')"><i class="fa-solid fa-triangle-exclamation"></i></span>
               </td>
               <td class="row1 row-hover" @click="$emit('openTopic', r)">
                 <a :href="'?community=' + config.communityAccount + '&view=topic&author=' + r.author + '&permlink=' + r.permlink" @click.stop.prevent="$emit('openTopic', r)" style="display:block; text-decoration:none; color:inherit;">

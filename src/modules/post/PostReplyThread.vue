@@ -206,6 +206,9 @@ const handleLinkClick = (event: MouseEvent) => {
               <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
 
+                  <span v-if="r.isMuted" style="color:var(--alert-error-text); font-weight:bold;">[{{ t('muted') }}]</span>
+                  <span v-if="r.isCommunityBanned" style="color:var(--alert-error-text); font-weight:bold;">🚫 [{{ t('bannedShort') }}]</span>
+                  <span v-if="r.isCoal" class="gs" style="color:var(--alert-error-text);" :title="r.coalInfo ? (r.coalInfo.reason + ': ' + r.coalInfo.notes) : ''"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('coalWarningShort') }}</span>
                   <PostBeneficiaries :beneficiaries="r.beneficiaries" :limit="2" :t="t" :community-account="config.communityAccount" @open-profile="(u) => emit('openProfile', u)" />
 
                 </div>

@@ -1440,6 +1440,34 @@ export function useApp() {
     canMute: () => canMute.value
   });
 
+  // COAL data loads asynchronously (network fetch or even a cached-but-first-microtask read),
+  // so anything already normalized before it resolves was baked with isCoal=false and never
+  // updates on its own (normalizePost computes flags once, it doesn't keep watching coalMap).
+  // Re-stamp every post/comment object we currently know about (by reference - these are the
+  // SAME reactive objects the templates and voteModal.post point to, see getFullPost above) the
+  // moment coalMap actually has data, and again whenever it's refreshed later (e.g. tomorrow).
+  const applyCoalFlags = (): void => {
+    const map = coalMap.value;
+    if (!map.size) return;
+    const reflag = (p?: Post | null) => {
+      if (!p || !p.author) return;
+      const entry = map.get(p.author.toLowerCase());
+      if (entry && !p.isCoal) {
+        p.isCoal = true;
+        p.coalInfo = entry;
+        p.isCoalCollapsed = true;
+      }
+    };
+    reflag(activeTopic.value);
+    replies.value.forEach(reflag);
+    forumStructure.value.forEach(cat => cat.forums.forEach(f => f.posts.forEach(reflag)));
+    if (activeForum.value) activeForum.value.posts.forEach(reflag);
+    profileUser.posts.forEach(reflag);
+    profileUser.comments.forEach(reflag);
+    profileUser.replies.forEach(reflag);
+  };
+  watch(coalMap, applyCoalFlags);
+
   const { supportModal, submitSupportComment, triggerSupport } = useSupport(
     rpc.dataClient.value, auth, broadcast as any, checkLock, t
   );

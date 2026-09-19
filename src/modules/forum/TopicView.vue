@@ -188,6 +188,9 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
               <!-- Mobile Header Stats (OP) -->
               <div class="show-mobile" style="margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <span v-if="activeTopic.isMuted" style="color:var(--alert-error-text); font-weight:bold;">[{{ t('muted') }}]</span>
+                  <span v-if="activeTopic.isCommunityBanned" style="color:var(--alert-error-text); font-weight:bold;">🚫 [{{ t('bannedShort') }}]</span>
+                  <span v-if="activeTopic.isCoal" class="gs" style="color:var(--alert-error-text);" :title="activeTopic.coalInfo ? (activeTopic.coalInfo.reason + ': ' + activeTopic.coalInfo.notes) : ''"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('coalWarningShort') }}</span>
                   <PostBeneficiaries :beneficiaries="activeTopic.beneficiaries" :limit="2" :t="t" :community-account="config.communityAccount" @open-profile="(u) => emit('openProfile', u)" />
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
