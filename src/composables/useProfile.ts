@@ -4,6 +4,8 @@ import * as Earnings from '../modules/earnings';
 import * as dblurt from '@beblurt/dblurt';
 import { Blockchain } from '../modules/blockchain';
 import { BFPlayer } from '../modules/player/player';
+import { isGloballyBanned } from '../modules/banned-users';
+import { isHiddenFromViewer } from '../modules/visibility';
 
 /**
  * Composable for managing user profile state and logic.
@@ -12,8 +14,13 @@ export function useProfile(
   client: any,
   globalProps: any,
   view: any,
-  normalizePost: (p: any) => Post
+  normalizePost: (p: any) => Post,
+  moderation?: { canBanUser?: () => boolean; canMute?: () => boolean }
 ) {
+  const visibleFilter = (p: Post) => !isHiddenFromViewer(p, {
+    canBanUser: moderation?.canBanUser?.() ?? false,
+    canMute: moderation?.canMute?.() ?? false
+  });
   const profileUser = reactive<{
     username: string;
     data: Record<string, unknown> | null;
@@ -49,8 +56,11 @@ export function useProfile(
       loading: boolean;
     };
     loading: boolean;
+    /** True when this account is on the site-wide ban list (banned-users.ts). See openProfile. */
+    banned: boolean;
   }>({
     username: '',
+    banned: false,
     data: null,
     posts: [],
     comments: [],
@@ -189,6 +199,16 @@ export function useProfile(
     profileUser.postsHasMore = profileUser.commentsHasMore = profileUser.repliesHasMore = true;
     view.value = 'profile';
 
+    // Site-wide ban (banned-users.ts): stop immediately, no RPC calls at all - the profile
+    // page just shows a "banned" placeholder. This is intentionally checked before anything
+    // else and cannot be bypassed by community role (owner/admin can't see it either).
+    if (isGloballyBanned(username)) {
+      profileUser.banned = true;
+      profileUser.loading = false;
+      return;
+    }
+    profileUser.banned = false;
+
     try {
       const [acc, followCount, posts, comments, replies] = await Promise.all([
         Blockchain.getAccount(client, username),
@@ -233,15 +253,15 @@ export function useProfile(
       }
 
       if (Array.isArray(posts)) {
-        profileUser.posts = posts.map(normalizePost);
+        profileUser.posts = posts.map(normalizePost).filter(visibleFilter);
         profileUser.postsHasMore = posts.length === 20;
       }
       if (Array.isArray(comments)) {
-        profileUser.comments = comments.map(normalizePost);
+        profileUser.comments = comments.map(normalizePost).filter(visibleFilter);
         profileUser.commentsHasMore = comments.length === 20;
       }
       if (Array.isArray(replies)) {
-        profileUser.replies = replies.map(normalizePost);
+        profileUser.replies = replies.map(normalizePost).filter(visibleFilter);
         profileUser.repliesHasMore = replies.length === 20;
       }
 
@@ -264,7 +284,7 @@ export function useProfile(
       const more = await Blockchain.getAccountPosts(client, sort, profileUser.username, 20, last?.author, last?.permlink);
 
       if (Array.isArray(more) && more.length > 0) {
-        const filtered = more.slice(1).map(normalizePost);
+        const filtered = more.slice(1).map(normalizePost).filter(visibleFilter);
         profileUser[sort] = [...profileUser[sort], ...filtered];
         profileUser[`${sort}HasMore`] = more.length === 20;
       } else {

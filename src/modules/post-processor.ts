@@ -1,6 +1,8 @@
 import { Parser } from './parser';
 import { BFUtils } from './utils';
+import { isGloballyBanned } from './banned-users';
 import type { Post, RawPost, Beneficiary, GlobalProps } from '../types';
+import type { CoalEntry } from './coal-list';
 
 export const PostProcessor = {
   /**
@@ -15,6 +17,10 @@ export const PostProcessor = {
       readStatusMap?: Record<string, number>;
       canMute?: boolean;
       globalProps?: GlobalProps | null;
+      /** Accounts with community role 'muted' (see list_community_roles) - community-level user ban. */
+      mutedAccounts?: Set<string>;
+      /** COAL list (coal.blurtwallet.com), lowercase username -> entry. Never causes hiding. */
+      coalMap?: Map<string, CoalEntry>;
     }
   ): Post {
     let tags: string[] = [];
@@ -44,6 +50,12 @@ export const PostProcessor = {
     let isPaid = total > 0 || ageDays > 7.5;
     if (p.cashout_time?.startsWith('1970')) isPaid = true;
 
+    // Moderation flags (see visibility.ts for how these are used to decide what's shown to whom).
+    const authorLower = String(p.author || '').toLowerCase();
+    const isCommunityBanned = !!context?.mutedAccounts?.has(authorLower);
+    const isGloballyBannedFlag = isGloballyBanned(p.author);
+    const coalInfo = context?.coalMap?.get(authorLower) || null;
+
     const post: Post = {
       author: p.author,
       permlink: p.permlink,
@@ -70,6 +82,11 @@ export const PostProcessor = {
       isRead: isRead,
       isFollowing: !!(context?.currentUser && context?.followingSet?.has(p.author)),
       isMuted: !!(p.stats?.is_muted || p.stats?.hide),
+      isCommunityBanned,
+      isGloballyBanned: isGloballyBannedFlag,
+      isCoal: !!coalInfo,
+      coalInfo,
+      isCoalCollapsed: !!coalInfo,
       isPaid,
       isCollapsed: !!(p.body && p.body.startsWith('Supporting original content by @')),
       replyCount: p.children || p.reply_count || 0,

@@ -163,6 +163,7 @@ export function usePostForm(ctx: PostFormContext) {
         pendingPayout: 0, totalPayout: 0, payout: 0, vote_count: 0, active_votes: [], net_rshares: 0,
         beneficiaries, _qOpen: false, _pending: 'sending', media: null, title: '', url: '', category: '',
         lastActivity: '', lastAuthor: '', isUnread: false, isRead: true, isFollowing: false, isMuted: false,
+        isCommunityBanned: false, isGloballyBanned: false, isCoal: false,
         isPaid: false, isCollapsed: false, replyCount: 0, tags: [],
       };
       replies.value = [...replies.value, optimistic];

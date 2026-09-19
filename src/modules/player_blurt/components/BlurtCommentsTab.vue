@@ -18,8 +18,10 @@ import { ref, watch } from 'vue';
 import PostReplyThread from '../../post/PostReplyThread.vue';
 import { Blockchain } from '../../blockchain';
 import { PostProcessor } from '../../post-processor';
+import { isHiddenFromViewer } from '../../visibility';
 import type { MediaTrack, BFPlayerAPI } from '../../player/types';
 import type { Post, AuthUser } from '../../../types';
+import type { CoalEntry } from '../../coal-list';
 
 const props = defineProps<{
   track: MediaTrack | null;
@@ -35,6 +37,10 @@ const props = defineProps<{
   isPostInCommunity: (p: Post) => boolean;
   getFollowingSet: () => Set<string>;
   getCanMute: () => boolean;
+  getCanBanUser: () => boolean;
+  getMutedAccounts: () => Set<string>;
+  getCoalMap: () => Map<string, CoalEntry>;
+  banUser: (username: string, ban: boolean) => void;
   config: { communityAccount: string };
   navigateToPath: (path: string) => void;
   cachePostBody: (author: string, permlink: string, body: string) => void;
@@ -64,7 +70,19 @@ const fetchReplies = async (author: string, permlink: string) => {
     if (!results?.length) return;
     for (const r of results) {
       props.cachePostBody(r.author, r.permlink, r.body);
-      flat.push({ ...PostProcessor.normalizePost(r), depth, _qOpen: false });
+      const post = {
+        ...PostProcessor.normalizePost(r, {
+          canMute: props.getCanMute(),
+          mutedAccounts: props.getMutedAccounts(),
+          coalMap: props.getCoalMap()
+        }),
+        depth,
+        _qOpen: false
+      };
+      // Same visibility rule as everywhere else - see visibility.ts.
+      if (!isHiddenFromViewer(post, { canBanUser: props.getCanBanUser(), canMute: props.getCanMute() })) {
+        flat.push(post);
+      }
       if (r.children && r.children > 0) await recurse(r.author, r.permlink, depth + 1);
     }
   };
@@ -130,6 +148,7 @@ const emptyReplyForm = { body: '', loading: false, error: '', success: '', benef
         :replyFeeEstimate="null"
         :followingSet="getFollowingSet()"
         :canMute="getCanMute()"
+        :canBanUser="getCanBanUser()"
         :t="t"
         :fmtDate="fmtDate"
         :renderMD="renderMD"
@@ -147,6 +166,7 @@ const emptyReplyForm = { body: '', loading: false, error: '', success: '', benef
         @start-edit="goToComment"
         @toggle-follow="toggleFollow"
         @mute-post="mutePost"
+        @ban-user="(u, b) => banUser(u, b)"
       />
     </template>
   </div>

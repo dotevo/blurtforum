@@ -1655,6 +1655,11 @@ a:hover { color: var(--link-hover-color); text-decoration: underline; }
 .btn-primary:hover { background: var(--btn-primary-hover-bg); color: var(--btn-primary-text); }
 .btn-accent { background: var(--btn-accent-bg); color: var(--btn-accent-text); border-color: var(--btn-accent-border); }
 .btn-accent:hover { background: var(--btn-accent-hover-bg); color: var(--btn-accent-text); }
+/* Used for the community/site "ban user" actions (see PostReplyThread/TopicView/ProfileView) -
+   reuses --alert-error-text (already defined per-theme) so it doesn't need its own token in
+   every theme block. */
+.btn-danger { background: var(--alert-error-text); color: #fff; border-color: var(--alert-error-text); }
+.btn-danger:hover { filter: brightness(1.1); }
 .btn-ghost { background: transparent; color: var(--btn-ghost-text); border: 1px solid var(--btn-ghost-border); }
 .btn-ghost:hover { background: var(--btn-ghost-hover-bg); color: var(--btn-ghost-hover-text); }
 .btn-sm { padding: 4px 10px; font-size: 11px; }

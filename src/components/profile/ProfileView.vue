@@ -47,6 +47,8 @@ const props = defineProps<{
       loading: boolean;
     };
     loading: boolean;
+    /** True when this account is on the site-wide ban list - nothing else about them is shown. */
+    banned: boolean;
   };
   profileTab: string;
   auth: { user: AuthUser | null };
@@ -58,6 +60,10 @@ const props = defineProps<{
   player: { state: { enabled: boolean } };
   hasVoted: (p: Post) => boolean;
   config: { communityAccount: string };
+  /** Only owner/admin of the current community - controls whether the Ban/Unban button shows. */
+  canBanUser: boolean;
+  /** Whether this profile's username currently has community role 'muted' (see mutedAccounts). */
+  isCommunityBanned: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -73,6 +79,7 @@ const emit = defineEmits<{
   cancelDelegation: [target: string];
   loadMoreProfileContent: [sort: 'posts' | 'comments' | 'replies'];
   submitVote: [post: Post];
+  banUser: [username: string, ban: boolean];
 }>();
 
 const showHistoryTable = ref(false);
@@ -114,7 +121,12 @@ const barSeries = computed(() => {
 </script>
 
 <template>
-    
+    <div v-if="profileUser.banned" class="forumline forumline-wrap" style="padding: 40px 20px; text-align: center;">
+      <div style="font-size: 48px; margin-bottom: 10px;">🚫</div>
+      <h2 style="margin: 0 0 8px;">{{ t('bannedProfileTitle') }}</h2>
+      <div class="gs">{{ t('bannedProfileText').replace('{user}', profileUser.username) }}</div>
+    </div>
+    <div v-else>
       <div class="forumline forumline-wrap" style="padding: 20px;">
         <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
           <UserAvatar :username="profileUser.username" size="lg" style="width: 120px; height: 120px;" />
@@ -124,12 +136,25 @@ const barSeries = computed(() => {
                 <h2 style="color: var(--brand); margin: 0 0 5px;">{{ profileUser.data ? (profileUser.data as any).displayName : '@' + profileUser.username }}</h2>
                 <div class="gs" style="margin-bottom: 10px; font-weight: bold;">@{{ profileUser.username }}</div>
               </div>
-              <button v-if="auth.user && auth.user.username !== profileUser.username"
-                      class="btn btn-follow" :class="followingSet.has(profileUser.username) ? 'btn-ghost' : 'btn-accent'"
-                      @click="$emit('toggleFollow', profileUser.username)">
-                <i class="fa-solid" :class="followingSet.has(profileUser.username) ? 'fa-user-check' : 'fa-user-plus'"></i>
-                {{ followingSet.has(profileUser.username) ? t('unfollow') : t('follow') }}
-              </button>            </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <button v-if="auth.user && canBanUser && auth.user.username !== profileUser.username"
+                        class="btn" :class="isCommunityBanned ? 'btn-ghost' : 'btn-danger'"
+                        :title="isCommunityBanned ? t('unbanUser') : t('banUser')"
+                        @click="$emit('banUser', profileUser.username, !isCommunityBanned)">
+                  <i class="fa-solid fa-ban"></i>
+                  {{ isCommunityBanned ? t('unbanUser') : t('banUser') }}
+                </button>
+                <button v-if="auth.user && auth.user.username !== profileUser.username"
+                        class="btn btn-follow" :class="followingSet.has(profileUser.username) ? 'btn-ghost' : 'btn-accent'"
+                        @click="$emit('toggleFollow', profileUser.username)">
+                  <i class="fa-solid" :class="followingSet.has(profileUser.username) ? 'fa-user-check' : 'fa-user-plus'"></i>
+                  {{ followingSet.has(profileUser.username) ? t('unfollow') : t('follow') }}
+                </button>
+              </div>
+              <div v-if="isCommunityBanned" class="gs" style="color: var(--danger, #e74c3c); font-weight: bold; margin-top: 6px;">
+                {{ t('communityBannedNotice') }}
+              </div>
+            </div>
             
             <div v-if="profileUser.data" style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
               <div v-if="(profileUser.data as any).about" style="font-size: 12px; margin-bottom: 10px; padding: 10px; background: var(--surface-3); border-left: 3px solid var(--brand);">
@@ -641,6 +666,7 @@ const barSeries = computed(() => {
         </div>
       </div>
     <!-- /profile -->
+    </div>
 </template>
 
 <style scoped>

@@ -2,6 +2,7 @@ import { ref, watch } from 'vue';
 import type { ActivityItem, RawPost, AuthUser } from '../types';
 import { useTitle } from './useTitle';
 import { Blockchain } from '../modules/blockchain';
+import { isGloballyBanned } from '../modules/banned-users';
 
 /**
  * Composable for managing global activity feed.
@@ -11,7 +12,11 @@ export function useGlobalActivity(
   auth: { user: AuthUser | null },
   config: any,
   userSubscriptions: any,
-  normalizePost: (p: RawPost) => any
+  normalizePost: (p: RawPost) => any,
+  // Community-role-muted accounts for config.communityAccount only (this feed spans many
+  // communities the user is subscribed to, and we only have role data for the primary one -
+  // see mutedAccounts in useApp.ts). The site-wide ban list (banned-users.ts) applies everywhere.
+  moderation?: { mutedAccounts?: () => Set<string>; canBanUser?: () => boolean }
 ) {
   const globalActivity = ref<ActivityItem[]>([]);
   const { setTitleIcon } = useTitle();
@@ -32,6 +37,18 @@ export function useGlobalActivity(
           posts.forEach(p => {
             const normalized = normalizePost(p);
             if (normalized.lastActivityTs! < sevenDaysAgo) return;
+            // Skip the whole item if whoever left the last activity is banned - we can't tell
+            // what the *previous* activity was (that data isn't returned by the API), so the
+            // entry just disappears from the feed rather than showing the banned account's name.
+            // This intentionally checks lastAuthor directly rather than normalized.isMuted/
+            // isCommunityBanned/isGloballyBanned, which describe the root post's own author.
+            const lastAuthorLower = (normalized.lastAuthor || '').toLowerCase();
+            if (isGloballyBanned(lastAuthorLower)) return;
+            if (sub.account === config.communityAccount) {
+              const muted = moderation?.mutedAccounts?.();
+              const canBan = moderation?.canBanUser?.() ?? false;
+              if (muted?.has(lastAuthorLower) && !canBan) return;
+            }
             allActivity.push({
               id: p.post_id ?? 0, author: normalized.lastAuthor, title: normalized.title,
               created: normalized.lastActivity, community: sub.account, community_title: sub.title,

@@ -28,6 +28,8 @@ import { BFPlayer } from '../modules/player/player';
 import { isTVPlatform } from '../modules/native/platform-info';
 import { Parser } from '../modules/parser';
 import { PostProcessor } from '../modules/post-processor';
+import { loadCoalList, type CoalEntry } from '../modules/coal-list';
+import { isHiddenFromViewer } from '../modules/visibility';
 
 import { TR, loadLanguage, type Lang, LANGS as langs } from '../modules/translations';
 import { syncSeoTags } from '../modules/seo';
@@ -193,6 +195,17 @@ export function useApp() {
   });
   const replies      = ref<Post[]>([]);
   const moderators   = ref<Moderator[]>([]);
+  // Accounts with community role 'muted' in the current community (lowercase usernames).
+  // Kept separate from `moderators`/`cc.team`, because `get_community`'s `team` field does
+  // NOT include muted accounts - only `bridge.list_community_roles` does. This is what powers
+  // both the "hide muted comments" logic (condenser_api replies don't carry stats.is_muted)
+  // and the community-level "ban user" feature (see canBanUser/banUser below).
+  const mutedAccounts = ref<Set<string>>(new Set());
+  // COAL (coal.blurtwallet.com) spam/impersonation list - loaded once, cached in
+  // localStorage by coal-list.ts (refreshed at most once/day). Never causes hiding,
+  // only flags posts/comments for a warning badge (see Post.isCoal/coalInfo).
+  const coalMap = ref<Map<string, CoalEntry>>(new Map());
+  loadCoalList().then(m => { coalMap.value = m; }).catch(() => {});
   const communityInfo = ref<CommunityInfo>({});
   const communityRewards = reactive({ blurt: '0.000', vesting: '0.000', hasRewards: false });
   const structureNote = ref(false);
@@ -290,7 +303,9 @@ export function useApp() {
     currentUser: auth.user?.username,
     followingSet: followingSet.value,
     readStatusMap: getReadStatusMap(),
-    canMute: canMute.value
+    canMute: canMute.value,
+    mutedAccounts: mutedAccounts.value,
+    coalMap: coalMap.value
   });
 
   const markTopicAsRead = (topic: { author: string; permlink: string; lastActivityTs?: number; lastActivity?: string }): void => {
@@ -338,6 +353,7 @@ export function useApp() {
         const props = await Blockchain.getDynamicGlobalProperties(rpc.dataClient.value);
         globalProps.value = props as any;
         moderators.value = [];
+        mutedAccounts.value = new Set();
         communityInfo.value = {};
         forumPagination.lastAuthor = '';
         forumPagination.lastPermlink = '';
@@ -395,11 +411,20 @@ export function useApp() {
           }
 
         try {
-          if (!moderators.value.length) {
-            const roles = await Blockchain.listCommunityRoles(rpc.forumClient.value, config.communityAccount);
-            if (Array.isArray(roles) && roles.length > 0) {
+          // bridge.get_community's `team` field (used above for `moderators`) does not
+          // include accounts with role 'muted', so it's fetched separately here every
+          // time rather than only as a fallback. If `team` was empty above (some
+          // deployments), this also fills in `moderators` for the Team display.
+          const roles = await Blockchain.listCommunityRoles(rpc.forumClient.value, config.communityAccount);
+          if (Array.isArray(roles) && roles.length > 0) {
+            mutedAccounts.value = new Set(
+              roles.filter(r => r[1] === 'muted').map(r => String(r[0]).toLowerCase())
+            );
+            if (!moderators.value.length) {
               moderators.value = roles.map(r => ({ account: r[0], role: r[1], title: r[2] || '' }));
             }
+          } else {
+            mutedAccounts.value = new Set();
           }
         } catch (e) { console.warn('Bridge list_community_roles error:', (e as Error).message); }
 
@@ -495,7 +520,7 @@ export function useApp() {
       const post = normalizePost(p);
       bodyCache[`${p.author}/${p.permlink}`] = p.body;
       
-      if (post.isMuted && !canMute.value) return;
+      if (isHiddenFromViewer(post, { canBanUser: canBanUser.value, canMute: canMute.value })) return;
       if (targetForum) {
         if (!targetForum.posts.find(fp => fp.permlink === post.permlink && fp.author === post.author)) targetForum.posts.push(post);
         return;
@@ -558,7 +583,13 @@ export function useApp() {
       for (const r of results) {
         bodyCache[`${r.author}/${r.permlink}`] = r.body;
         const post = { ...normalizePost(r), depth, _qOpen: false };
-        flat.push(post);
+        // Hide entirely (not just gray out) for viewers without permission - this also hides
+        // the whole reply subtree below a hidden comment, since condenser_api's flat reply
+        // list has no reliable stats.is_muted of its own to rely on otherwise, and a visible
+        // orphaned reply under a hidden parent would be confusing.
+        if (!isHiddenFromViewer(post, { canBanUser: canBanUser.value, canMute: canMute.value })) {
+          flat.push(post);
+        }
         if (r.children && r.children > 0) await recurse(r.author, r.permlink, depth + 1);
       }
     };
@@ -1062,6 +1093,30 @@ export function useApp() {
     try { await broadcast([op]); waitAndReload(view.value === 'topic'); } catch (err) { console.error('Mute error:', err); }
   };
 
+  // Community-level "ban": sets the account's community role to 'muted' (the same role
+  // already used for e.g. blurt-rewards / blurt.rewards). Unlike mutePost (single post/comment,
+  // still visible to mods), this hides ALL of the account's content in this community from
+  // everyone except the owner/admin who can reverse it. Only owner/admin may call this
+  // (see canBanUser) - Blurt's community consensus rules don't allow mods to set roles.
+  const banUser = async (account: string, ban = true): Promise<void> => {
+    if (checkLock(() => banUser(account, ban))) return;
+    if (!auth.user || !canBanUser.value) return;
+    const confirmMsg = ban
+      ? t('confirmBanUser').replace('{user}', account)
+      : t('confirmUnbanUser').replace('{user}', account);
+    if (!confirm(confirmMsg)) return;
+    const role = ban ? 'muted' : 'member';
+    const json = JSON.stringify(['setRole', { community: config.communityAccount, account, role }]);
+    const op = ['custom_json', { required_auths: [], required_posting_auths: [auth.user.username], id: 'community', json }];
+    try {
+      await broadcast([op]);
+      const lower = account.toLowerCase();
+      if (ban) mutedAccounts.value = new Set([...mutedAccounts.value, lower]);
+      else { const next = new Set(mutedAccounts.value); next.delete(lower); mutedAccounts.value = next; }
+      waitAndReload(view.value === 'topic');
+    } catch (err) { console.error('Ban user error:', err); }
+  };
+
   const startEditStructure = (): void => { structureForm.text = rawDescription.value; structureForm.error = ''; editStructureMode.value = true; };
 
   const saveStructure = async (): Promise<void> => {
@@ -1184,7 +1239,7 @@ export function useApp() {
       allForums.forEach(async (f) => {
         try {
           const raw = await Blockchain.getForumPosts(rpc.dataClient.value, config.communityAccount, 10, 'activity', undefined, undefined, undefined, f.targetTags.length > 0 ? f.targetTags : undefined);
-          if (raw?.length) f.posts = raw.map(normalizePost).filter(post => !post.isMuted || canMute.value).slice(0, 5);
+          if (raw?.length) f.posts = raw.map(normalizePost).filter(post => !isHiddenFromViewer(post, { canBanUser: canBanUser.value, canMute: canMute.value })).slice(0, 5);
         } catch { /* ignore */ }
       });
       trackCurrentView();
@@ -1309,7 +1364,10 @@ export function useApp() {
     globalActivity,
     updateGlobalActivity,
     markActivityAsRead
-  } = useGlobalActivity(rpc.dataClient.value, auth, config, userSubscriptions, normalizePost);
+  } = useGlobalActivity(rpc.dataClient.value, auth, config, userSubscriptions, normalizePost, {
+    mutedAccounts: () => mutedAccounts.value,
+    canBanUser: () => canBanUser.value
+  });
 
   const userRole = computed(() => {
     if (!auth.user || !moderators.value.length) return null;
@@ -1318,6 +1376,8 @@ export function useApp() {
   });
   const canEditStructure = computed(() => ['owner', 'admin'].includes(userRole.value ?? ''));
   const canMute = computed(() => ['owner', 'admin', 'mod'].includes(userRole.value ?? ''));
+  // Only owner/admin can change community roles (setRole) - mods can mutePost but not ban a whole account.
+  const canBanUser = computed(() => ['owner', 'admin'].includes(userRole.value ?? ''));
 
   const checkLock = (fn: () => void): boolean => {
     if (auth.user && auth.user.type === 'key' && auth.user.locked) {
@@ -1375,7 +1435,10 @@ export function useApp() {
     openProfile,
     loadMoreProfileContent,
     fetchEarningsHistory: _fetchEarningsHistory
-  } = useProfile(rpc.dataClient.value, globalProps, view, normalizePost);
+  } = useProfile(rpc.dataClient.value, globalProps, view, normalizePost, {
+    canBanUser: () => canBanUser.value,
+    canMute: () => canMute.value
+  });
 
   const { supportModal, submitSupportComment, triggerSupport } = useSupport(
     rpc.dataClient.value, auth, broadcast as any, checkLock, t
@@ -1418,6 +1481,10 @@ export function useApp() {
       auth, t, fmtDate, renderMD, hasVoted, isNestedReply, getParentBody, isPostInCommunity,
       getFollowingSet: () => followingSet.value,
       getCanMute: () => canMute.value,
+      getCanBanUser: () => canBanUser.value,
+      getMutedAccounts: () => mutedAccounts.value,
+      getCoalMap: () => coalMap.value,
+      banUser: (u: string, b: boolean) => banUser(u, b),
       config, navigateToPath, cachePostBody,
       submitVote, mutePost, toggleFollow, openPayoutModal, openProfile,
     }));
@@ -1641,7 +1708,7 @@ export function useApp() {
     walletAuthModal,
     followModal, confirmToggleFollow,
     openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
-    canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
+    canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
     pinModal, handlePinSubmit,

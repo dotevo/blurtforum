@@ -33,6 +33,14 @@ const emit = defineEmits<{
         ✍ {{ voteModal.post.title || ('@' + voteModal.post.author) }}
       </div>
 
+      <!-- COAL warning: author is flagged as "slippery" (spam/impersonation) on coal.blurtwallet.com.
+           Content stays visible/votable - this is just so a voter doesn't upvote it by accident. -->
+      <div v-if="voteModal.post && voteModal.post.isCoal" class="alert alert-info" style="border-color:var(--alert-error-text); margin-bottom:14px; font-size:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('coalVoteWarningTitle') }}</div>
+        <div>{{ voteModal.post.coalInfo?.reason }}<span v-if="voteModal.post.coalInfo?.notes"> — {{ voteModal.post.coalInfo?.notes }}</span></div>
+        <a href="https://coal.blurtwallet.com/" target="_blank" rel="noopener" style="text-decoration:underline;">{{ t('coalVoteWarningLink') }}</a>
+      </div>
+
       <!-- Slider -->
       <div style="margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">

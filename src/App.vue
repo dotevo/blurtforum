@@ -81,7 +81,7 @@ const {
   followModal, confirmToggleFollow,
 
   openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
-  canEditStructure, canMute, mutePost, editStructureMode, startEditStructure, saveStructure,
+  canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
   forumPagination,
   pinModal, handlePinSubmit,
@@ -154,7 +154,7 @@ const {
     const stub: Post = {
       author, permlink, media: null, title: '', body: '', created: '', url: '',
       category: '', lastActivity: '', lastAuthor: '', isUnread: false, isRead: false,
-      isFollowing: false, isMuted: false, isPaid: false, isCollapsed: false,
+      isFollowing: false, isMuted: false, isCommunityBanned: false, isGloballyBanned: false, isCoal: false, isPaid: false, isCollapsed: false,
       replyCount: 0, parent_author: '', parent_permlink: '', pendingPayout: 0,
       totalPayout: 0, payout: 0, vote_count: 0, active_votes: [], net_rshares: 0,
       beneficiaries: [], tags: [],
@@ -562,6 +562,7 @@ const {
         :quick-reply-body="quickReplyBody"
         :following-set="followingSet"
         :can-mute="canMute"
+        :can-ban-user="canBanUser"
         :t="t"
         :fmt-date="fmtDate"
         :time-ago="timeAgo"
@@ -582,6 +583,7 @@ const {
         @start-edit="startEdit"
         @toggle-follow="toggleFollow"
         @mute-post="mutePost"
+        @ban-user="(u, b) => banUser(u, b)"
         @switch-community="switchCommunity"
         @load-topic-context="loadTopicContext"
         @submit-reply="submitReply"
@@ -624,6 +626,8 @@ const {
         :player="player"
         :has-voted="hasVoted"
         :config="config"
+        :can-ban-user="canBanUser"
+        :is-community-banned="mutedAccounts.has(profileUser.username.toLowerCase())"
         @open-profile="openProfile"
         @open-topic="openTopic"
         @open-payout-modal="openPayoutModal"
@@ -635,6 +639,7 @@ const {
         @fetch-earnings="() => fetchEarningsHistory(profileUser.username, ((profileUser as any).earnings.history[(profileUser as any).earnings.history.length-1]?.seq || 0) - 1)"
         @load-more-profile-content="loadMoreProfileContent"
         @submit-vote="submitVote"
+        @ban-user="(username: string, ban: boolean) => banUser(username, ban)"
       />
 
       </template>

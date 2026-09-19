@@ -3,6 +3,7 @@ import { activeProfile } from '../device-profiles/device-profiles';
 import { isTVPlatform } from '../native/platform-info';
 import type { BFPlayerAPI } from '../player/types';
 import type { Post, AuthUser } from '../../types';
+import type { CoalEntry } from '../coal-list';
 
 /**
  * Registers the "Comments" tab into the player's expanded panel (see
@@ -28,6 +29,13 @@ export interface BlurtCommentsPluginDeps {
   isPostInCommunity: (p: Post) => boolean;
   getFollowingSet: () => Set<string>;
   getCanMute: () => boolean;
+  // Same moderation data useApp.ts's normalizePost wrapper uses - passed through so comments
+  // shown in the player tab get exactly the same hide-muted/banned/coal-flag behavior as the
+  // full topic page (this tab calls PostProcessor.normalizePost itself, see BlurtCommentsTab.vue).
+  getCanBanUser: () => boolean;
+  getMutedAccounts: () => Set<string>;
+  getCoalMap: () => Map<string, CoalEntry>;
+  banUser: (username: string, ban: boolean) => void;
   config: { communityAccount: string };
   navigateToPath: (path: string) => void;
   cachePostBody: (author: string, permlink: string, body: string) => void;

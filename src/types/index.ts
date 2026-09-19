@@ -74,6 +74,11 @@ export interface Post {
   isRead: boolean;
   isFollowing: boolean;
   isMuted: boolean;
+  isCommunityBanned: boolean;
+  isGloballyBanned: boolean;
+  isCoal: boolean;
+  coalInfo?: { reason: string; notes: string } | null;
+  isCoalCollapsed?: boolean;
   isPaid: boolean;
   isCollapsed: boolean;
   replyCount: number;

@@ -98,7 +98,7 @@ const emit = defineEmits<{
           </div>
         </div>
         <div class="mods-body">
-          <div v-for="m in moderators" :key="m.account" class="mod-badge">
+          <div v-for="m in moderators.filter(m => m.role !== 'muted')" :key="m.account" class="mod-badge">
             <span><a :href="'?view=profile&user=' + m.account" @click.prevent="emit('openProfile', m.account)">@{{ m.account }}</a></span>
             <span class="mod-role" :style="{color: ['owner', 'admin'].includes(m.role) ? 'var(--alert-error-text)' : 'var(--mod-role-text)'}">{{ m.role }}</span>
           </div>

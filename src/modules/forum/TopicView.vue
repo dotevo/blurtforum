@@ -62,6 +62,7 @@ const props = defineProps<{
   quickReplyBody: string;
   followingSet: Set<string>;
   canMute: boolean;
+  canBanUser: boolean;
   t: (k: string) => string;
   fmtDate: (s: string) => string;
   timeAgo: (s: string) => string;
@@ -86,6 +87,7 @@ const emit = defineEmits<{
   startEdit: [post: Post];
   toggleFollow: [username: string];
   mutePost: [post: Post, mute: boolean];
+  banUser: [username: string, ban: boolean];
   switchCommunity: [account: string];
   loadTopicContext: [];
   handleMediaAction: [type: string, id: string, host: string, action: string, data: any];
@@ -111,6 +113,12 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
 
 <template>
     <div class="topic-view-root">
+      <div v-if="activeTopic.isGloballyBanned" class="forumline forumline-wrap" style="padding: 40px 20px; text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 10px;">🚫</div>
+        <h2 style="margin: 0 0 8px;">{{ t('contentUnavailableTitle') }}</h2>
+        <div class="gs">{{ t('contentUnavailableText') }}</div>
+      </div>
+      <template v-else>
       <div v-if="!isPostInCommunity(activeTopic)" class="alert alert-info" style="margin-bottom:15px">
         🌐 {{ t('externalPostWarning') || 'This post is outside the currently selected community.' }} 
         (Category: 
@@ -135,10 +143,16 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 <span class="gs">{{ t('posted') }}: {{ fmtDate(activeTopic.created) }}</span>
                 <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                   <span v-if="activeTopic.isMuted" style="color:var(--alert-error-text); font-weight:bold;">[{{ t('muted') }}]</span>
-                  
+                  <span v-if="activeTopic.isCommunityBanned" style="color:var(--alert-error-text); font-weight:bold;">🚫 [{{ t('bannedShort') }}]</span>
+                  <span v-if="activeTopic.isCoal" class="gs" style="color:var(--alert-error-text);" :title="activeTopic.coalInfo ? (activeTopic.coalInfo.reason + ': ' + activeTopic.coalInfo.notes) : ''"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('coalWarningShort') }}</span>
+
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
+                  </template>
+                  <template v-if="canBanUser && isPostInCommunity(activeTopic)">
+                    <button v-if="!activeTopic.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', activeTopic.author, true)">🚫 {{ t('banUser') }}</button>
+                    <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', activeTopic.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>
                   </div>            </div>
             </td>
@@ -178,6 +192,10 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                   <template v-if="canMute && isPostInCommunity(activeTopic)">
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
+                  </template>
+                  <template v-if="canBanUser && isPostInCommunity(activeTopic)">
+                    <button v-if="!activeTopic.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', activeTopic.author, true)">🚫 {{ t('banUser') }}</button>
+                    <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', activeTopic.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>
                 </div>
               </div>
@@ -256,6 +274,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
         :replyFeeEstimate="replyFeeEstimate"
         :followingSet="followingSet"
         :canMute="canMute"
+        :canBanUser="canBanUser"
         :t="t"
         :fmtDate="fmtDate"
         :renderMD="renderMD"
@@ -272,6 +291,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
         @start-edit="(p) => emit('startEdit', p)"
         @toggle-follow="(u) => emit('toggleFollow', u)"
         @mute-post="(p, m) => emit('mutePost', p, m)"
+        @ban-user="(u, b) => emit('banUser', u, b)"
         @submit-reply="(d) => emit('submitReply', d)"
         @on-reply-save-draft="(d) => emit('onReplySaveDraft', d)"
         @on-reply-image-pick="(e) => emit('onReplyImagePick', e)"
@@ -308,6 +328,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
       </div>
  
     <!-- /topic -->
+    </template>
 
   </div>
 </template>

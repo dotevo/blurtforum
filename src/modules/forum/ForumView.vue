@@ -130,6 +130,7 @@ onUpdated(triggerScan);
             </td>
             <td :class="i%2===0?'row1':'row2'" class="col-topic">
               <span v-if="post.isMuted" style="margin-right:5px; color:var(--alert-error-text); font-weight:bold;">[{{ t('muted') }}]</span>
+              <span v-if="post.isCoal" style="margin-right:5px; color:var(--alert-error-text);" :title="post.coalInfo ? (post.coalInfo.reason + ': ' + post.coalInfo.notes) : t('coalWarningShort')"><i class="fa-solid fa-triangle-exclamation"></i></span>
               <span v-if="post.isUnread" style="display:inline-block; width:8px; height:8px; background:var(--accent); border-radius:50%; margin-right:8px; box-shadow:0 0 4px var(--accent);" title="Unread"></span>
               <span v-else style="display:inline-block; width:8px; height:8px; background:var(--surface-border); border-radius:50%; margin-right:8px;" title="Read"></span>
               
