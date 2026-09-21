@@ -59,24 +59,26 @@ function loadGoogleAnalytics(): void {
   (window as any).dataLayer = (window as any).dataLayer || [];
   (window as any).gtag = function gtag(...args: unknown[]) { (window as any).dataLayer.push(args); };
 
-  // Real root cause of "GA looks 100% wired up client-side (dataLayer is
-  // correct, gtm.load fires, script loads 200 OK) but literally zero hits
-  // ever reach google-analytics.com, in every browser, with every blocker
-  // disabled": gtag.js was NEVER given an explicit consent signal. Without
-  // one, modern gtag.js defaults analytics_storage to 'denied' for EU
-  // traffic (Consent Mode) -- it still runs internally (that's why the
-  // dataLayer / gtm.* housekeeping events looked fine) but silently
-  // suppresses the actual network hit, with zero console warning. Since
-  // this function is ONLY ever called after the user has actually
-  // accepted (see acceptCookies()/initConsent() below), we can tell it
-  // consent is granted immediately -- no need for a real default-denied
-  // window here.
-  (window as any).gtag('consent', 'default', {
-    analytics_storage: 'granted',
-    ad_storage: 'denied',
-    ad_user_data: 'denied',
-    ad_personalization: 'denied'
-  });
+  // Deliberately NOT calling gtag('consent', 'default'/'update', ...) here.
+  // A previous version of this function did (to satisfy Google's documented
+  // Consent Mode pattern), and it looked correct - dataLayer filled up
+  // normally, gtm.* housekeeping events fired, the script loaded 200 OK -
+  // but empirically (confirmed live on forum.blurt.pl, Sept 2026) NO
+  // gtag('event', ...) or gtag('get', ...) call ever actually reached
+  // google-analytics.com after that call was added, regardless of the
+  // values passed to it ('granted' included). Removing the call entirely
+  // (this version) was verified to fix it: same dynamic <script> injection,
+  // same gtag('js')/gtag('config') calls, minus this one, and events
+  // reached GA4 again immediately. Root cause of gtag.js silently
+  // swallowing hits after that call was never fully pinned down (not
+  // documented Google behavior as far as we could find), but the fix is
+  // reproducible, so leaving it out on purpose.
+  //
+  // This is also not a compliance problem: loadGoogleAnalytics() is ONLY
+  // ever invoked after the user has actually clicked "accept" (see
+  // acceptCookies()/initConsent() below) or already had done so in a prior
+  // session - there is no code path where this loads before consent - so
+  // there is nothing for a consent signal to gate here in the first place.
   (window as any).gtag('js', new Date());
   (window as any).gtag('config', GA_MEASUREMENT_ID, { send_page_view: false });
 }
