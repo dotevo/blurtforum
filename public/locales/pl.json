@@ -54,6 +54,7 @@
   "browserQuotaAvailable": "Dostępny limit przeglądarki",
   "by": "przez",
   "cancel": "Anuluj",
+  "cannotBanProtected": "Nie możesz zbanować siebie ani innego moderatora/administratora tej community (@{user}). Najpierw zmień jego rolę ręcznie, jeśli naprawdę tego chcesz.",
   "categories": "Kategorie",
   "category": "Kategoria (wybierz jeden)",
   "checkActiveOn": "Sprawdź aktywne na",

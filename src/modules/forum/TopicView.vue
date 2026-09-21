@@ -63,6 +63,7 @@ const props = defineProps<{
   followingSet: Set<string>;
   canMute: boolean;
   canBanUser: boolean;
+  isProtectedFromBan: (username: string) => boolean;
   t: (k: string) => string;
   fmtDate: (s: string) => string;
   timeAgo: (s: string) => string;
@@ -150,7 +151,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
                   </template>
-                  <template v-if="canBanUser && isPostInCommunity(activeTopic)">
+                  <template v-if="canBanUser && isPostInCommunity(activeTopic) && !isProtectedFromBan(activeTopic.author)">
                     <button v-if="!activeTopic.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', activeTopic.author, true)">🚫 {{ t('banUser') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', activeTopic.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>
@@ -196,7 +197,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                     <button v-if="!activeTopic.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', activeTopic, false)">🔓 {{ t('unmute') }}</button>
                   </template>
-                  <template v-if="canBanUser && isPostInCommunity(activeTopic)">
+                  <template v-if="canBanUser && isPostInCommunity(activeTopic) && !isProtectedFromBan(activeTopic.author)">
                     <button v-if="!activeTopic.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', activeTopic.author, true)">🚫 {{ t('banUser') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', activeTopic.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>
@@ -293,6 +294,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
         :followingSet="followingSet"
         :canMute="canMute"
         :canBanUser="canBanUser"
+        :isProtectedFromBan="isProtectedFromBan"
         :t="t"
         :fmtDate="fmtDate"
         :renderMD="renderMD"

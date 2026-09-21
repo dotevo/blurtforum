@@ -54,6 +54,7 @@
   "browserQuotaAvailable": "Disponebla retumila kvoto",
   "by": "per",
   "cancel": "Nuligi",
+  "cannotBanProtected": "Vi ne povas malpermesi vin mem aŭ alian moderigganton/administranton de ĉi tiu komunumo (@{user}). Unue ŝanĝu lian rolon permane, se vi vere tion intencas.",
   "categories": "Kategorioj",
   "category": "Kategorio",
   "checkActiveOn": "Kontroli aktiva je",

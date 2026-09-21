@@ -37,6 +37,8 @@ const props = defineProps<{
   canMute: boolean;
   /** Only owner/admin - shows the "ban user" button next to "mute", separate from canMute. */
   canBanUser: boolean;
+  /** True if banning would hit yourself or a fellow owner/admin/mod - hides the Ban button. */
+  isProtectedFromBan: (username: string) => boolean;
   t: (k: string) => string;
   fmtDate: (s: string) => string;
   renderMD: (s: string, ctx?: unknown) => string;
@@ -147,7 +149,7 @@ const handleLinkClick = (event: MouseEvent) => {
                     <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
                   </template>
-                  <template v-if="canBanUser && isPostInCommunity(r)">
+                  <template v-if="canBanUser && isPostInCommunity(r) && !isProtectedFromBan(r.author)">
                     <button v-if="!r.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', r.author, true)">🚫 {{ t('banUser') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', r.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>
@@ -185,7 +187,7 @@ const handleLinkClick = (event: MouseEvent) => {
                     <button v-if="!r.isMuted" class="btn btn-sm btn-hdr" @click="emit('mutePost', r, true)">🚫 {{ t('mute') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('mutePost', r, false)">🔓 {{ t('unmute') }}</button>
                   </template>
-                  <template v-if="canBanUser && isPostInCommunity(r)">
+                  <template v-if="canBanUser && isPostInCommunity(r) && !isProtectedFromBan(r.author)">
                     <button v-if="!r.isCommunityBanned" class="btn btn-sm btn-hdr btn-danger" @click="emit('banUser', r.author, true)">🚫 {{ t('banUser') }}</button>
                     <button v-else class="btn btn-sm btn-hdr" @click="emit('banUser', r.author, false)">🔓 {{ t('unbanUser') }}</button>
                   </template>

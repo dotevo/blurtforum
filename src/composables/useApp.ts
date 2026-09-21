@@ -1098,9 +1098,22 @@ export function useApp() {
   // still visible to mods), this hides ALL of the account's content in this community from
   // everyone except the owner/admin who can reverse it. Only owner/admin may call this
   // (see canBanUser) - Blurt's community consensus rules don't allow mods to set roles.
+  // Guards against banning yourself or a fellow team member by mistake - setRole would demote/
+  // ban them just as easily as a random scammer, and it's easy to fat-finger on a phone.
+  const isProtectedFromBan = (account: string): boolean => {
+    if (!account) return false;
+    const lower = account.toLowerCase();
+    if (auth.user && lower === auth.user.username.toLowerCase()) return true;
+    return moderators.value.some(m => m.account.toLowerCase() === lower && ['owner', 'admin', 'mod'].includes(m.role));
+  };
+
   const banUser = async (account: string, ban = true): Promise<void> => {
     if (checkLock(() => banUser(account, ban))) return;
     if (!auth.user || !canBanUser.value) return;
+    if (ban && isProtectedFromBan(account)) {
+      alert(t('cannotBanProtected').replace('{user}', account));
+      return;
+    }
     const confirmMsg = ban
       ? t('confirmBanUser').replace('{user}', account)
       : t('confirmUnbanUser').replace('{user}', account);
@@ -1510,6 +1523,7 @@ export function useApp() {
       getFollowingSet: () => followingSet.value,
       getCanMute: () => canMute.value,
       getCanBanUser: () => canBanUser.value,
+      isProtectedFromBan: (u: string) => isProtectedFromBan(u),
       getMutedAccounts: () => mutedAccounts.value,
       getCoalMap: () => coalMap.value,
       banUser: (u: string, b: boolean) => banUser(u, b),
@@ -1736,7 +1750,7 @@ export function useApp() {
     walletAuthModal,
     followModal, confirmToggleFollow,
     openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory: _fetchEarningsHistory, openNotification,
-    canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
+    canEditStructure, canMute, mutePost, canBanUser, banUser, isProtectedFromBan, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
     structureForm, showStructureDocs,
     forumPagination, loadMorePosts,
     pinModal, handlePinSubmit,

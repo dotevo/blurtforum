@@ -62,6 +62,8 @@ const props = defineProps<{
   config: { communityAccount: string };
   /** Only owner/admin of the current community - controls whether the Ban/Unban button shows. */
   canBanUser: boolean;
+  /** True if banning would hit yourself or a fellow owner/admin/mod - hides the Ban button. */
+  isProtectedFromBan: (username: string) => boolean;
   /** Whether this profile's username currently has community role 'muted' (see mutedAccounts). */
   isCommunityBanned: boolean;
 }>();
@@ -137,7 +139,7 @@ const barSeries = computed(() => {
                 <div class="gs" style="margin-bottom: 10px; font-weight: bold;">@{{ profileUser.username }}</div>
               </div>
               <div style="display:flex; gap:8px; align-items:center;">
-                <button v-if="auth.user && canBanUser && auth.user.username !== profileUser.username"
+                <button v-if="auth.user && canBanUser && !isProtectedFromBan(profileUser.username)"
                         class="btn" :class="isCommunityBanned ? 'btn-ghost' : 'btn-danger'"
                         :title="isCommunityBanned ? t('unbanUser') : t('banUser')"
                         @click="$emit('banUser', profileUser.username, !isCommunityBanned)">

@@ -81,7 +81,7 @@ const {
   followModal, confirmToggleFollow,
 
   openProfile, profileUser, profileTab, loadMoreProfileContent, fetchEarningsHistory, openNotification,
-  canEditStructure, canMute, mutePost, canBanUser, banUser, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
+  canEditStructure, canMute, mutePost, canBanUser, banUser, isProtectedFromBan, mutedAccounts, coalMap, editStructureMode, startEditStructure, saveStructure,
   structureForm, showStructureDocs,
   forumPagination,
   pinModal, handlePinSubmit,
@@ -566,6 +566,7 @@ const {
         :following-set="followingSet"
         :can-mute="canMute"
         :can-ban-user="canBanUser"
+        :is-protected-from-ban="isProtectedFromBan"
         :t="t"
         :fmt-date="fmtDate"
         :time-ago="timeAgo"
@@ -630,6 +631,7 @@ const {
         :has-voted="hasVoted"
         :config="config"
         :can-ban-user="canBanUser"
+        :is-protected-from-ban="isProtectedFromBan"
         :is-community-banned="mutedAccounts.has(profileUser.username.toLowerCase())"
         @open-profile="openProfile"
         @open-topic="openTopic"

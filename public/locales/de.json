@@ -54,6 +54,7 @@
   "browserQuotaAvailable": "Verfügbares Browser-Kontingent",
   "by": "von",
   "cancel": "Abbrechen",
+  "cannotBanProtected": "Du kannst dich selbst oder einen anderen Moderator/Admin dieser Community nicht bannen (@{user}). Ändere seine Rolle zuerst manuell, falls du das wirklich willst.",
   "categories": "Kategorien",
   "category": "Kategorie",
   "checkActiveOn": "Aktiv prüfen am",

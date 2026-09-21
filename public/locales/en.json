@@ -54,6 +54,7 @@
   "browserQuotaAvailable": "Browser Quota Available",
   "by": "by",
   "cancel": "Cancel",
+  "cannotBanProtected": "You can't ban yourself or another moderator/admin of this community (@{user}). Change their role manually first if you really intend to.",
   "categories": "Categories",
   "category": "Category",
   "checkActiveOn": "Check active on",

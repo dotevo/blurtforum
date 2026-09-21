@@ -54,6 +54,7 @@
   "browserQuotaAvailable": "Quota de navigateur disponible",
   "by": "par",
   "cancel": "Annuler",
+  "cannotBanProtected": "Vous ne pouvez pas vous bannir vous-même ni bannir un autre modérateur/administrateur de cette communauté (@{user}). Modifiez d'abord son rôle manuellement si c'est vraiment votre intention.",
   "categories": "Catégories",
   "category": "Catégorie",
   "checkActiveOn": "Vérifier actif le",

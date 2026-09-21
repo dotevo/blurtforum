@@ -33,6 +33,7 @@ export interface BlurtCommentsPluginDeps {
   // shown in the player tab get exactly the same hide-muted/banned/coal-flag behavior as the
   // full topic page (this tab calls PostProcessor.normalizePost itself, see BlurtCommentsTab.vue).
   getCanBanUser: () => boolean;
+  isProtectedFromBan: (username: string) => boolean;
   getMutedAccounts: () => Set<string>;
   getCoalMap: () => Map<string, CoalEntry>;
   banUser: (username: string, ban: boolean) => void;
