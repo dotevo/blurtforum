@@ -47,7 +47,7 @@
  *      to this track", so the two are kept as clearly separate concerns
  *      rather than one being folded into the other.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Shoutbox } from '../shoutbox';
 import type { ShoutboxScope } from '../types';
 import type { AuthUser } from '../../../types';
@@ -79,12 +79,59 @@ const draft = defineModel<string>('draft', { default: '' });
 
 const EXPANDED_STORAGE_KEY = 'bf_shoutbox_expanded';
 const expanded = ref(localStorage.getItem(EXPANDED_STORAGE_KEY) === '1');
-const unreadCount = ref(0);
+
+// ─── Unread badge: per-scope "read up to this timestamp" marker, persisted
+// across reloads — NOT a simple "did the message count grow" delta.
+//
+// The bug this replaces: the old version was a bare `ref(0)` incremented
+// whenever `messages.value.length` grew while collapsed. That watcher
+// can't tell "a message that's genuinely new since you last looked" apart
+// from "the local history cache (up to 200 msgs/scope, see store.ts) just
+// finished loading from localStorage/peers" — both look identical to it
+// (length going from 0 to N). Every single page load re-hydrates that
+// full local history, so the badge always showed the *entire* cached
+// backlog as unread, every time, regardless of what you'd actually seen
+// before.
+//
+// Fixed by tracking, per scope, the timestamp of the newest message you'd
+// already been shown, persisted in localStorage so it survives reloads.
+// Unread = messages newer than that marker. A scope's marker is seeded
+// (once, the first time we ever see that scope) to whatever's ALREADY
+// loaded at that moment — not 0 — so pre-existing history is never
+// misread as unread on a fresh browser either; only messages that show up
+// after that point count.
+const LAST_READ_STORAGE_KEY = 'bf_shoutbox_last_read_v1';
+function loadLastRead(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(LAST_READ_STORAGE_KEY) || '{}'); } catch { return {}; }
+}
+const lastRead = reactive<Record<string, number>>(loadLastRead());
+function persistLastRead(): void {
+  try { localStorage.setItem(LAST_READ_STORAGE_KEY, JSON.stringify(lastRead)); } catch { /* quota — non-fatal, same trade-off as store.ts */ }
+}
+/** Seed a scope's marker to "everything currently loaded counts as read"
+ *  the first time we ever see it — never retroactively lowers an existing
+ *  marker. Safe to call repeatedly (e.g. on every scope switch). */
+function ensureLastReadBaseline(s: ShoutboxScope): void {
+  if (lastRead[s] !== undefined) return;
+  const msgs = Shoutbox.messagesFor(s);
+  lastRead[s] = msgs.length ? msgs[msgs.length - 1].ts : 0;
+  persistLastRead();
+}
+function markScopeRead(s: ShoutboxScope): void {
+  const msgs = Shoutbox.messagesFor(s);
+  lastRead[s] = msgs.length ? msgs[msgs.length - 1].ts : Date.now();
+  persistLastRead();
+}
+const unreadCount = computed(() => {
+  if (expanded.value) return 0;
+  const cutoff = lastRead[scope.value] ?? 0;
+  return messages.value.filter((m) => m.ts > cutoff).length;
+});
 
 function toggleExpanded(): void {
   expanded.value = !expanded.value;
   localStorage.setItem(EXPANDED_STORAGE_KEY, expanded.value ? '1' : '0');
-  if (expanded.value) unreadCount.value = 0;
+  if (expanded.value) markScopeRead(scope.value);
 }
 
 const communityScope = computed<ShoutboxScope | null>(() =>
@@ -134,27 +181,30 @@ onMounted(() => {
 onMounted(async () => {
   Shoutbox.init({ auth: props.auth, getClient: props.getClient, checkLock: props.checkLock });
   await Shoutbox.start(scope.value);
+  // Baseline whatever local-cache history just got hydrated by start() as
+  // "already read" (see the unread-badge comment above `lastRead`) —
+  // otherwise the very first computation of `unreadCount` right after this
+  // would count that entire backlog as new.
+  ensureLastReadBaseline('global');
+  if (communityScope.value) ensureLastReadBaseline(communityScope.value);
+  if (expanded.value) markScopeRead(scope.value);
 });
 
 onBeforeUnmount(() => {
   Shoutbox.stop();
 });
 
-watch(scope, (s) => Shoutbox.setScope(s));
+watch(scope, (s) => {
+  Shoutbox.setScope(s);
+  ensureLastReadBaseline(s);
+  if (expanded.value) markScopeRead(s);
+});
 
 // If a community-scoped tab is active but the user navigates somewhere
 // without a community (communityId becomes null), fall back to Global
 // rather than leaving the tab pointing at a scope with no visible entry point.
 watch(communityScope, (s) => { if (!s && activeTab.value === 'community') activeTab.value = 'global'; });
 
-// Counts new chat messages in the currently-selected scope while the
-// panel is collapsed, shown as a small badge on the pill — cleared on expand.
-watch(
-  () => messages.value.length,
-  (len, prevLen) => {
-    if (!expanded.value && len > (prevLen ?? len)) unreadCount.value += len - (prevLen ?? len);
-  }
-);
 
 // Tell the room what we're currently reading — see this file's header
 // comment for why this is intentionally post-only, never player/track info.

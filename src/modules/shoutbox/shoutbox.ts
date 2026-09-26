@@ -38,6 +38,18 @@ function warn(...args: unknown[]): void { console.warn(LOG, ...args); }
 const HEARTBEAT_MS = 8_000;
 const PRESENCE_STALE_MS = 20_000; // > 2x heartbeat interval
 const HISTORY_RESPONSE_LIMIT = 50; // per scope, per response
+// How often we re-ask the room for anything we might be missing, on top of
+// the one-shot request onConnected() already sends. See "History sync is
+// self-healing" below for why this exists at all.
+const HISTORY_RESYNC_MS = 45_000;
+// Each resync re-asks slightly further back than our own latest known
+// message, not exactly from it — catches stragglers that legitimately
+// have an older timestamp than something we already have (arrived out of
+// order, or were dropped earlier because their certificate wasn't known
+// yet at the time, see ingestChatMessage). Harmless overlap: anything we
+// already have is skipped by ingestChatMessage's id check before it even
+// re-verifies a signature.
+const HISTORY_RESYNC_OVERLAP_MS = 2 * 60_000;
 
 function makeNonce(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -70,6 +82,7 @@ class ShoutboxCore {
   private transport: SignalingTransport;
   private deps: ShoutboxDeps | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private historyResyncTimer: ReturnType<typeof setInterval> | null = null;
   private unsubs: Array<() => void> = [];
 
   readonly status = reactive<{ value: TransportStatus }>({ value: 'disconnected' });
@@ -102,10 +115,12 @@ class ShoutboxCore {
 
     await this.transport.connect();
     this.startHeartbeat();
+    this.startHistoryResync();
   }
 
   stop(): void {
     this.stopHeartbeat();
+    this.stopHistoryResync();
     for (const u of this.unsubs) u();
     this.unsubs = [];
     this.transport.disconnect();
@@ -234,9 +249,30 @@ class ShoutboxCore {
     this.requestHistory(['global', this.currentScope.value]);
   }
 
-  private requestHistory(scopes: ShoutboxScope[]): void {
+  /** History sync is self-healing, not one-shot: onConnected() above asks
+   *  once right after connecting, but in a star topology relayed through a
+   *  single broker-elected host (see transport/peerjs-transport.ts), any
+   *  individual connection can flake or a message can arrive while we're
+   *  mid-reconnect and get missed. Rather than trying to detect and retry
+   *  each such failure individually, we just re-ask periodically — cheap
+   *  (broadcast() is a no-op with 0 known peers, and a "nothing new"
+   *  answer costs nobody anything, see the history_request handler below)
+   *  and self-correcting regardless of *why* something was missed. */
+  private startHistoryResync(): void {
+    this.stopHistoryResync();
+    this.historyResyncTimer = setInterval(() => {
+      this.requestHistory(['global', this.currentScope.value], HISTORY_RESYNC_OVERLAP_MS);
+    }, HISTORY_RESYNC_MS);
+  }
+
+  private stopHistoryResync(): void {
+    if (this.historyResyncTimer !== null) { clearInterval(this.historyResyncTimer); this.historyResyncTimer = null; }
+  }
+
+  private requestHistory(scopes: ShoutboxScope[], overlapMs = 0): void {
     const since = Math.min(...scopes.map((s) => ShoutboxStore.latestTimestamp(s)));
-    const req: HistoryRequest = { kind: 'history_request', scopes, since: Number.isFinite(since) ? since : 0 };
+    const floor = Number.isFinite(since) ? Math.max(0, since - overlapMs) : 0;
+    const req: HistoryRequest = { kind: 'history_request', scopes, since: floor };
     this.transport.broadcast(req);
   }
 
@@ -309,12 +345,23 @@ class ShoutboxCore {
       }
 
       case 'history_request': {
-        // Only the host answers: it's the only peer whose local store
-        // reliably saw everything that passed through the room (by
-        // construction, all traffic transits the host). If every peer
-        // answered, requesters would get redundant, possibly conflicting
-        // partial responses for no benefit.
-        if (!this.transport.isHost) return;
+        // Every connected peer answers now, not just the host. Used to be
+        // host-only ("it's the only peer guaranteed to have seen
+        // everything that passed through the room") — but host is elected
+        // purely by whoever's browser tab happened to claim the room id
+        // first (see transport/peerjs-transport.ts), with zero regard for
+        // who actually has the richest local cache. In practice that meant
+        // a peer sitting on months of history could be connected right
+        // next to someone who has none, and that history would never be
+        // shared, simply because the peer with it wasn't the one who won
+        // the race to be host this session. Now anyone who has messages
+        // matching the request answers, so a newcomer gets backfilled by
+        // whoever in the (small) room actually has the data — mesh-like
+        // resilience without needing a real mesh transport. Multiple
+        // overlapping answers from several peers at once is expected and
+        // cheap: ingestChatMessage() below dedupes by message id before
+        // doing any signature verification, so redundant answers are
+        // silently discarded, not reprocessed.
         const scopes = msg.scopes.length ? msg.scopes : ShoutboxStore.getKnownScopes();
         const since = msg.since ?? 0;
         const out: ChatMessage[] = [];

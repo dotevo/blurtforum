@@ -147,10 +147,25 @@ of recovery for any scope's history, not just people who happened to have
 that specific tab open.
 
 On connect (and on switching scopes), a peer sends a `history_request`
-for the scopes it cares about; **only the host answers** — it's the only
-peer whose local store reliably saw everything that passed through the
-room (by construction, all traffic transits the host). Answers are capped
-at 50 messages per scope per response.
+for the scopes it cares about; **any currently-connected peer that has a
+matching message answers** (not just the host — see `shoutbox.ts`'s
+`history_request` handler for why that changed from an earlier, host-only
+version). Answers are capped at 50 messages per scope per response, and
+redundant/overlapping answers from multiple peers are expected — they're
+deduped by message id before any signature verification happens, so
+answering "too much" costs nobody anything beyond a little redundant
+bandwidth at this app's current handful-of-users scale.
+
+**History sync also re-runs periodically, not just once on connect**
+(`HISTORY_RESYNC_MS`, currently 45s, with a couple minutes of intentional
+overlap on each re-ask — see `startHistoryResync()`). This is what makes
+the "any connected peer, not just the host, can backfill you" property
+above actually reliable in practice rather than a one-shot best-effort at
+the moment you happen to connect: a flaky reconnect, a message that
+arrived while your certificate for its author hadn't shown up yet (see
+"Not included here" below), or simply not yet being connected to the peer
+who has it, all get a second (and third, and fourth, …) chance to resolve
+themselves without anyone needing to notice and manually refresh.
 
 **A `history_response` always bundles a message together with the
 certificate that authorizes it** (`HistoryResponse.certificates`) — a
