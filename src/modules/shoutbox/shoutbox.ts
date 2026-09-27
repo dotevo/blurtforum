@@ -84,6 +84,12 @@ class ShoutboxCore {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private historyResyncTimer: ReturnType<typeof setInterval> | null = null;
   private unsubs: Array<() => void> = [];
+  /** Extra scopes to keep syncing in the background even while nobody has
+   *  them open — e.g. other communities the logged-in user subscribes to
+   *  (see setWatchedScopes()). Always unioned with 'global' and
+   *  currentScope wherever history is requested (watchedScopes()), so
+   *  callers don't need to re-include those themselves. */
+  private extraScopes: ShoutboxScope[] = [];
 
   readonly status = reactive<{ value: TransportStatus }>({ value: 'disconnected' });
   readonly messages = reactive<Record<string, ChatMessage[]>>({});
@@ -133,6 +139,23 @@ class ShoutboxCore {
     this.hydrateFromStore(scope);
     this.broadcastPresence();
     this.requestHistory([scope]);
+  }
+
+  /** Registers extra scopes to keep syncing in the background regardless
+   *  of which one is currently active — e.g. ShoutboxWidget.vue calls this
+   *  with the user's other subscribed communities, so a tab can appear
+   *  for one (see the component's `visibleExtraScopes`) as soon as it
+   *  actually has anything in it, rather than only ever finding out by
+   *  accident. Immediately hydrates each newly-added scope from whatever
+   *  is already cached locally (a previous session's history), so nothing
+   *  waits on a network round-trip just to show what we already have. */
+  setWatchedScopes(scopes: ShoutboxScope[]): void {
+    this.extraScopes = scopes;
+    for (const s of scopes) if (!(s in this.messages)) this.hydrateFromStore(s);
+  }
+
+  private watchedScopes(): ShoutboxScope[] {
+    return Array.from(new Set<ShoutboxScope>(['global', this.currentScope.value, ...this.extraScopes]));
   }
 
   messagesFor(scope: ShoutboxScope): ChatMessage[] {
@@ -202,15 +225,26 @@ class ShoutboxCore {
    * header comment. Otherwise wraps itself in checkLock() exactly like
    * every other signing action in the app (submitPost, uploadImageFile,
    * …): if a local key is PIN-locked, this shows the PIN modal and
-   * re-invokes send() automatically once unlocked, rather than failing. */
-  async send(body: string): Promise<boolean> {
+   * re-invokes send() automatically once unlocked, rather than failing.
+   *
+   * `onSent` fires exactly once, right before resolving `true` — on
+   * whichever attempt actually succeeds, immediate or the PIN-unlock
+   * retry. It exists because the retry above is a fire-and-forget call
+   * the original caller has no way to still be awaiting (that original
+   * `await send(...)` already resolved to `false` the moment the PIN
+   * modal appeared) — so any success-only side effect the *component*
+   * needs (here: clearing the input box) has to be threaded through
+   * explicitly like this rather than living in the caller's own
+   * `if (ok) ...` after the first `await`, or it simply never runs for
+   * the PIN-retry path. See ShoutboxWidget.vue's submit(). */
+  async send(body: string, onSent?: () => void): Promise<boolean> {
     const trimmed = expandEmojiShortcodes(body).trim();
     if (!trimmed || !this.deps) return false;
 
     const user = this.deps.auth.user;
     if (!user) { warn('cannot send — not logged in'); return false; }
 
-    if (this.deps.checkLock(() => { void this.send(body); })) return false; // PIN modal now showing, will retry after unlock
+    if (this.deps.checkLock(() => { void this.send(body, onSent); })) return false; // PIN modal now showing, will retry after unlock
 
     this.sending.value = true;
     try {
@@ -236,6 +270,7 @@ class ShoutboxCore {
       // ever needs optimizing.
       this.transport.broadcast({ kind: 'certificate', cert: session.cert } as CertificateBroadcast);
       this.transport.broadcast({ kind: 'chat', message } as ChatBroadcast);
+      onSent?.();
       return true;
     } finally {
       this.sending.value = false;
@@ -246,7 +281,7 @@ class ShoutboxCore {
 
   private onConnected(): void {
     this.broadcastPresence();
-    this.requestHistory(['global', this.currentScope.value]);
+    this.requestHistory(this.watchedScopes());
   }
 
   /** History sync is self-healing, not one-shot: onConnected() above asks
@@ -261,7 +296,7 @@ class ShoutboxCore {
   private startHistoryResync(): void {
     this.stopHistoryResync();
     this.historyResyncTimer = setInterval(() => {
-      this.requestHistory(['global', this.currentScope.value], HISTORY_RESYNC_OVERLAP_MS);
+      this.requestHistory(this.watchedScopes(), HISTORY_RESYNC_OVERLAP_MS);
     }, HISTORY_RESYNC_MS);
   }
 

@@ -146,6 +146,20 @@ Storing scope-blind means anyone connected at all is a potential source
 of recovery for any scope's history, not just people who happened to have
 that specific tab open.
 
+**This is also how cross-deployment community tabs work.** `ROOM_ID` is a
+single hardcoded constant (`transport/peerjs-transport.ts`), not derived
+from `config.communityAccount` — so every deployed instance of this app,
+regardless of which Blurt community it's configured for, shares the exact
+same P2P room. A message tagged `community:some-other-community` really
+can arrive here, broadcast live by a user of a *different* forum.blurt.pl-
+style deployment configured for that community. `ShoutboxWidget.vue` calls
+`Shoutbox.setWatchedScopes()` with the logged-in user's other subscribed
+communities (same list the forum's own activity sidebar uses) so those
+keep syncing in the background too, and surfaces a tab for one as soon as
+it actually has a message in it (`visibleExtraScopes`) — not merely
+because the user is subscribed, since most subscriptions will never see a
+single message through this particular room.
+
 On connect (and on switching scopes), a peer sends a `history_request`
 for the scopes it cares about; **any currently-connected peer that has a
 matching message answers** (not just the host — see `shoutbox.ts`'s

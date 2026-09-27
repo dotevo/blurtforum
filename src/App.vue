@@ -306,6 +306,7 @@ const {
     :community-id="config.communityAccount"
     :current-post="view === 'topic' && activeTopic ? { author: activeTopic.author, permlink: activeTopic.permlink, title: activeTopic.title } : null"
     :open-post-ref="openPostRef"
+    :user-subscriptions="userSubscriptions"
   />
 
   <NavBar

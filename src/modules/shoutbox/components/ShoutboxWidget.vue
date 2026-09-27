@@ -47,7 +47,7 @@
  *      to this track", so the two are kept as clearly separate concerns
  *      rather than one being folded into the other.
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Shoutbox } from '../shoutbox';
 import type { ShoutboxScope } from '../types';
 import type { AuthUser } from '../../../types';
@@ -72,9 +72,20 @@ const props = defineProps<{
   /** Navigates the host app to a post referenced in chat or in the Online
    * tab. Omit to render post references as plain (non-clickable) text. */
   openPostRef?: (author: string, permlink: string) => void;
+  /** Other Blurt communities the logged-in user subscribes to (same list
+   * useGlobalActivity.ts's sidebar uses) — NOT this forum's own community
+   * (that's `communityId` above, always its own dedicated tab). The
+   * underlying P2P room is shared across every deployed instance of this
+   * app regardless of which community each instance is configured for
+   * (see transport/peerjs-transport.ts's ROOM_ID), so messages tagged
+   * with one of these communities' scopes can genuinely arrive here, from
+   * that other instance's own users — this just gives them a tab to
+   * surface in, instead of being silently stored but never shown. See the
+   * `extraCommunityScopes` comment below for how a tab actually appears. */
+  userSubscriptions?: { account: string; title: string }[];
 }>();
 
-const activeTab = defineModel<'global' | 'community' | 'online'>('activeTab', { default: 'global' });
+const activeTab = defineModel<string>('activeTab', { default: 'global' });
 const draft = defineModel<string>('draft', { default: '' });
 
 const EXPANDED_STORAGE_KEY = 'bf_shoutbox_expanded';
@@ -127,20 +138,83 @@ const unreadCount = computed(() => {
   const cutoff = lastRead[scope.value] ?? 0;
   return messages.value.filter((m) => m.ts > cutoff).length;
 });
+/** Same as `unreadCount` above but for an arbitrary scope, not just the
+ *  currently-selected one — powers the per-tab badges (Global/Community/
+ *  other subscribed communities) so a new message in a tab you're NOT
+ *  looking at is actually visible, instead of only affecting the pill's
+ *  total once you happen to open that tab. */
+function unreadForScope(s: ShoutboxScope): number {
+  if (expanded.value && scope.value === s) return 0; // currently open and being looked at
+  const cutoff = lastRead[s] ?? 0;
+  return Shoutbox.messagesFor(s).filter((m) => m.ts > cutoff).length;
+}
+
+// ─── Auto-scroll to the newest message ──────────────────────────────────
+// `.shoutbox-messages` only exists in the DOM while expanded (see
+// `v-if="expanded"` on the panel below), so this ref is null whenever
+// collapsed — scrollToBottom() below is a safe no-op in that case, not a
+// bug to guard against separately.
+const messagesEl = ref<HTMLElement | null>(null);
+function scrollToBottom(): void {
+  nextTick(() => {
+    const el = messagesEl.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
 
 function toggleExpanded(): void {
   expanded.value = !expanded.value;
   localStorage.setItem(EXPANDED_STORAGE_KEY, expanded.value ? '1' : '0');
-  if (expanded.value) markScopeRead(scope.value);
+  if (expanded.value) { markScopeRead(scope.value); scrollToBottom(); }
 }
 
 const communityScope = computed<ShoutboxScope | null>(() =>
   props.communityId ? (`community:${props.communityId}` as ShoutboxScope) : null
 );
 
-const scope = computed<ShoutboxScope>(() =>
-  activeTab.value === 'community' && communityScope.value ? communityScope.value : 'global'
+// ─── Other subscribed communities' chat, surfaced only once they actually
+// have something in them ─────────────────────────────────────────────────
+// `extraCommunityScopes` is every OTHER community the user subscribes to
+// (excluding this forum's own — that's the dedicated "Community" tab).
+// These are kept in sync in the background regardless of whether their tab
+// is showing (see the watcher below, and Shoutbox.setWatchedScopes()) —
+// otherwise we'd only find out one has new messages by chance, whenever a
+// live broadcast happens to arrive while we're connected, which is exactly
+// the "didn't notice until I happened to open the tab" complaint this is
+// fixing for the CURRENT community too (see unreadForScope below).
+//
+// `visibleExtraScopes` is the subset actually rendered as tabs — only ones
+// with at least one message ever seen (read or not). Intentionally not
+// "only while unread", so a tab you've already read doesn't vanish and
+// reappear as you switch away and back; the trigger for a tab existing at
+// all is "something was ever said there", per what was asked for.
+const extraCommunityScopes = computed<ShoutboxScope[]>(() =>
+  (props.userSubscriptions ?? [])
+    .filter((s) => s.account !== props.communityId)
+    .map((s) => `community:${s.account}` as ShoutboxScope)
 );
+const visibleExtraScopes = computed<ShoutboxScope[]>(() =>
+  extraCommunityScopes.value.filter((s) => Shoutbox.messagesFor(s).length > 0)
+);
+function extraScopeTitle(s: ShoutboxScope): string {
+  const account = s.slice('community:'.length);
+  return props.userSubscriptions?.find((sub) => sub.account === account)?.title ?? account;
+}
+
+watch(
+  extraCommunityScopes,
+  (scopes) => {
+    Shoutbox.setWatchedScopes(scopes);
+    scopes.forEach(ensureLastReadBaseline);
+  },
+  { immediate: true }
+);
+
+const scope = computed<ShoutboxScope>(() => {
+  if (activeTab.value === 'community' && communityScope.value) return communityScope.value;
+  if (activeTab.value.startsWith('community:')) return activeTab.value as ShoutboxScope;
+  return 'global';
+});
 
 const messages = computed(() => Shoutbox.messagesFor(scope.value));
 const onlineCount = computed(() => Shoutbox.onlineCount(scope.value)); // pill badge: current chat tab only
@@ -187,7 +261,7 @@ onMounted(async () => {
   // would count that entire backlog as new.
   ensureLastReadBaseline('global');
   if (communityScope.value) ensureLastReadBaseline(communityScope.value);
-  if (expanded.value) markScopeRead(scope.value);
+  if (expanded.value) { markScopeRead(scope.value); scrollToBottom(); }
 });
 
 onBeforeUnmount(() => {
@@ -197,13 +271,18 @@ onBeforeUnmount(() => {
 watch(scope, (s) => {
   Shoutbox.setScope(s);
   ensureLastReadBaseline(s);
-  if (expanded.value) markScopeRead(s);
+  if (expanded.value) { markScopeRead(s); scrollToBottom(); }
 });
 
 // If a community-scoped tab is active but the user navigates somewhere
 // without a community (communityId becomes null), fall back to Global
 // rather than leaving the tab pointing at a scope with no visible entry point.
 watch(communityScope, (s) => { if (!s && activeTab.value === 'community') activeTab.value = 'global'; });
+
+// Always stick to the newest message — covers messages arriving live (from
+// anyone) and history/resync backfill, whenever the panel is open. Runs
+// for the currently-selected scope only, same as `messages` itself.
+watch(() => messages.value.length, () => { if (expanded.value) scrollToBottom(); });
 
 
 // Tell the room what we're currently reading — see this file's header
@@ -217,7 +296,11 @@ watch(
 async function submit(): Promise<void> {
   const text = draft.value;
   if (!text.trim()) return;
-  const ok = await Shoutbox.send(text);
+  // onSent (not just `if (ok) ...` below) is what actually clears the box
+  // when a PIN prompt was involved — see Shoutbox.send()'s own comment on
+  // why: this whole submit() call already returns long before the PIN
+  // retry resolves, so the retry has no other way back to this input box.
+  const ok = await Shoutbox.send(text, () => { draft.value = ''; });
   if (ok) draft.value = '';
 }
 
@@ -230,7 +313,9 @@ function openPost(author: string, permlink: string): void {
 }
 
 function scopeLabel(s: ShoutboxScope): string {
-  return s === 'global' ? 'Global' : 'Community';
+  if (s === 'global') return 'Global';
+  if (s === communityScope.value) return 'Community';
+  return extraScopeTitle(s);
 }
 
 // ─── Composer input helpers: insert text at the cursor rather than always
@@ -276,7 +361,7 @@ function shareCurrentPost(): void {
       <div class="shoutbox-header">
         <div class="shoutbox-tabs">
           <button type="button" :class="{ active: activeTab === 'global' }" @click="activeTab = 'global'">
-            Global
+            Global<span v-if="unreadForScope('global') > 0" class="shoutbox-tab-badge">{{ unreadForScope('global') }}</span>
           </button>
           <button
             v-if="communityScope"
@@ -284,7 +369,17 @@ function shareCurrentPost(): void {
             :class="{ active: activeTab === 'community' }"
             @click="activeTab = 'community'"
           >
-            Community
+            Community<span v-if="unreadForScope(communityScope) > 0" class="shoutbox-tab-badge">{{ unreadForScope(communityScope) }}</span>
+          </button>
+          <button
+            v-for="s in visibleExtraScopes"
+            :key="s"
+            type="button"
+            :class="{ active: activeTab === s }"
+            @click="activeTab = s"
+            :title="extraScopeTitle(s)"
+          >
+            {{ extraScopeTitle(s) }}<span v-if="unreadForScope(s) > 0" class="shoutbox-tab-badge">{{ unreadForScope(s) }}</span>
           </button>
           <button type="button" :class="{ active: activeTab === 'online' }" @click="activeTab = 'online'">
             Online ({{ totalOnlineCount }})
@@ -310,7 +405,7 @@ function shareCurrentPost(): void {
       </div>
 
       <template v-else>
-        <div class="shoutbox-messages">
+        <div class="shoutbox-messages" ref="messagesEl">
           <div v-if="!messages.length" class="shoutbox-empty">No messages yet — say hi.</div>
           <div v-for="m in messages" :key="m.id" class="shoutbox-msg">
             <span class="author">{{ m.author }}</span>
@@ -454,6 +549,19 @@ function shareCurrentPost(): void {
   border-bottom-color: var(--tab-active-border);
   color: var(--tab-active-text);
   font-weight: 600;
+}
+.shoutbox-tab-badge {
+  display: inline-block;
+  min-width: 15px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent, #e0393e);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
 }
 .shoutbox-messages { flex: 1; overflow-y: auto; padding: 8px 10px; color: var(--card-about-text); }
 .shoutbox-empty { opacity: 0.6; color: var(--card-muted-text); text-align: center; padding: 16px 0; }
