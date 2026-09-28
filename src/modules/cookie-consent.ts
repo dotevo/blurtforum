@@ -57,28 +57,23 @@ function loadGoogleAnalytics(): void {
   document.head.appendChild(script);
 
   (window as any).dataLayer = (window as any).dataLayer || [];
-  (window as any).gtag = function gtag(...args: unknown[]) { (window as any).dataLayer.push(args); };
-
-  // Deliberately NOT calling gtag('consent', 'default'/'update', ...) here.
-  // A previous version of this function did (to satisfy Google's documented
-  // Consent Mode pattern), and it looked correct - dataLayer filled up
-  // normally, gtm.* housekeeping events fired, the script loaded 200 OK -
-  // but empirically (confirmed live on forum.blurt.pl, Sept 2026) NO
-  // gtag('event', ...) or gtag('get', ...) call ever actually reached
-  // google-analytics.com after that call was added, regardless of the
-  // values passed to it ('granted' included). Removing the call entirely
-  // (this version) was verified to fix it: same dynamic <script> injection,
-  // same gtag('js')/gtag('config') calls, minus this one, and events
-  // reached GA4 again immediately. Root cause of gtag.js silently
-  // swallowing hits after that call was never fully pinned down (not
-  // documented Google behavior as far as we could find), but the fix is
-  // reproducible, so leaving it out on purpose.
+  // MUST push the `arguments` object, not an array. gtag.js only recognises
+  // gtag() commands when the queued item is an Arguments object; a plain
+  // Array (which is what `function gtag(...args) { dataLayer.push(args) }`
+  // pushes) is treated as an ordinary GTM-style dataLayer push and the
+  // command is silently ignored - no error, no network hit. That is what
+  // broke analytics after the cookie banner moved this snippet out of
+  // index.html (the original inline snippet used push(arguments)). Both
+  // shapes look identical under JSON.stringify(dataLayer), which is why it
+  // was easy to miss when inspecting the queue in the console.
   //
-  // This is also not a compliance problem: loadGoogleAnalytics() is ONLY
-  // ever invoked after the user has actually clicked "accept" (see
-  // acceptCookies()/initConsent() below) or already had done so in a prior
-  // session - there is no code path where this loads before consent - so
-  // there is nothing for a consent signal to gate here in the first place.
+  // (An earlier version of this comment blamed a gtag('consent', 'default')
+  // call instead. That diagnosis was wrong: the consent call is left out
+  // below, but it was never shown to be the cause. It is also unnecessary:
+  // loadGoogleAnalytics() only ever runs after the user has accepted, so
+  // there is no pre-consent window for a consent signal to gate.)
+  (window as any).gtag = function gtag() { (window as any).dataLayer.push(arguments); };
+
   (window as any).gtag('js', new Date());
   (window as any).gtag('config', GA_MEASUREMENT_ID, { send_page_view: false });
 }

@@ -88,8 +88,14 @@ const props = defineProps<{
 const activeTab = defineModel<string>('activeTab', { default: 'global' });
 const draft = defineModel<string>('draft', { default: '' });
 
-const EXPANDED_STORAGE_KEY = 'bf_shoutbox_expanded';
-const expanded = ref(localStorage.getItem(EXPANDED_STORAGE_KEY) === '1');
+// Always starts collapsed on every page load — never remembers/restores a
+// previously-expanded state across reloads. That used to be the behavior
+// (a localStorage flag toggled in toggleExpanded() below, read back in as
+// the initial value here), which meant leaving it open once left it
+// popping open on every subsequent visit, unprompted — the unread badge
+// (see `unreadCount`/`unreadForScope` below) is the only thing that should
+// ever draw attention to it; opening is always the user's own action.
+const expanded = ref(false);
 
 // ─── Unread badge: per-scope "read up to this timestamp" marker, persisted
 // across reloads — NOT a simple "did the message count grow" delta.
@@ -164,7 +170,6 @@ function scrollToBottom(): void {
 
 function toggleExpanded(): void {
   expanded.value = !expanded.value;
-  localStorage.setItem(EXPANDED_STORAGE_KEY, expanded.value ? '1' : '0');
   if (expanded.value) { markScopeRead(scope.value); scrollToBottom(); }
 }
 
@@ -283,6 +288,15 @@ watch(communityScope, (s) => { if (!s && activeTab.value === 'community') active
 // anyone) and history/resync backfill, whenever the panel is open. Runs
 // for the currently-selected scope only, same as `messages` itself.
 watch(() => messages.value.length, () => { if (expanded.value) scrollToBottom(); });
+
+// Returning from the "Online" tab (or any tab switch that lands on a chat
+// list) has to scroll too. The Online tab REPLACES the message container
+// (v-if / v-else in the template), so coming back mounts a brand-new
+// `.shoutbox-messages` element with scrollTop = 0 — and `watch(scope)`
+// above can't catch it, because `scope` doesn't change for that trip
+// (Global → Online → Global stays 'global' the whole time). Watching the
+// tab itself is what actually matches what's being remounted.
+watch(activeTab, (tab) => { if (expanded.value && tab !== 'online') scrollToBottom(); });
 
 
 // Tell the room what we're currently reading — see this file's header
