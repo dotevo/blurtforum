@@ -90,6 +90,7 @@
   "contentUnavailableText": "Este contenido no está disponible.",
   "contentUnavailableTitle": "Contenido no disponible",
   "cookieBannerAccept": "Aceptar",
+  "cookieBannerAriaLabel": "Consentimiento de cookies",
   "cookieBannerReject": "Rechazar no esenciales",
   "cookieBannerText": "Utilizamos cookies para el funcionamiento esencial del sitio y, solo con su consentimiento, para análisis (Google Analytics). Consulte nuestra",
   "cookieSettings": "Configuración de cookies",

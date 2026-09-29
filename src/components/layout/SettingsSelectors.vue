@@ -131,14 +131,14 @@ onBeforeUnmount(() => {
     <div class="selector-item">
       <i class="fa-solid fa-palette"></i>
       <span class="gs">{{ t('theme') }}:</span>
-      <select :value="theme" @change="emit('setTheme', ($event.target as HTMLSelectElement).value)" class="lang-btn">
+      <select :value="theme" @change="emit('setTheme', ($event.target as HTMLSelectElement).value)" class="lang-btn" :aria-label="t('theme')">
         <option v-for="th in themes" :key="th.id" :value="th.id">{{ th.label }}</option>
       </select>
     </div>
     <div class="selector-item">
       <i class="fa-solid fa-language"></i>
       <span class="gs">{{ t('lang') }}:</span>
-      <select :value="lang" @change="emit('setLang', ($event.target as HTMLSelectElement).value)" class="lang-btn">
+      <select :value="lang" @change="emit('setLang', ($event.target as HTMLSelectElement).value)" class="lang-btn" :aria-label="t('lang')">
         <option v-for="l in (langs as any)" :key="l.code || l" :value="l.code || l">{{ l.name || l.toUpperCase() }}</option>
       </select>
     </div>
@@ -187,14 +187,14 @@ onBeforeUnmount(() => {
         <div class="selector-item">
           <i class="fa-solid fa-palette"></i>
           <span class="gs">{{ t('theme') }}:</span>
-          <select :value="theme" @change="emit('setTheme', ($event.target as HTMLSelectElement).value)" class="lang-btn">
+          <select :value="theme" @change="emit('setTheme', ($event.target as HTMLSelectElement).value)" class="lang-btn" :aria-label="t('theme')">
             <option v-for="th in themes" :key="th.id" :value="th.id">{{ th.label }}</option>
           </select>
         </div>
         <div class="selector-item">
           <i class="fa-solid fa-language"></i>
           <span class="gs">{{ t('lang') }}:</span>
-          <select :value="lang" @change="emit('setLang', ($event.target as HTMLSelectElement).value)" class="lang-btn">
+          <select :value="lang" @change="emit('setLang', ($event.target as HTMLSelectElement).value)" class="lang-btn" :aria-label="t('lang')">
             <option v-for="l in (langs as any)" :key="l.code || l" :value="l.code || l">{{ l.name || l.toUpperCase() }}</option>
           </select>
         </div>

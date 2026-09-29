@@ -1,3 +1,18 @@
+/* Reserves consistent inline space for FontAwesome icons before the icon
+   font itself has loaded (it's now non-blocking, see index.html's
+   preload/onload swap on the fontawesome stylesheet) -- without this, an
+   <i class="fa-..."> renders at essentially zero width until the font
+   applies, then jumps to its real glyph width, shifting whatever text
+   sits next to it (this app puts an icon in front of most nav/button
+   labels). min-width approximates the font's actual glyph width closely
+   enough that the shift is imperceptible; exact width isn't critical here
+   since perfect alignment isn't the goal, just avoiding a visible jump. */
+.fa-solid, .fa-brands, .fa-regular {
+  display: inline-block;
+  min-width: 1em;
+  text-align: center;
+}
+
 /* ===== EMBEDS ===== */
 .embed-wrapper {
   margin: 15px 0;

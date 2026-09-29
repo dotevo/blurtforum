@@ -38,7 +38,23 @@
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
 <script src="./vendor/dblurt/dblurt.js" defer></script>
 <script src="./vendor/peertube-embed-api/player.min.js" defer></script>
-<link rel="stylesheet" href="./vendor/fontawesome/css/all.min.css">
+<!-- Was a plain blocking <link rel="stylesheet"> -- Lighthouse flags any
+     synchronous stylesheet in <head> as a render-blocking request (this
+     was the ~450ms "render-blocking requests" finding, essentially the
+     only candidate for it on this page: the two <script> tags above are
+     already `defer`, and nothing else in <head> is a stylesheet). The
+     icon font is already a small (~9KB) subset (see
+     scripts/subset-fontawesome.mjs) and nothing above the fold strictly
+     needs it painted before first content, so it's safe to let it load in
+     parallel: `rel="preload" as="style"` fetches it with page-load
+     priority without blocking rendering, then the `onload` swaps it to a
+     real stylesheet once it's actually in cache. <noscript> covers the
+     (rare) no-JS case, where the onload trick can't run.
+     See style.css's `.fa-solid, .fa-brands` rule for the other half of
+     this change -- reserving icon glyph width up front so icons don't
+     visibly pop in and shift surrounding text once this loads. -->
+<link rel="preload" href="./vendor/fontawesome/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="./vendor/fontawesome/css/all.min.css"></noscript>
 <!-- Google Analytics (gtag.js) is intentionally NOT loaded here anymore --
      it only loads after the user accepts cookies via the in-app consent
      banner. See src/modules/cookie-consent.ts for the full story. -->

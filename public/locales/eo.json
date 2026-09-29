@@ -90,6 +90,7 @@
   "contentUnavailableText": "Ĉi tiu enhavo ne disponeblas.",
   "contentUnavailableTitle": "Enhavo ne disponebla",
   "cookieBannerAccept": "Akcepti",
+  "cookieBannerAriaLabel": "Konsento pri kuketoj",
   "cookieBannerReject": "Rifuzi nenecesajn",
   "cookieBannerText": "Ni uzas kuketojn necesajn por la baza funkciado de la retejo kaj, nur kun via konsento, por analitiko (Google Analytics). Vidu nian",
   "cookieSettings": "Agordoj de kuketoj",

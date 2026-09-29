@@ -40,7 +40,7 @@ const bottom = useFloatingLayer(el, { id: 'cookie-banner', order: 20, visible: (
 </script>
 
 <template>
-  <div ref="el" class="ccb-banner" role="dialog" aria-live="polite" :style="{ bottom: bottom + 'px' }">
+  <div ref="el" class="ccb-banner" role="dialog" :aria-label="t('cookieBannerAriaLabel') || 'Cookie consent'" aria-live="polite" :style="{ bottom: bottom + 'px' }">
     <div class="ccb-inner">
       <p class="ccb-text">
         {{ t('cookieBannerText') || 'We use cookies for essential site functionality and, only with your consent, for analytics (Google Analytics). See our' }}
