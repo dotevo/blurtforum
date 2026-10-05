@@ -15,7 +15,19 @@ export function useProfile(
   globalProps: any,
   view: any,
   normalizePost: (p: any) => Post,
-  moderation?: { canBanUser?: () => boolean; canMute?: () => boolean }
+  moderation?: { canBanUser?: () => boolean; canMute?: () => boolean },
+  /** Writes `view`/`profileUser` (among other things) to the real address
+   *  bar + browser history — see useApp.ts's syncUrl(). openProfile() below
+   *  used to set `view.value = 'profile'` and never call this, which is
+   *  why navigating to a profile (from anywhere: a post's byline, a
+   *  mention, the chat's clickable usernames) never changed the URL at
+   *  all — the address bar kept showing whatever was there before (a
+   *  topic, another profile, …), even though the page itself had
+   *  genuinely navigated. openTopic()/goHome()/etc. in useApp.ts all call
+   *  this already; openProfile() just never did. Optional only so this
+   *  composable doesn't hard-fail if a future caller has no URL to sync
+   *  (there's currently exactly one caller, useApp.ts, which always has one). */
+  syncUrl?: () => void
 ) {
   const visibleFilter = (p: Post) => !isHiddenFromViewer(p, {
     canBanUser: moderation?.canBanUser?.() ?? false,
@@ -197,7 +209,13 @@ export function useProfile(
     profileUser.comments = [];
     profileUser.replies = [];
     profileUser.postsHasMore = profileUser.commentsHasMore = profileUser.repliesHasMore = true;
+    // Reset alongside the rest of the state above, rather than leaving
+    // whatever tab was open on the PREVIOUS profile — otherwise the new
+    // syncUrl() call below would carry a stale `&tab=comments` etc. into
+    // a freshly-opened profile's URL.
+    profileTab.value = 'posts';
     view.value = 'profile';
+    syncUrl?.();
 
     // Site-wide ban (banned-users.ts): stop immediately, no RPC calls at all - the profile
     // page just shows a "banned" placeholder. This is intentionally checked before anything

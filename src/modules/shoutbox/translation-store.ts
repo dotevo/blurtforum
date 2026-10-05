@@ -61,6 +61,16 @@ interface StoredRow {
   key: string;
   ts: number;
   translation: Translation;
+  /** Last time this entry was actually READ — by us showing it to a
+   *  viewer, or by us serving it to another peer's translation_request
+   *  (see shoutbox.ts) — as opposed to `ts`, which is when the
+   *  translation was originally produced and never changes. Eviction
+   *  below is LRU on THIS field, not `ts`: a translation nobody's looked
+   *  at in months should go before one that's six months older but got
+   *  read yesterday. Separate from the signed `Translation` object
+   *  itself, which must stay exactly as it was signed — this is purely
+   *  local bookkeeping about OUR OWN usage, never transmitted. */
+  lastAccessedTs: number;
 }
 
 async function withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => Promise<T> | T): Promise<T> {
@@ -85,17 +95,37 @@ function reqToPromise<T>(req: IDBRequest<T>): Promise<T> {
 
 export async function getTranslation(contentId: string, targetLang: string): Promise<Translation | null> {
   try {
-    const row = await withStore<StoredRow | undefined>('readonly', (store) => reqToPromise(store.get(keyFor(contentId, targetLang))));
-    return row?.translation ?? null;
+    const key = keyFor(contentId, targetLang);
+    const row = await withStore<StoredRow | undefined>('readonly', (store) => reqToPromise(store.get(key)));
+    if (!row) return null;
+    // Fire-and-forget: refresh recency on every successful read (whether
+    // that read is us displaying it to our own viewer, or us answering
+    // someone else's translation_request — both go through this same
+    // function, so "seeding" something keeps it alive exactly like
+    // reading it yourself would). Never blocks the caller on this write.
+    void touchTranslation(key);
+    return row.translation;
   } catch {
     return null; // IndexedDB unavailable (very old browser / private-mode edge case) — treat as cache miss
   }
 }
 
+async function touchTranslation(key: string): Promise<void> {
+  try {
+    await withStore('readwrite', async (store) => {
+      const row = await reqToPromise(store.get(key) as IDBRequest<StoredRow | undefined>);
+      if (!row) return;
+      row.lastAccessedTs = Date.now();
+      store.put(row);
+    });
+  } catch { /* best-effort — worst case this entry just looks less-recently-used than it really is */ }
+}
+
 export async function putTranslation(t: Translation): Promise<void> {
   try {
     await withStore('readwrite', (store) => {
-      const row: StoredRow = { key: keyFor(t.contentId, t.targetLang), ts: t.ts, translation: t };
+      const now = Date.now();
+      const row: StoredRow = { key: keyFor(t.contentId, t.targetLang), ts: t.ts, translation: t, lastAccessedTs: now };
       store.put(row);
       return Promise.resolve();
     });
@@ -105,13 +135,20 @@ export async function putTranslation(t: Translation): Promise<void> {
   }
 }
 
-export async function allTranslations(): Promise<Translation[]> {
+async function allRows(): Promise<StoredRow[]> {
   try {
     const rows = await withStore<StoredRow[]>('readonly', (store) => reqToPromise(store.getAll() as IDBRequest<StoredRow[]>));
-    return rows.map((r) => r.translation);
+    // Older rows written before this field existed won't have it — treat
+    // as "never accessed", i.e. first in line for eviction, rather than
+    // crashing the sort below on `undefined - undefined`.
+    return rows.map((r) => ({ ...r, lastAccessedTs: r.lastAccessedTs ?? 0 }));
   } catch {
     return [];
   }
+}
+
+export async function allTranslations(): Promise<Translation[]> {
+  return (await allRows()).map((r) => r.translation);
 }
 
 export interface CacheStats {
@@ -147,21 +184,29 @@ export function setMaxCacheBytes(n: number): void {
   localStorage.setItem(MAX_BYTES_KEY, String(Math.max(0, Math.floor(n))));
 }
 
-/** Evicts the oldest entries (by translation timestamp) until the store
- *  fits back under the configured budget. Runs after every write rather
- *  than on a schedule — writes are infrequent (one per newly-translated
- *  post/comment a peer hasn't seen before) so this is cheap in practice. */
+/** Evicts the LEAST-RECENTLY-USED entries until the store fits back under
+ *  the configured budget — true LRU on `lastAccessedTs`, not on how long
+ *  ago the translation was originally produced. This is what makes a
+ *  popular post's translation survive: every peer that reads it (or
+ *  seeds it to someone else, see getTranslation's doc comment above)
+ *  refreshes its recency, so it keeps getting pushed to the back of the
+ *  eviction queue for as long as anyone's actually using it. Something
+ *  nobody has touched in a long time is exactly what SHOULD go first,
+ *  regardless of whether it happens to be old or recent by creation
+ *  date. Runs after every write rather than on a schedule — writes are
+ *  infrequent (one per newly-cached translation) so this is cheap in
+ *  practice. */
 async function evictIfOverBudget(): Promise<void> {
   const max = getMaxCacheBytes();
-  const all = await allTranslations();
-  let bytes = all.reduce((sum, t) => sum + JSON.stringify(t).length, 0);
+  const rows = await allRows();
+  let bytes = rows.reduce((sum, r) => sum + JSON.stringify(r.translation).length, 0);
   if (bytes <= max) return;
-  const sorted = [...all].sort((a, b) => a.ts - b.ts); // oldest first
+  const sorted = [...rows].sort((a, b) => a.lastAccessedTs - b.lastAccessedTs); // least-recently-used first
   const toDelete: string[] = [];
-  for (const t of sorted) {
+  for (const r of sorted) {
     if (bytes <= max) break;
-    bytes -= JSON.stringify(t).length;
-    toDelete.push(keyFor(t.contentId, t.targetLang));
+    bytes -= JSON.stringify(r.translation).length;
+    toDelete.push(r.key);
   }
   if (!toDelete.length) return;
   try {

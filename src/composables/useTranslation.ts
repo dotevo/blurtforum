@@ -97,6 +97,14 @@ export function useTranslation() {
         return;
       }
 
+      // Nobody had it and nobody else had already claimed it (requestTranslation
+      // above already waited out a grace period for any claim it saw) — so
+      // WE announce the claim now, before doing the actual (slow, rate-limited)
+      // provider call. Any other peer that starts asking for this same key
+      // after this point will see our claim and wait for us instead of also
+      // translating it. See shoutbox.ts's armTranslationTimeout for the full
+      // mechanism this is the other half of.
+      Shoutbox.announceTranslationClaim(contentId, targetLang);
       const translated = await translateText(originalBody, targetLang, translationPrefs.engine);
       if (!translated) { entry.status = 'error'; return; }
 

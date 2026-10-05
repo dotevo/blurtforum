@@ -134,6 +134,25 @@ export interface TranslationRequest {
   targetLang: string;
 }
 
+/**
+ * "I'm about to machine-translate this myself — hold off." Broadcast by a
+ * peer right before it calls a translation provider, so other peers
+ * concurrently waiting on the exact same (content, language) back off
+ * instead of also independently translating it (see shoutbox.ts's
+ * requestTranslation/armTranslationTimeout for the full "thundering herd"
+ * problem this solves). Deliberately NOT signed/attributed like a
+ * Translation itself — it's a transient coordination hint with no lasting
+ * effect if ignored or spoofed (worst case: a bit of duplicate work, the
+ * same outcome as if this message didn't exist at all), so it doesn't
+ * need the certificate machinery real content does.
+ */
+export interface TranslationClaim {
+  kind: 'translation_claim';
+  contentId: string;
+  targetLang: string;
+  by: string;
+}
+
 export type WireMessage =
   | PresenceUpdate
   | ChatBroadcast
@@ -141,4 +160,5 @@ export type WireMessage =
   | HistoryRequest
   | HistoryResponse
   | TranslationBroadcast
-  | TranslationRequest;
+  | TranslationRequest
+  | TranslationClaim;

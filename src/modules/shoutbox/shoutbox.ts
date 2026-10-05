@@ -1,6 +1,6 @@
 import { reactive } from 'vue';
 import type { AuthUser } from '../../types';
-import type { CertificateBroadcast, ChatBroadcast, ChatMessage, HistoryRequest, HistoryResponse, PresenceUpdate, ShoutboxScope, Translation, TranslationBroadcast, TranslationRequest, WireMessage } from './types';
+import type { CertificateBroadcast, ChatBroadcast, ChatMessage, HistoryRequest, HistoryResponse, PresenceUpdate, ShoutboxScope, Translation, TranslationBroadcast, TranslationClaim, TranslationRequest, WireMessage } from './types';
 import type { SignalingTransport, TransportStatus } from './transport/types';
 import { PeerJsTransport } from './transport/peerjs-transport';
 import { ShoutboxStore } from './store';
@@ -58,6 +58,20 @@ const HISTORY_RESYNC_OVERLAP_MS = 2 * 60_000;
 // staring at a spinner if nobody has it, long enough for a same-room peer
 // (which, per the star topology, is at most one relay hop away) to reply.
 const TRANSLATION_REQUEST_TIMEOUT_MS = 3_000;
+// If some OTHER peer announces a translation_claim for the exact key we're
+// waiting on (see TranslationClaim's doc comment in types.ts), we give
+// them this much extra time to actually deliver before giving up and
+// doing it ourselves — avoids several peers redundantly hitting the
+// translation provider for the same text at once ("thundering herd").
+const TRANSLATION_CLAIM_GRACE_MS = 6_000;
+// One last, randomized micro-wait right before we'd otherwise give up —
+// claimSeen is checked again when THIS fires too. Covers the case where
+// two peers' original timeouts expire within the same instant: neither
+// had claimed anything yet, so without this both would immediately
+// declare a claim and translate at once. Jittering who "wins" that last
+// moment means whichever fires first gets to claim it, and the other
+// sees that claim during its own (slightly longer) wait and defers.
+const TRANSLATION_FINAL_JITTER_RANGE_MS: [number, number] = [150, 500];
 
 function makeNonce(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -103,7 +117,18 @@ class ShoutboxCore {
    *  comes first. Deduped: a second requestTranslation() call for the same
    *  key while one is already in flight just gets the same promise, rather
    *  than re-broadcasting a redundant request. */
-  private pendingTranslationRequests = new Map<string, { waiters: Array<(t: Translation | null) => void>; timer: ReturnType<typeof setTimeout> }>();
+  private pendingTranslationRequests = new Map<string, {
+    waiters: Array<(t: Translation | null) => void>;
+    timer: ReturnType<typeof setTimeout>;
+    /** Set by handleWireMessage when a translation_claim arrives for this
+     *  exact key, whichever of the timers below happens to be running at
+     *  the time — consulted each time one of them fires. */
+    claimSeen: boolean;
+    /** We only grant the CLAIM_GRACE extension once per request, so a
+     *  peer that claims and then never delivers can't stall us forever
+     *  (a second claim for the same key, if it even happens, is ignored). */
+    grantedGrace: boolean;
+  }>();
 
   readonly status = reactive<{ value: TransportStatus }>({ value: 'disconnected' });
   readonly messages = reactive<Record<string, ChatMessage[]>>({});
@@ -303,15 +328,59 @@ class ShoutboxCore {
     if (existing) return new Promise((resolve) => existing.waiters.push(resolve));
 
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const entry = this.pendingTranslationRequests.get(key);
-        this.pendingTranslationRequests.delete(key);
-        entry?.waiters.forEach((w) => w(null));
-      }, TRANSLATION_REQUEST_TIMEOUT_MS);
-      this.pendingTranslationRequests.set(key, { waiters: [resolve], timer });
+      this.pendingTranslationRequests.set(key, {
+        waiters: [resolve],
+        timer: null as unknown as ReturnType<typeof setTimeout>,
+        claimSeen: false,
+        grantedGrace: false,
+      });
+      this.armTranslationTimeout(key, TRANSLATION_REQUEST_TIMEOUT_MS);
       const req: TranslationRequest = { kind: 'translation_request', contentId, targetLang };
       this.transport.broadcast(req);
     });
+  }
+
+  /** Tells the room "I'm about to translate this myself" — see
+   *  TranslationClaim's doc comment in types.ts. Callers (useTranslation.ts)
+   *  call this right before running the text through a provider, once
+   *  requestTranslation() above has already come back empty-handed. */
+  announceTranslationClaim(contentId: string, targetLang: string): void {
+    const claim: TranslationClaim = { kind: 'translation_claim', contentId, targetLang, by: this.transport.peerId ?? 'unknown' };
+    this.transport.broadcast(claim);
+  }
+
+  /** One tier of requestTranslation()'s wait. Re-arms itself with a longer
+   *  wait if a claim showed up in the meantime (once), or with one final
+   *  short randomized wait if nothing has shown up at all yet (also once) —
+   *  see TRANSLATION_CLAIM_GRACE_MS / TRANSLATION_FINAL_JITTER_RANGE_MS's
+   *  comments above for why each exists. `isFinalJitter` marks that second
+   *  case so we don't loop forever adding more jitter tiers. */
+  private armTranslationTimeout(key: string, ms: number, isFinalJitter = false): void {
+    const entry = this.pendingTranslationRequests.get(key);
+    if (!entry) return;
+    entry.timer = setTimeout(() => {
+      const e = this.pendingTranslationRequests.get(key);
+      if (!e) return;
+      if (e.claimSeen && !e.grantedGrace) {
+        e.grantedGrace = true;
+        this.armTranslationTimeout(key, TRANSLATION_CLAIM_GRACE_MS);
+        return;
+      }
+      if (!isFinalJitter) {
+        const [lo, hi] = TRANSLATION_FINAL_JITTER_RANGE_MS;
+        this.armTranslationTimeout(key, lo + Math.random() * (hi - lo), true);
+        return;
+      }
+      this.finalizeTranslationRequest(key, null);
+    }, ms);
+  }
+
+  private finalizeTranslationRequest(key: string, result: Translation | null): void {
+    const entry = this.pendingTranslationRequests.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    this.pendingTranslationRequests.delete(key);
+    entry.waiters.forEach((w) => w(result));
   }
 
   /** Signs, stores locally, and shares a freshly machine-translated body —
@@ -504,6 +573,13 @@ class ShoutboxCore {
         await this.ingestTranslation(msg.translation);
         return;
       }
+
+      case 'translation_claim': {
+        const key = `${msg.contentId}::${msg.targetLang}`;
+        const entry = this.pendingTranslationRequests.get(key);
+        if (entry) entry.claimSeen = true; // consulted next time this key's timer fires — see armTranslationTimeout
+        return;
+      }
     }
   }
 
@@ -560,13 +636,7 @@ class ShoutboxCore {
     if (!ok) { warn('dropped translation with invalid session signature from', t.translator); return; }
 
     await TranslationStore.put(t);
-
-    const pending = this.pendingTranslationRequests.get(key);
-    if (pending) {
-      clearTimeout(pending.timer);
-      this.pendingTranslationRequests.delete(key);
-      pending.waiters.forEach((w) => w(t));
-    }
+    this.finalizeTranslationRequest(key, t);
   }
 }
 

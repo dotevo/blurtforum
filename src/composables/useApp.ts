@@ -1451,7 +1451,7 @@ export function useApp() {
   } = useProfile(rpc.dataClient.value, globalProps, view, normalizePost, {
     canBanUser: () => canBanUser.value,
     canMute: () => canMute.value
-  });
+  }, syncUrl);
 
   // COAL data loads asynchronously (network fetch or even a cached-but-first-microtask read),
   // so anything already normalized before it resolves was baked with isCoal=false and never
