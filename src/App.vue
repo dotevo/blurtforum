@@ -49,6 +49,7 @@ const ImageLightbox = defineAsyncComponent(() => import('./components/modals/Ima
 const WalletModal = defineAsyncComponent(() => import('./components/modals/WalletModal.vue'));
 const WalletAuthModal = defineAsyncComponent(() => import('./components/modals/WalletAuthModal.vue'));
 const RpcModal = defineAsyncComponent(() => import('./components/modals/RpcModal.vue'));
+const TranslationSettingsModal = defineAsyncComponent(() => import('./components/modals/TranslationSettingsModal.vue'));
 const SwitchAccountModal = defineAsyncComponent(() => import('./components/modals/SwitchAccountModal.vue'));
 const OldContentModal = defineAsyncComponent(() => import('./components/modals/OldContentModal.vue'));
 const PrivacyPolicyModal = defineAsyncComponent(() => import('./components/modals/PrivacyPolicyModal.vue'));
@@ -58,6 +59,7 @@ const PrivacyPolicyModal = defineAsyncComponent(() => import('./components/modal
 import CookieConsentBanner from './components/CookieConsentBanner.vue';
 import { consent as cookieConsent, acceptCookies, rejectCookies, resetConsent } from './modules/cookie-consent';
 import { useFloatingLayer } from './modules/floating-stack';
+import { isAccountHiddenFromViewer } from './modules/visibility';
 const showPrivacyPolicy = ref(false);
 
 const {
@@ -162,6 +164,21 @@ const {
     void openTopic(stub);
   };
 
+  // Applies the SAME moderation used for ordinary posts/comments to the
+  // attributed author of a shared translation (see
+  // components/layout/TranslatedBody.vue + modules/visibility.ts) — a
+  // translation from a site-wide-banned or community-muted account is
+  // treated as if it doesn't exist, same as their actual posts.
+  const isTranslatorHidden = (username: string): boolean =>
+    isAccountHiddenFromViewer(username, { mutedAccounts: mutedAccounts.value, canBanUser: canBanUser.value });
+
+  // Local UI-only state (not business logic, so it lives here rather than
+  // in useApp.ts) for the translation-settings modal, opened from the same
+  // place the RPC gear button lives (see SettingsSelectors.vue) in all
+  // three places that bar appears — desktop LangBar, the mobile drawer,
+  // and the cinema-mode rail.
+  const translationSettingsOpen = ref(false);
+
   watch([view, activeForum, activeTopic, () => profileUser.username], () => {
     if (view.value === 'forum' && activeForum.value) {
       setPageTitle(activeForum.value.name);
@@ -211,6 +228,7 @@ const {
     @update:expanded="mobileActivityExpanded = $event"
     @update:activity-tab="activityTab = $event"
     @update:rpc-menu-open="rpcMenuOpen = $event"
+    @open-translation-settings="translationSettingsOpen = true"
     @open-activity="openActivity"
     @open-login-modal="openLoginModal"
     @open-notif-modal="openNotifModal"
@@ -232,6 +250,7 @@ const {
     :cinemaMode="cinemaMode"
     @set-theme="setTheme" @set-lang="(v: string) => setLang(v as 'en'|'pl'|'eo')"
     @update:rpc-menu-open="rpcMenuOpen = $event"
+    @open-translation-settings="translationSettingsOpen = true"
     @set-cinema-mode="setCinemaMode"
   />
 
@@ -248,6 +267,12 @@ const {
     @update:rpc-data-custom="rpcDataCustom = $event"
     @update:rpc-forum-custom="rpcForumCustom = $event"
     @apply-rpc-settings="applyRpcSettings"
+  />
+
+  <TranslationSettingsModal
+    :show="translationSettingsOpen"
+    :t="t"
+    @close="translationSettingsOpen = false"
   />
 
   <SiteHeader
@@ -306,6 +331,7 @@ const {
     :community-id="config.communityAccount"
     :current-post="view === 'topic' && activeTopic ? { author: activeTopic.author, permlink: activeTopic.permlink, title: activeTopic.title } : null"
     :open-post-ref="openPostRef"
+    :open-profile-ref="openProfile"
     :user-subscriptions="userSubscriptions"
   />
 
@@ -361,6 +387,7 @@ const {
     @set-theme="setTheme"
     @set-lang="(v: string) => setLang(v as 'en'|'pl'|'eo')"
     @update:rpc-menu-open="rpcMenuOpen = $event"
+    @open-translation-settings="translationSettingsOpen = true"
     @set-cinema-mode="setCinemaMode"
     @close-payout-modal="payoutModal.show = false"
   />
@@ -581,6 +608,7 @@ const {
         :wait-and-reload="waitAndReload"
         :check-lock="checkLock"
         :navigate-to-path="navigateToPath"
+        :is-translator-hidden="isTranslatorHidden"
         @open-profile="openProfile"
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"

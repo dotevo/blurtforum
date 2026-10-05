@@ -20,6 +20,7 @@ const emit = defineEmits<{
   'setTheme': [value: string];
   'setLang': [value: string];
   'openRpc': [];
+  'openTranslationSettings': [];
   'setCinemaMode': [value: boolean];
 }>();
 
@@ -145,6 +146,9 @@ onBeforeUnmount(() => {
     <button class="lang-btn rpc-btn" @click="emit('openRpc')" :title="t('rpcSettings')">
       <i class="fa-solid fa-gear"></i> <span>{{ t('rpc') }}</span>
     </button>
+    <button class="lang-btn rpc-btn" @click="emit('openTranslationSettings')" :title="t('translationSettings') || 'Translation settings'">
+      <i class="fa-solid fa-globe"></i> <span>{{ t('translationSettings') || 'Translation' }}</span>
+    </button>
     <button v-if="!isTVPlatform" class="lang-btn rpc-btn cinema-btn" :class="{ active: cinemaMode }"
             @click="emit('setCinemaMode', !cinemaMode)" :title="t('cinemaMode') || 'Cinema mode'">
       <i class="fa-solid fa-film"></i> <span>{{ t('cinemaMode') || 'Cinema' }}</span>
@@ -201,6 +205,9 @@ onBeforeUnmount(() => {
       </template>
       <button class="lang-btn rpc-btn" @click="emit('openRpc')" :title="t('rpcSettings')">
         <i class="fa-solid fa-gear"></i> <span v-if="!mobile">{{ t('rpc') }}</span>
+      </button>
+      <button class="lang-btn rpc-btn" @click="emit('openTranslationSettings')" :title="t('translationSettings') || 'Translation settings'">
+        <i class="fa-solid fa-globe"></i> <span v-if="!mobile">{{ t('translationSettings') || 'Translation' }}</span>
       </button>
       <button v-if="!isTVPlatform" class="lang-btn rpc-btn cinema-btn" :class="{ active: cinemaMode }"
               @click="emit('setCinemaMode', !cinemaMode)" :title="t('cinemaMode') || 'Cinema mode'">

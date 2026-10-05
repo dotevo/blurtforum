@@ -18,7 +18,7 @@ import { ref, watch } from 'vue';
 import PostReplyThread from '../../post/PostReplyThread.vue';
 import { Blockchain } from '../../blockchain';
 import { PostProcessor } from '../../post-processor';
-import { isHiddenFromViewer } from '../../visibility';
+import { isHiddenFromViewer, isAccountHiddenFromViewer } from '../../visibility';
 import type { MediaTrack, BFPlayerAPI } from '../../player/types';
 import type { Post, AuthUser } from '../../../types';
 import type { CoalEntry } from '../../coal-list';
@@ -161,6 +161,7 @@ const emptyReplyForm = { body: '', loading: false, error: '', success: '', benef
         :config="config"
         :navigateToPath="navigateToPath"
         :compact="true"
+        :isTranslatorHidden="(u: string) => isAccountHiddenFromViewer(u, { mutedAccounts: getMutedAccounts(), canBanUser: getCanBanUser() })"
         @open-profile="openProfile"
         @open-payout-modal="openPayoutModal"
         @submit-vote="submitVote"

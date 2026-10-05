@@ -54,6 +54,7 @@ import type { AuthUser } from '../../../types';
 import { EMOJI_LIST } from '../emoji';
 import { parseMessageSegments } from '../render';
 import { useFloatingLayer } from '../../floating-stack';
+import { useTitle } from '../../../composables/useTitle';
 
 const props = defineProps<{
   auth: { user: AuthUser | null };
@@ -72,6 +73,10 @@ const props = defineProps<{
   /** Navigates the host app to a post referenced in chat or in the Online
    * tab. Omit to render post references as plain (non-clickable) text. */
   openPostRef?: (author: string, permlink: string) => void;
+  /** Navigates the host app to a user's profile — used when a chat
+   * username is clicked. Omit to render usernames as plain (non-clickable)
+   * text, same convention as openPostRef above. */
+  openProfileRef?: (username: string) => void;
   /** Other Blurt communities the logged-in user subscribes to (same list
    * useGlobalActivity.ts's sidebar uses) — NOT this forum's own community
    * (that's `communityId` above, always its own dedicated tab). The
@@ -139,10 +144,18 @@ function markScopeRead(s: ShoutboxScope): void {
   lastRead[s] = msgs.length ? msgs[msgs.length - 1].ts : Date.now();
   persistLastRead();
 }
+// Own messages never count as "unread" — sending something and then
+// switching tabs used to flag the tab you just posted in, because the
+// filter below only compared timestamps against the read marker and had
+// no notion of "but I'm the one who wrote this." You've necessarily
+// already seen your own message (you just typed it), so it's excluded
+// from both the count AND from ever advancing `lastRead` on its own.
+const ownUsername = computed(() => props.auth.user?.username ?? null);
+
 const unreadCount = computed(() => {
   if (expanded.value) return 0;
   const cutoff = lastRead[scope.value] ?? 0;
-  return messages.value.filter((m) => m.ts > cutoff).length;
+  return messages.value.filter((m) => m.ts > cutoff && m.author !== ownUsername.value).length;
 });
 /** Same as `unreadCount` above but for an arbitrary scope, not just the
  *  currently-selected one — powers the per-tab badges (Global/Community/
@@ -152,8 +165,49 @@ const unreadCount = computed(() => {
 function unreadForScope(s: ShoutboxScope): number {
   if (expanded.value && scope.value === s) return 0; // currently open and being looked at
   const cutoff = lastRead[s] ?? 0;
-  return Shoutbox.messagesFor(s).filter((m) => m.ts > cutoff).length;
+  return Shoutbox.messagesFor(s).filter((m) => m.ts > cutoff && m.author !== ownUsername.value).length;
 }
+
+// ─── @mention of the logged-in user's own username ──────────────────────
+// Mirrors the existing activity-feed notification (useGlobalActivity.ts's
+// '⚡' via useTitle's setTitleIcon) so a chat mention gets the same
+// can't-miss page-title/favicon treatment, under its own icon key so the
+// two don't clobber each other. Scans every scope we're tracking (not
+// just the active tab) so a mention in a community tab you're not
+// currently looking at still flashes the title.
+const { setTitleIcon } = useTitle();
+function escapeRegExp(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function mentionsUser(body: string, username: string): boolean {
+  return new RegExp(`@${escapeRegExp(username)}\\b`, 'i').test(body);
+}
+const hasUnreadMention = computed(() => {
+  const me = ownUsername.value;
+  if (!me) return false;
+  for (const s of Object.keys(Shoutbox.messages)) {
+    const cutoff = lastRead[s] ?? 0;
+    for (const m of Shoutbox.messagesFor(s as ShoutboxScope)) {
+      if (m.ts <= cutoff) continue;
+      if (m.author === me) continue;
+      if (mentionsUser(m.body, me)) return true;
+    }
+  }
+  return false;
+});
+watch(hasUnreadMention, (v) => setTitleIcon('shoutbox-mention', v ? '🔔' : null), { immediate: true });
+onBeforeUnmount(() => setTitleIcon('shoutbox-mention', null));
+
+// Collapsed pill blinks whenever there's something unread waiting —
+// either an ordinary unread count in any scope we're tracking (not just
+// the active tab, so a message in a background community tab still makes
+// the pill blink), or a mention — so it's noticeable even without opening
+// the panel (a plain badge number is easy to miss at a glance on a small
+// corner pill). Iterates Shoutbox.messages' own keys rather than the
+// `extraCommunityScopes` computed declared further below, so this doesn't
+// care about declaration order in this file.
+const hasAnyUnread = computed(() => {
+  if (hasUnreadMention.value) return true;
+  return Object.keys(Shoutbox.messages).some((s) => unreadForScope(s as ShoutboxScope) > 0);
+});
 
 // ─── Auto-scroll to the newest message ──────────────────────────────────
 // `.shoutbox-messages` only exists in the DOM while expanded (see
@@ -201,6 +255,12 @@ const extraCommunityScopes = computed<ShoutboxScope[]>(() =>
 const visibleExtraScopes = computed<ShoutboxScope[]>(() =>
   extraCommunityScopes.value.filter((s) => Shoutbox.messagesFor(s).length > 0)
 );
+// Split so unread tabs stay prominent (before the Online tab) and read
+// ones get pushed after it, out of the way — with many subscribed
+// communities the tab bar can get long, so this keeps the ones that
+// actually need attention from scrolling out of view behind the rest.
+const extraScopesWithUnread = computed<ShoutboxScope[]>(() => visibleExtraScopes.value.filter((s) => unreadForScope(s) > 0));
+const extraScopesWithoutUnread = computed<ShoutboxScope[]>(() => visibleExtraScopes.value.filter((s) => unreadForScope(s) === 0));
 function extraScopeTitle(s: ShoutboxScope): string {
   const account = s.slice('community:'.length);
   return props.userSubscriptions?.find((sub) => sub.account === account)?.title ?? account;
@@ -318,12 +378,24 @@ async function submit(): Promise<void> {
   if (ok) draft.value = '';
 }
 
+// Time-only was unreadable for anything more than a few hours old — no
+// way to tell "yesterday" from "last week" apart. Still just the time for
+// anything from today (the common case, where a date would be pure
+// noise); anything older gets a short date in front of it.
 function fmtTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const d = new Date(ts);
+  const now = new Date();
+  const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return timePart;
+  return `${d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined })} ${timePart}`;
 }
 
 function openPost(author: string, permlink: string): void {
   props.openPostRef?.(author, permlink);
+}
+
+function openProfileFor(username: string): void {
+  props.openProfileRef?.(username);
 }
 
 function scopeLabel(s: ShoutboxScope): string {
@@ -363,7 +435,7 @@ function shareCurrentPost(): void {
 
 <template>
   <div ref="dockEl" class="shoutbox-dock" :class="{ 'shoutbox-dock--expanded': expanded }" :style="{ bottom: dockBottomPx + 'px', opacity: settled ? 1 : 0, transition: 'opacity 0.15s ease-in, bottom 0.2s ease-in-out' }">
-    <button type="button" class="shoutbox-pill" @click="toggleExpanded">
+    <button type="button" class="shoutbox-pill" :class="{ 'shoutbox-pill--blink': !expanded && hasAnyUnread }" @click="toggleExpanded">
       <span class="dot" :class="status"></span>
       <span class="shoutbox-pill-label">Chat</span>
       <span class="shoutbox-pill-count">{{ onlineCount }} online</span>
@@ -386,7 +458,7 @@ function shareCurrentPost(): void {
             Community<span v-if="unreadForScope(communityScope) > 0" class="shoutbox-tab-badge">{{ unreadForScope(communityScope) }}</span>
           </button>
           <button
-            v-for="s in visibleExtraScopes"
+            v-for="s in extraScopesWithUnread"
             :key="s"
             type="button"
             :class="{ active: activeTab === s }"
@@ -398,13 +470,30 @@ function shareCurrentPost(): void {
           <button type="button" :class="{ active: activeTab === 'online' }" @click="activeTab = 'online'">
             Online ({{ totalOnlineCount }})
           </button>
+          <button
+            v-for="s in extraScopesWithoutUnread"
+            :key="s"
+            type="button"
+            :class="{ active: activeTab === s }"
+            @click="activeTab = s"
+            :title="extraScopeTitle(s)"
+          >
+            {{ extraScopeTitle(s) }}
+          </button>
         </div>
       </div>
 
       <div v-if="activeTab === 'online'" class="shoutbox-online-list">
         <div v-if="!onlinePeers.length" class="shoutbox-empty">Nobody else around right now.</div>
         <div v-for="p in onlinePeers" :key="p.peerId" class="online-row">
-          <span class="online-name">{{ p.username ?? 'anonymous' }}</span>
+          <a
+            v-if="p.username"
+            href="#"
+            class="online-name"
+            :class="{ 'online-name--inert': !openProfileRef }"
+            @click.prevent="openProfileFor(p.username)"
+          >{{ p.username }}</a>
+          <span v-else class="online-name">anonymous</span>
           <span class="online-scope">{{ scopeLabel(p.scope) }}</span>
           <a
             v-if="p.viewingPost"
@@ -422,7 +511,12 @@ function shareCurrentPost(): void {
         <div class="shoutbox-messages" ref="messagesEl">
           <div v-if="!messages.length" class="shoutbox-empty">No messages yet — say hi.</div>
           <div v-for="m in messages" :key="m.id" class="shoutbox-msg">
-            <span class="author">{{ m.author }}</span>
+            <a
+              href="#"
+              class="author"
+              :class="{ 'author--inert': !openProfileRef }"
+              @click.prevent="openProfileFor(m.author)"
+            >{{ m.author }}</a>
             <span class="time">{{ fmtTime(m.ts) }}</span>
             <div class="body">
               <template v-for="(seg, idx) in parseMessageSegments(m.body)" :key="idx">
@@ -520,6 +614,14 @@ function shareCurrentPost(): void {
   line-height: 1.5;
 }
 .shoutbox-pill-chevron { opacity: 0.7; }
+/* Noticeable-but-not-annoying pulse so the collapsed pill draws the eye
+   even when something arrives while it's closed, not just a static badge
+   number that's easy to miss on a small corner element. */
+.shoutbox-pill--blink { animation: shoutbox-pill-pulse 1.4s ease-in-out infinite; }
+@keyframes shoutbox-pill-pulse {
+  0%, 100% { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15); }
+  50% { box-shadow: 0 2px 14px 3px color-mix(in srgb, var(--accent, #e0393e) 65%, transparent); }
+}
 
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-soft); flex-shrink: 0; }
 .dot.connected { background: var(--state-active); }
@@ -547,7 +649,20 @@ function shareCurrentPost(): void {
   border-bottom: 1px solid var(--tab-border);
   background: var(--tab-bg);
 }
-.shoutbox-tabs { display: flex; }
+/* Scrolls horizontally once there are more community tabs than fit —
+   `min-width: 0` is needed because a flex item's default min-width is
+   `auto` (its content size), which otherwise silently defeats
+   `overflow-x: auto` by never letting the row shrink below the width of
+   all tabs laid end to end. Scrollbar hidden (both engines) since this is
+   a small chrome-less chat header, not a place a visible scrollbar reads
+   as useful rather than as clutter. */
+.shoutbox-tabs {
+  display: flex;
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: none;
+}
+.shoutbox-tabs::-webkit-scrollbar { height: 0; }
 .shoutbox-tabs button {
   background: none;
   border: none;
@@ -557,6 +672,7 @@ function shareCurrentPost(): void {
   cursor: pointer;
   font-size: 0.8rem;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .shoutbox-tabs button.active {
   background: var(--tab-active-bg);
@@ -580,7 +696,10 @@ function shareCurrentPost(): void {
 .shoutbox-messages { flex: 1; overflow-y: auto; padding: 8px 10px; color: var(--card-about-text); }
 .shoutbox-empty { opacity: 0.6; color: var(--card-muted-text); text-align: center; padding: 16px 0; }
 .shoutbox-msg { margin-bottom: 6px; }
-.shoutbox-msg .author { font-weight: 600; color: var(--brand); }
+.shoutbox-msg .author { font-weight: 600; color: var(--brand); text-decoration: none; cursor: pointer; }
+.shoutbox-msg .author:hover { text-decoration: underline; }
+.shoutbox-msg .author--inert { cursor: default; }
+.shoutbox-msg .author--inert:hover { text-decoration: none; }
 .shoutbox-msg .time { opacity: 0.7; color: var(--card-muted-text); font-size: 0.7rem; margin-left: 6px; }
 .shoutbox-msg .body { white-space: pre-wrap; word-break: break-word; }
 .post-ref {
@@ -602,7 +721,10 @@ function shareCurrentPost(): void {
   flex-wrap: wrap;
 }
 .online-row:last-child { border-bottom: none; }
-.online-name { font-weight: 600; color: var(--brand); }
+.online-name { font-weight: 600; color: var(--brand); text-decoration: none; cursor: pointer; }
+.online-name:hover { text-decoration: underline; }
+.online-name--inert { cursor: default; }
+.online-name--inert:hover { text-decoration: none; }
 .online-scope {
   font-size: 0.7rem;
   color: var(--card-muted-text);

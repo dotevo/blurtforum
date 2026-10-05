@@ -98,3 +98,71 @@ export async function verifyChatBody(
     return false;
   }
 }
+
+// ─── Translations ───────────────────────────────────────────────────────
+// Same signing scheme as chat messages, but under its own payload prefix
+// (`shoutbox:translation:v1:` vs `shoutbox:chat:v1:`) and its own replay
+// cache, so a signature produced for one domain can never be mistaken for
+// — or replayed as — a valid signature in the other, even though both are
+// ultimately backed by the same per-account session key/certificate.
+const seenTranslationNonces = new Set<string>(); // `${translator}:${nonce}`
+
+function translationPayload(contentId: string, targetLang: string, engine: string, translator: string, body: string, ts: number, nonce: string): string {
+  return `shoutbox:translation:v1:${contentId}:${targetLang}:${engine}:${translator}:${ts}:${nonce}:${body}`;
+}
+
+export async function signTranslationBody(
+  sessionPrivateKey: CryptoKey,
+  contentId: string,
+  targetLang: string,
+  engine: string,
+  translator: string,
+  body: string,
+  nonce: string
+): Promise<SignedChatFields> {
+  const ts = Date.now();
+  const payload = translationPayload(contentId, targetLang, engine, translator, body, ts, nonce);
+  const sigBuf = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, sessionPrivateKey, new TextEncoder().encode(payload));
+  return { ts, sig: b64FromBuffer(sigBuf) };
+}
+
+export async function verifyTranslationBody(
+  sessionPublicKey: CryptoKey,
+  contentId: string,
+  targetLang: string,
+  engine: string,
+  translator: string,
+  body: string,
+  ts: number,
+  nonce: string,
+  sigB64: string,
+  certWindowStart: number,
+  certWindowEnd: number
+): Promise<boolean> {
+  if (ts < certWindowStart || ts > certWindowEnd) {
+    warn('rejecting translation from', translator, '— timestamp outside its certificate\'s validity window');
+    return false;
+  }
+
+  const seenKey = `${translator}:${nonce}`;
+  if (seenTranslationNonces.has(seenKey)) {
+    warn('rejecting translation from', translator, '— nonce already seen (replay)');
+    return false;
+  }
+
+  try {
+    const payload = translationPayload(contentId, targetLang, engine, translator, body, ts, nonce);
+    const ok = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      sessionPublicKey,
+      bufferFromB64(sigB64),
+      new TextEncoder().encode(payload)
+    );
+    if (ok) seenTranslationNonces.add(seenKey);
+    else warn('rejecting translation from', translator, '— session-key signature does not verify');
+    return ok;
+  } catch (e) {
+    warn('translation verification threw for', translator, e);
+    return false;
+  }
+}

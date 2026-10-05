@@ -17,6 +17,7 @@ withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:rpcMenuOpen': [value: boolean];
+  'openTranslationSettings': [];
   'setTheme': [value: string];
   'setLang': [value: string];
   'setCinemaMode': [value: boolean];
@@ -37,6 +38,7 @@ const emit = defineEmits<{
     @set-theme="emit('setTheme', $event)"
     @set-lang="emit('setLang', $event)"
     @open-rpc="emit('update:rpcMenuOpen', true)"
+    @open-translation-settings="emit('openTranslationSettings')"
     @set-cinema-mode="emit('setCinemaMode', $event)"
   />
 </div>

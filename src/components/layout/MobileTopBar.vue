@@ -38,6 +38,7 @@ const emit = defineEmits<{
   'update:expanded': [value: boolean];
   'update:activityTab': [value: string];
   'update:rpcMenuOpen': [value: boolean];
+  openTranslationSettings: [];
   openActivity: [act: ActivityItem];
   openLoginModal: [];
   openNotifModal: [];
@@ -113,6 +114,7 @@ const getLatestActivities = () => {
           @set-theme="emit('setTheme', $event)"
           @set-lang="emit('setLang', $event)"
           @update:rpc-menu-open="emit('update:rpcMenuOpen', $event)"
+          @open-translation-settings="emit('openTranslationSettings')"
           @set-cinema-mode="emit('setCinemaMode', $event)"
         />
         <div class="mtb-auth-actions" v-if="auth.user">

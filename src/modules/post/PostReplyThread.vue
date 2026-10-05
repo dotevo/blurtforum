@@ -16,6 +16,7 @@ import ForumMedia from '../player_blurt/components/ForumMedia.ce.vue';
 import PayoutBadge from '../../components/layout/PayoutBadge.vue';
 import UserAvatar from '../../components/layout/UserAvatar.vue';
 import PostEditor from '../../components/layout/PostEditor.vue';
+import TranslatedBody from '../../components/layout/TranslatedBody.vue';
 import type { Post, AuthUser } from '../../types';
 
 const props = defineProps<{
@@ -52,6 +53,12 @@ const props = defineProps<{
    *  forces the mobile-style compact header even on wide viewports, smaller
    *  type/spacing. Same markup/data everywhere, just a CSS-level variant. */
   compact?: boolean;
+  /** See components/layout/TranslatedBody.vue — applies the same
+   *  moderation used for ordinary posts/comments to a shared
+   *  translation's attributed author. Optional: omit to skip
+   *  translator-level moderation in contexts with no moderation data in
+   *  scope (global bans still apply regardless). */
+  isTranslatorHidden?: (username: string) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -228,9 +235,9 @@ const handleLinkClick = (event: MouseEvent) => {
                 :permlink="r.permlink"
                 :t="t"
               >
-                <div class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
+                <TranslatedBody :post="r" :render-m-d="renderMD" :handle-link-click="handleLinkClick" :t="t" :is-translator-hidden="isTranslatorHidden" />
               </ForumMedia>
-              <div v-else class="post-body" v-html="renderMD(r.body, r)" @click="handleLinkClick"></div>
+              <TranslatedBody v-else :post="r" :render-m-d="renderMD" :handle-link-click="handleLinkClick" :t="t" :is-translator-hidden="isTranslatorHidden" />
 
               </div>
               <!-- COAL warning overlay: content is blurred until the reader explicitly acknowledges it -

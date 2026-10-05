@@ -1,12 +1,14 @@
 import { reactive } from 'vue';
 import type { AuthUser } from '../../types';
-import type { CertificateBroadcast, ChatBroadcast, ChatMessage, HistoryRequest, HistoryResponse, PresenceUpdate, ShoutboxScope, WireMessage } from './types';
+import type { CertificateBroadcast, ChatBroadcast, ChatMessage, HistoryRequest, HistoryResponse, PresenceUpdate, ShoutboxScope, Translation, TranslationBroadcast, TranslationRequest, WireMessage } from './types';
 import type { SignalingTransport, TransportStatus } from './transport/types';
 import { PeerJsTransport } from './transport/peerjs-transport';
 import { ShoutboxStore } from './store';
-import { signChatBody, verifyChatBody } from './identity';
+import { signChatBody, verifyChatBody, signTranslationBody, verifyTranslationBody } from './identity';
 import { getOrCreateSession, importSessionPublicKey, verifyCertificate } from './session';
 import { expandEmojiShortcodes } from './emoji';
+import { TranslationStore } from './translation-store';
+import type { TranslationEngine } from './translation-providers';
 
 /**
  * modules/shoutbox/shoutbox.ts
@@ -50,6 +52,12 @@ const HISTORY_RESYNC_MS = 45_000;
 // already have is skipped by ingestChatMessage's id check before it even
 // re-verifies a signature.
 const HISTORY_RESYNC_OVERLAP_MS = 2 * 60_000;
+// How long requestTranslation() waits for some peer to answer with an
+// already-cached translation before the caller falls back to running the
+// text through a provider itself. Short enough that a reader isn't stuck
+// staring at a spinner if nobody has it, long enough for a same-room peer
+// (which, per the star topology, is at most one relay hop away) to reply.
+const TRANSLATION_REQUEST_TIMEOUT_MS = 3_000;
 
 function makeNonce(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -90,6 +98,12 @@ class ShoutboxCore {
    *  currentScope wherever history is requested (watchedScopes()), so
    *  callers don't need to re-include those themselves. */
   private extraScopes: ShoutboxScope[] = [];
+  /** Keyed by `${contentId}::${targetLang}` — resolved by ingestTranslation()
+   *  the moment a verified answer arrives, or by its own timeout, whichever
+   *  comes first. Deduped: a second requestTranslation() call for the same
+   *  key while one is already in flight just gets the same promise, rather
+   *  than re-broadcasting a redundant request. */
+  private pendingTranslationRequests = new Map<string, { waiters: Array<(t: Translation | null) => void>; timer: ReturnType<typeof setTimeout> }>();
 
   readonly status = reactive<{ value: TransportStatus }>({ value: 'disconnected' });
   readonly messages = reactive<Record<string, ChatMessage[]>>({});
@@ -277,6 +291,64 @@ class ShoutboxCore {
     }
   }
 
+  /** Asks the room "does anyone already have a translation of this
+   *  content into this language?" and waits briefly for a verified
+   *  answer. Resolves `null` on timeout or if nothing verifiable turns
+   *  up — callers (see useTranslation.ts) treat that as "nobody has it,
+   *  translate it yourself." Pure network lookup: callers are expected to
+   *  have already checked their own local cache (TranslationStore) first. */
+  requestTranslation(contentId: string, targetLang: string): Promise<Translation | null> {
+    const key = `${contentId}::${targetLang}`;
+    const existing = this.pendingTranslationRequests.get(key);
+    if (existing) return new Promise((resolve) => existing.waiters.push(resolve));
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const entry = this.pendingTranslationRequests.get(key);
+        this.pendingTranslationRequests.delete(key);
+        entry?.waiters.forEach((w) => w(null));
+      }, TRANSLATION_REQUEST_TIMEOUT_MS);
+      this.pendingTranslationRequests.set(key, { waiters: [resolve], timer });
+      const req: TranslationRequest = { kind: 'translation_request', contentId, targetLang };
+      this.transport.broadcast(req);
+    });
+  }
+
+  /** Signs, stores locally, and shares a freshly machine-translated body —
+   *  same requires-login + checkLock dance as send() (see that method's
+   *  header comment), because a translation is just as much an
+   *  attributed, moderatable piece of content as a chat message: an
+   *  unsigned "translation" would be a trivial way to inject altered text
+   *  under someone else's apparent words. Returns false (and shares
+   *  nothing) if not logged in — callers still may display the text
+   *  locally for this viewer only in that case, see useTranslation.ts. */
+  async publishTranslation(contentId: string, targetLang: string, engine: TranslationEngine, body: string): Promise<boolean> {
+    if (!this.deps) return false;
+    const user = this.deps.auth.user;
+    if (!user) { warn('cannot publish translation — not logged in'); return false; }
+
+    return new Promise<boolean>((resolve) => {
+      if (this.deps!.checkLock(() => { void this.publishTranslation(contentId, targetLang, engine, body).then(resolve); })) return; // PIN modal now showing
+
+      (async () => {
+        const session = await getOrCreateSession(this.deps!.auth);
+        if (!session) { warn('cannot publish translation — could not establish a signed session'); resolve(false); return; }
+
+        const translator = user.username;
+        const nonce = makeNonce();
+        const { ts, sig } = await signTranslationBody(session.privateKey, contentId, targetLang, engine, translator, body, nonce);
+        const translation: Translation = { id: nonce, contentId, targetLang, engine, translator, body, ts, sig, certId: session.cert.id };
+
+        ShoutboxStore.addCertificate(session.cert);
+        await TranslationStore.put(translation); // cache our own result locally too, same as a chat message's optimistic local echo
+
+        this.transport.broadcast({ kind: 'certificate', cert: session.cert } as CertificateBroadcast);
+        this.transport.broadcast({ kind: 'translation', translation } as TranslationBroadcast);
+        resolve(true);
+      })();
+    });
+  }
+
   // ─── internals ──────────────────────────────────────────────────────────
 
   private onConnected(): void {
@@ -415,6 +487,23 @@ class ShoutboxCore {
         for (const m of msg.messages) await this.ingestChatMessage(m);
         return;
       }
+
+      case 'translation_request': {
+        // Answer only if we actually have this exact (content, language)
+        // cached locally — unlike history_request, there's no "give me
+        // everything newer than X" fan-out here, just a direct lookup.
+        const cached = await TranslationStore.get(msg.contentId, msg.targetLang);
+        if (!cached) return;
+        const certs = ShoutboxStore.getCertificates(new Set([cached.certId]));
+        for (const c of certs) this.transport.broadcast({ kind: 'certificate', cert: c } as CertificateBroadcast);
+        this.transport.broadcast({ kind: 'translation', translation: cached } as TranslationBroadcast);
+        return;
+      }
+
+      case 'translation': {
+        await this.ingestTranslation(msg.translation);
+        return;
+      }
     }
   }
 
@@ -440,6 +529,44 @@ class ShoutboxCore {
     if (!ok) { warn('dropped message with invalid session signature from', m.author); return; }
 
     this.applyMessage(m.scope, m);
+  }
+
+  /** Same verification chain as ingestChatMessage (certificate's
+   *  posting-key signature, then the session-key signature over the
+   *  translation-specific payload domain, then the certificate's
+   *  validity window) — a translation is attributed and moderatable
+   *  exactly like a chat message is, see this module's header comment.
+   *  Resolves any requestTranslation() callers waiting on this exact
+   *  (content, language) key ONLY on a successful verification; a failed
+   *  one is silently dropped and the waiter just falls through to its own
+   *  timeout, in case a different, legitimate peer still answers. */
+  private async ingestTranslation(t: Translation): Promise<void> {
+    if (!this.deps) return;
+    const key = `${t.contentId}::${t.targetLang}`;
+
+    const already = await TranslationStore.get(t.contentId, t.targetLang);
+    if (already && already.id === t.id) return;
+
+    const cert = ShoutboxStore.getCertificate(t.certId);
+    if (!cert) { warn('dropping translation from', t.translator, '— certificate', t.certId, 'not known locally yet'); return; }
+
+    const certOk = await verifyCertificate(this.deps.getClient(), cert);
+    if (!certOk) { warn('dropping translation from', t.translator, '— its certificate does not verify'); return; }
+
+    if (cert.account !== t.translator) { warn('dropping translation — certificate account does not match claimed translator'); return; }
+
+    const sessionPubKey = await importSessionPublicKey(cert);
+    const ok = await verifyTranslationBody(sessionPubKey, t.contentId, t.targetLang, t.engine, t.translator, t.body, t.ts, t.id, t.sig, cert.issuedAt, cert.expiresAt);
+    if (!ok) { warn('dropped translation with invalid session signature from', t.translator); return; }
+
+    await TranslationStore.put(t);
+
+    const pending = this.pendingTranslationRequests.get(key);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingTranslationRequests.delete(key);
+      pending.waiters.forEach((w) => w(t));
+    }
   }
 }
 

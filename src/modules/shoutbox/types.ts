@@ -93,4 +93,52 @@ export interface HistoryResponse {
   certificates: SessionCertificate[];
 }
 
-export type WireMessage = PresenceUpdate | ChatBroadcast | CertificateBroadcast | HistoryRequest | HistoryResponse;
+/**
+ * Machine-translated text for a post or comment, shared over the SAME
+ * P2P room chat already uses (see shoutbox.ts) rather than a second
+ * PeerJS connection — one peer runs it through MyMemory/Google once, and
+ * everyone else who looks at that content afterwards gets it for free.
+ *
+ * Signed and certificate-backed exactly like a ChatMessage (same session
+ * key, same SessionCertificate), so a translation is just as strongly
+ * attributed to a real Blurt account as a chat message is — this matters
+ * because an unattributed "translation" is a realistic way to slip
+ * fake/altered text under someone else's apparent words. The signing
+ * domain is kept separate from chat (see identity.ts's payload prefix) so
+ * a valid chat signature can never be replayed as a valid translation
+ * signature or vice versa.
+ */
+export interface Translation {
+  /** Also the signature nonce — same convention as ChatMessage.id. */
+  id: string;
+  /** `${author}:${permlink}` of the post or comment being translated. */
+  contentId: string;
+  targetLang: string;
+  engine: 'mymemory' | 'google';
+  /** Blurt account that produced (and is vouching for) this translation. */
+  translator: string;
+  body: string;
+  ts: number;
+  sig: string;
+  certId: string;
+}
+
+export interface TranslationBroadcast {
+  kind: 'translation';
+  translation: Translation;
+}
+
+export interface TranslationRequest {
+  kind: 'translation_request';
+  contentId: string;
+  targetLang: string;
+}
+
+export type WireMessage =
+  | PresenceUpdate
+  | ChatBroadcast
+  | CertificateBroadcast
+  | HistoryRequest
+  | HistoryResponse
+  | TranslationBroadcast
+  | TranslationRequest;

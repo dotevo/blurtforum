@@ -60,6 +60,7 @@ const emit = defineEmits<{
   setTheme: [value: string];
   setLang: [value: string];
   'update:rpcMenuOpen': [value: boolean];
+  openTranslationSettings: [];
   setCinemaMode: [value: boolean];
   togglePushNotifications: [];
   closePayoutModal: [];
@@ -187,6 +188,7 @@ watch(() => props.payoutModal.show, (open) => { if (open) showNotifPanel.value =
         @set-theme="emit('setTheme', $event)"
         @set-lang="emit('setLang', $event)"
         @open-rpc="emit('update:rpcMenuOpen', true)"
+        @open-translation-settings="emit('openTranslationSettings')"
         @set-cinema-mode="emit('setCinemaMode', $event)"
       />
     </div>

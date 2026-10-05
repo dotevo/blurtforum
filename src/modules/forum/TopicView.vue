@@ -8,6 +8,7 @@ import PayoutBadge from '../../components/layout/PayoutBadge.vue';
 import UserAvatar from '../../components/layout/UserAvatar.vue';
 import PostEditor from '../../components/layout/PostEditor.vue';
 import PostReplyThread from '../post/PostReplyThread.vue';
+import TranslatedBody from '../../components/layout/TranslatedBody.vue';
 import type { Post, AuthUser } from '../../types';
 
 const handleLinkClick = (event: MouseEvent) => {
@@ -78,6 +79,9 @@ const props = defineProps<{
   checkLock: (fn: any) => boolean;
   config: { communityAccount: string };
   navigateToPath: (path: string) => void;
+  /** See components/layout/TranslatedBody.vue. Optional — omit to skip
+   *  translator-level moderation (global bans still apply regardless). */
+  isTranslatorHidden?: (username: string) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -215,9 +219,9 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
                 :permlink="activeTopic.permlink"
                 :t="t"
               >
-                <div class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
+                <TranslatedBody :post="activeTopic" :render-m-d="renderMD" :handle-link-click="handleLinkClick" :t="t" :is-translator-hidden="isTranslatorHidden" />
               </ForumMedia>
-              <div v-else class="post-body" v-html="renderMD(activeTopic.body, activeTopic)" @click="handleLinkClick"></div>
+              <TranslatedBody v-else :post="activeTopic" :render-m-d="renderMD" :handle-link-click="handleLinkClick" :t="t" :is-translator-hidden="isTranslatorHidden" />
               </div>
               <!-- COAL warning overlay: content is blurred until the reader explicitly acknowledges it -
                    deliberately click-to-reveal rather than hover, since hover doesn't exist on mobile. -->
@@ -304,6 +308,7 @@ watch(() => [props.activeTopic.permlink, props.replies.length], () => {
         :isPostInCommunity="isPostInCommunity"
         :config="config"
         :navigateToPath="navigateToPath"
+        :isTranslatorHidden="isTranslatorHidden"
         @open-profile="(u) => emit('openProfile', u)"
         @open-payout-modal="(p) => emit('openPayoutModal', p)"
         @submit-vote="(p) => emit('submitVote', p)"
