@@ -21,6 +21,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useTranslation, type TranslationStatus } from '../../composables/useTranslation';
+import { isLikelySameLanguage } from '../../modules/shoutbox/language-detect';
 
 const props = defineProps<{
   post: { author: string; permlink: string; body: string } & Record<string, any>;
@@ -44,7 +45,12 @@ const showTranslation = ref(false);
 
 async function checkAndMaybeAutoShow(): Promise<void> {
   if (!prefs.enabled) return;
-  if (prefs.autoShow) {
+  // Skip the AUTOMATIC trigger (only) when the post already looks like
+  // it's in the target language — see language-detect.ts for why this is
+  // a cheap heuristic, not real detection, and why it only ever suppresses
+  // auto-show, never the manual "Translate" button below: a wrong guess
+  // here should cost nothing more than "I still had to click the button."
+  if (prefs.autoShow && !isLikelySameLanguage(props.post.body, prefs.targetLang)) {
     showTranslation.value = true;
     await ensureTranslation(contentId.value, prefs.targetLang, props.post.body, props.isTranslatorHidden);
   } else {

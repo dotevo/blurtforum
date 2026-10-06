@@ -55,6 +55,7 @@ import { EMOJI_LIST } from '../emoji';
 import { parseMessageSegments } from '../render';
 import { useFloatingLayer } from '../../floating-stack';
 import { useTitle } from '../../../composables/useTitle';
+import ScrollableTabs from '../../ui/ScrollableTabs.vue';
 
 const props = defineProps<{
   auth: { user: AuthUser | null };
@@ -255,16 +256,46 @@ const extraCommunityScopes = computed<ShoutboxScope[]>(() =>
 const visibleExtraScopes = computed<ShoutboxScope[]>(() =>
   extraCommunityScopes.value.filter((s) => Shoutbox.messagesFor(s).length > 0)
 );
-// Split so unread tabs stay prominent (before the Online tab) and read
-// ones get pushed after it, out of the way — with many subscribed
-// communities the tab bar can get long, so this keeps the ones that
-// actually need attention from scrolling out of view behind the rest.
-const extraScopesWithUnread = computed<ShoutboxScope[]>(() => visibleExtraScopes.value.filter((s) => unreadForScope(s) > 0));
-const extraScopesWithoutUnread = computed<ShoutboxScope[]>(() => visibleExtraScopes.value.filter((s) => unreadForScope(s) === 0));
 function extraScopeTitle(s: ShoutboxScope): string {
   const account = s.slice('community:'.length);
   return props.userSubscriptions?.find((sub) => sub.account === account)?.title ?? account;
 }
+
+// ─── Channel list (replaces the old flat "Global / Community / extra
+// communities / Online" tab row) ─────────────────────────────────────────
+// Fixed, Discord-like ordering (Global, then this forum's own Community,
+// then whatever else is subscribed) rather than the previous
+// unread-first sort — a sidebar of channels that keeps reshuffling itself
+// as things get read would feel wrong in a "mini Discord" layout, where
+// the whole point is a stable list you learn the position of. "Online" is
+// no longer one of these entries at all: it moved out to its own always-
+// visible header button (see `showOnline` below) per the redesign.
+interface ChannelTab { key: string; scope: ShoutboxScope; label: string; unread: number }
+const channels = computed<ChannelTab[]>(() => {
+  const list: ChannelTab[] = [
+    { key: 'global', scope: 'global', label: 'Global', unread: unreadForScope('global') },
+  ];
+  if (communityScope.value) {
+    list.push({ key: 'community', scope: communityScope.value, label: 'Community', unread: unreadForScope(communityScope.value) });
+  }
+  for (const s of visibleExtraScopes.value) {
+    list.push({ key: s, scope: s, label: extraScopeTitle(s), unread: unreadForScope(s) });
+  }
+  return list;
+});
+function selectChannel(c: ChannelTab): void {
+  showOnline.value = false;
+  activeTab.value = c.key;
+}
+
+// ─── Online-peers overlay — a toggle, not a tab ──────────────────────────
+// Previously "Online (N)" was just another entry in the tab row, which is
+// exactly what crowded it out with 7 communities' worth of tabs. Now the
+// peer count lives in its own persistent header inside the panel (always
+// visible, whichever channel is open) and clicking it reveals/hides the
+// peer list in place of the message list — the channel rail/strip stays
+// visible and untouched either way.
+const showOnline = ref(false);
 
 watch(
   extraCommunityScopes,
@@ -349,14 +380,15 @@ watch(communityScope, (s) => { if (!s && activeTab.value === 'community') active
 // for the currently-selected scope only, same as `messages` itself.
 watch(() => messages.value.length, () => { if (expanded.value) scrollToBottom(); });
 
-// Returning from the "Online" tab (or any tab switch that lands on a chat
-// list) has to scroll too. The Online tab REPLACES the message container
-// (v-if / v-else in the template), so coming back mounts a brand-new
-// `.shoutbox-messages` element with scrollTop = 0 — and `watch(scope)`
-// above can't catch it, because `scope` doesn't change for that trip
-// (Global → Online → Global stays 'global' the whole time). Watching the
-// tab itself is what actually matches what's being remounted.
-watch(activeTab, (tab) => { if (expanded.value && tab !== 'online') scrollToBottom(); });
+// Closing the online-peers overlay (or any channel switch that lands back
+// on a chat list) has to scroll too. The overlay REPLACES the message
+// container (v-if / v-else in the template), so coming back mounts a
+// brand-new `.shoutbox-messages` element with scrollTop = 0 — and
+// `watch(scope)` above can't catch it, because `scope` doesn't change for
+// that trip (Global → online overlay → Global stays 'global' the whole
+// time). Watching the overlay flag itself is what actually matches what's
+// being remounted.
+watch(showOnline, (v) => { if (expanded.value && !v) scrollToBottom(); });
 
 
 // Tell the room what we're currently reading — see this file's header
@@ -444,134 +476,141 @@ function shareCurrentPost(): void {
     </button>
 
     <div v-if="expanded" class="shoutbox">
-      <div class="shoutbox-header">
-        <div class="shoutbox-tabs">
-          <button type="button" :class="{ active: activeTab === 'global' }" @click="activeTab = 'global'">
-            Global<span v-if="unreadForScope('global') > 0" class="shoutbox-tab-badge">{{ unreadForScope('global') }}</span>
-          </button>
+      <div class="shoutbox-body">
+        <!-- Desktop: "mini Discord" vertical channel rail -->
+        <div class="channel-rail hide-mobile">
           <button
-            v-if="communityScope"
+            v-for="c in channels"
+            :key="c.key"
             type="button"
-            :class="{ active: activeTab === 'community' }"
-            @click="activeTab = 'community'"
+            class="channel-btn"
+            :class="{ active: !showOnline && activeTab === c.key }"
+            :title="c.label"
+            @click="selectChannel(c)"
           >
-            Community<span v-if="unreadForScope(communityScope) > 0" class="shoutbox-tab-badge">{{ unreadForScope(communityScope) }}</span>
-          </button>
-          <button
-            v-for="s in extraScopesWithUnread"
-            :key="s"
-            type="button"
-            :class="{ active: activeTab === s }"
-            @click="activeTab = s"
-            :title="extraScopeTitle(s)"
-          >
-            {{ extraScopeTitle(s) }}<span v-if="unreadForScope(s) > 0" class="shoutbox-tab-badge">{{ unreadForScope(s) }}</span>
-          </button>
-          <button type="button" :class="{ active: activeTab === 'online' }" @click="activeTab = 'online'">
-            Online ({{ totalOnlineCount }})
-          </button>
-          <button
-            v-for="s in extraScopesWithoutUnread"
-            :key="s"
-            type="button"
-            :class="{ active: activeTab === s }"
-            @click="activeTab = s"
-            :title="extraScopeTitle(s)"
-          >
-            {{ extraScopeTitle(s) }}
+            <span class="channel-label">{{ c.label }}</span>
+            <span v-if="c.unread > 0" class="shoutbox-tab-badge">{{ c.unread }}</span>
           </button>
         </div>
-      </div>
 
-      <div v-if="activeTab === 'online'" class="shoutbox-online-list">
-        <div v-if="!onlinePeers.length" class="shoutbox-empty">Nobody else around right now.</div>
-        <div v-for="p in onlinePeers" :key="p.peerId" class="online-row">
-          <a
-            v-if="p.username"
-            href="#"
-            class="online-name"
-            :class="{ 'online-name--inert': !openProfileRef }"
-            @click.prevent="openProfileFor(p.username)"
-          >{{ p.username }}</a>
-          <span v-else class="online-name">anonymous</span>
-          <span class="online-scope">{{ scopeLabel(p.scope) }}</span>
-          <a
-            v-if="p.viewingPost"
-            href="#"
-            class="post-ref"
-            :class="{ 'post-ref--inert': !openPostRef }"
-            :title="`@${p.viewingPost.author}/${p.viewingPost.permlink}`"
-            @click.prevent="openPost(p.viewingPost!.author, p.viewingPost!.permlink)"
-          >📖 {{ p.viewingPost.title || `@${p.viewingPost.author}/${p.viewingPost.permlink}` }}</a>
-          <span v-else class="online-browsing">browsing</span>
-        </div>
-      </div>
+        <div class="shoutbox-main">
+          <!-- Mobile: horizontal channel strip, drag/wheel-scrollable like the player's own tabs -->
+          <ScrollableTabs class="show-mobile channel-strip">
+            <button
+              v-for="c in channels"
+              :key="c.key"
+              type="button"
+              class="channel-btn"
+              :class="{ active: !showOnline && activeTab === c.key }"
+              :title="c.label"
+              @click="selectChannel(c)"
+            >
+              {{ c.label }}<span v-if="c.unread > 0" class="shoutbox-tab-badge">{{ c.unread }}</span>
+            </button>
+          </ScrollableTabs>
 
-      <template v-else>
-        <div class="shoutbox-messages" ref="messagesEl">
-          <div v-if="!messages.length" class="shoutbox-empty">No messages yet — say hi.</div>
-          <div v-for="m in messages" :key="m.id" class="shoutbox-msg">
-            <a
-              href="#"
-              class="author"
-              :class="{ 'author--inert': !openProfileRef }"
-              @click.prevent="openProfileFor(m.author)"
-            >{{ m.author }}</a>
-            <span class="time">{{ fmtTime(m.ts) }}</span>
-            <div class="body">
-              <template v-for="(seg, idx) in parseMessageSegments(m.body)" :key="idx">
-                <span v-if="seg.type === 'text'">{{ seg.value }}</span>
-                <a
-                  v-else
-                  href="#"
-                  class="post-ref"
-                  :class="{ 'post-ref--inert': !openPostRef }"
-                  :title="seg.label"
-                  @click.prevent="openPost(seg.author, seg.permlink)"
-                >📄 {{ seg.label }}</a>
-              </template>
+          <button
+            type="button"
+            class="online-header"
+            :class="{ active: showOnline }"
+            @click="showOnline = !showOnline"
+          >
+            <span class="online-header-dot"></span>
+            {{ totalOnlineCount }} online
+            <span class="online-header-chevron">{{ showOnline ? '▾' : '▸' }}</span>
+          </button>
+
+          <div v-if="showOnline" class="shoutbox-online-list">
+            <div v-if="!onlinePeers.length" class="shoutbox-empty">Nobody else around right now.</div>
+            <div v-for="p in onlinePeers" :key="p.peerId" class="online-row">
+              <a
+                v-if="p.username"
+                href="#"
+                class="online-name"
+                :class="{ 'online-name--inert': !openProfileRef }"
+                @click.prevent="openProfileFor(p.username)"
+              >{{ p.username }}</a>
+              <span v-else class="online-name">anonymous</span>
+              <span class="online-scope">{{ scopeLabel(p.scope) }}</span>
+              <a
+                v-if="p.viewingPost"
+                href="#"
+                class="post-ref"
+                :class="{ 'post-ref--inert': !openPostRef }"
+                :title="`@${p.viewingPost.author}/${p.viewingPost.permlink}`"
+                @click.prevent="openPost(p.viewingPost!.author, p.viewingPost!.permlink)"
+              >📖 {{ p.viewingPost.title || `@${p.viewingPost.author}/${p.viewingPost.permlink}` }}</a>
+              <span v-else class="online-browsing">browsing</span>
             </div>
           </div>
-        </div>
 
-        <div v-if="showEmojiPicker" class="emoji-picker">
-          <button
-            v-for="e in EMOJI_LIST"
-            :key="e.shortcode"
-            type="button"
-            class="emoji-option"
-            :title="`:${e.shortcode}:`"
-            @click="pickEmoji(e.emoji)"
-          >{{ e.emoji }}</button>
-        </div>
+          <template v-else>
+            <div class="shoutbox-messages" ref="messagesEl">
+              <div v-if="!messages.length" class="shoutbox-empty">No messages yet — say hi.</div>
+              <div v-for="m in messages" :key="m.id" class="shoutbox-msg">
+                <a
+                  href="#"
+                  class="author"
+                  :class="{ 'author--inert': !openProfileRef }"
+                  @click.prevent="openProfileFor(m.author)"
+                >{{ m.author }}</a>
+                <span class="time">{{ fmtTime(m.ts) }}</span>
+                <div class="body">
+                  <template v-for="(seg, idx) in parseMessageSegments(m.body)" :key="idx">
+                    <span v-if="seg.type === 'text'">{{ seg.value }}</span>
+                    <a
+                      v-else
+                      href="#"
+                      class="post-ref"
+                      :class="{ 'post-ref--inert': !openPostRef }"
+                      :title="seg.label"
+                      @click.prevent="openPost(seg.author, seg.permlink)"
+                    >📄 {{ seg.label }}</a>
+                  </template>
+                </div>
+              </div>
+            </div>
 
-        <form class="shoutbox-input" @submit.prevent="submit">
-          <button
-            type="button"
-            class="icon-btn"
-            :class="{ active: showEmojiPicker }"
-            title="Emoji"
-            @click="showEmojiPicker = !showEmojiPicker"
-          >😀</button>
-          <button
-            v-if="currentPost"
-            type="button"
-            class="icon-btn"
-            title="Share the post you're currently viewing"
-            @click="shareCurrentPost"
-          >🔗</button>
-          <input
-            ref="inputEl"
-            v-model="draft"
-            type="text"
-            maxlength="500"
-            :placeholder="!props.auth.user ? 'Log in to chat' : isSending ? 'Sending…' : 'Write a message…'"
-            :disabled="!canSend"
-            @focus="showEmojiPicker = false"
-          />
-          <button type="submit" class="send-btn" :disabled="!canSend || !draft.trim()">Send</button>
-        </form>
-      </template>
+            <div v-if="showEmojiPicker" class="emoji-picker">
+              <button
+                v-for="e in EMOJI_LIST"
+                :key="e.shortcode"
+                type="button"
+                class="emoji-option"
+                :title="`:${e.shortcode}:`"
+                @click="pickEmoji(e.emoji)"
+              >{{ e.emoji }}</button>
+            </div>
+
+            <form class="shoutbox-input" @submit.prevent="submit">
+              <button
+                type="button"
+                class="icon-btn"
+                :class="{ active: showEmojiPicker }"
+                title="Emoji"
+                @click="showEmojiPicker = !showEmojiPicker"
+              >😀</button>
+              <button
+                v-if="currentPost"
+                type="button"
+                class="icon-btn"
+                title="Share the post you're currently viewing"
+                @click="shareCurrentPost"
+              >🔗</button>
+              <input
+                ref="inputEl"
+                v-model="draft"
+                type="text"
+                maxlength="500"
+                :placeholder="!props.auth.user ? 'Log in to chat' : isSending ? 'Sending…' : 'Write a message…'"
+                :disabled="!canSend"
+                @focus="showEmojiPicker = false"
+              />
+              <button type="submit" class="send-btn" :disabled="!canSend || !draft.trim()">Send</button>
+            </form>
+          </template>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -632,7 +671,7 @@ function shareCurrentPost(): void {
   order: 1; /* above the pill */
   display: flex;
   flex-direction: column;
-  width: 320px;
+  width: 420px; /* wider than before (320px) to fit the channel rail next to a still-readable message column */
   max-width: calc(100vw - 24px);
   max-height: 420px;
   margin-bottom: 6px;
@@ -642,44 +681,68 @@ function shareCurrentPost(): void {
   background: var(--card-bg);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
 }
-.shoutbox-header {
+
+/* `.shoutbox-body` is the row that holds the desktop channel rail next to
+   the main panel. On mobile the rail is display:none (`.hide-mobile`) and
+   `.shoutbox-main` alone fills the width, so this stays `display:flex`
+   unconditionally — only the rail's own visibility changes per breakpoint. */
+.shoutbox-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.shoutbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ─── Desktop: "mini Discord" vertical channel rail ─────────────────────
+   A fixed-width column of channel buttons, independently scrollable so a
+   long list of subscribed communities doesn't push the rail (and with it
+   the whole panel) taller than the messages area next to it. */
+.channel-rail {
+  width: 92px;
+  flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--tab-border);
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid var(--tab-border);
   background: var(--tab-bg);
 }
-/* Scrolls horizontally once there are more community tabs than fit —
-   `min-width: 0` is needed because a flex item's default min-width is
-   `auto` (its content size), which otherwise silently defeats
-   `overflow-x: auto` by never letting the row shrink below the width of
-   all tabs laid end to end. Scrollbar hidden (both engines) since this is
-   a small chrome-less chat header, not a place a visible scrollbar reads
-   as useful rather than as clutter. */
-.shoutbox-tabs {
-  display: flex;
-  overflow-x: auto;
-  min-width: 0;
-  scrollbar-width: none;
-}
-.shoutbox-tabs::-webkit-scrollbar { height: 0; }
-.shoutbox-tabs button {
+.channel-btn {
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-left: 3px solid transparent;
   color: var(--tab-text);
-  padding: 8px 10px;
+  padding: 8px 8px;
   cursor: pointer;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  flex-shrink: 0;
+  font-size: 0.75rem;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
 }
-.shoutbox-tabs button.active {
+.channel-rail .channel-btn { border-bottom: 1px solid var(--card-divider); }
+.channel-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-btn.active {
   background: var(--tab-active-bg);
-  border-bottom-color: var(--tab-active-border);
+  border-left-color: var(--tab-active-border);
   color: var(--tab-active-text);
   font-weight: 600;
 }
+
+/* ─── Mobile: horizontal channel strip ───────────────────────────────────
+   Wrapped in ScrollableTabs (same component the media player's tabs use)
+   so it actually drag/wheel-scrolls once there are more channels than fit
+   — plain `overflow-x: auto` on a touch-first element like this one isn't
+   enough on its own without a real pointer-drag affordance for mouse users. */
+.channel-strip {
+  border-bottom: 1px solid var(--tab-border);
+  background: var(--tab-bg);
+  flex-shrink: 0;
+}
+.channel-strip .channel-btn {
+  border-bottom: 2px solid transparent;
+  border-left: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.channel-strip .channel-btn.active { border-left: none; border-bottom-color: var(--tab-active-border); }
+
 .shoutbox-tab-badge {
   display: inline-block;
   min-width: 15px;
@@ -693,6 +756,31 @@ function shareCurrentPost(): void {
   line-height: 15px;
   text-align: center;
 }
+
+/* ─── Global online-peers header ─────────────────────────────────────────
+   Always visible above the message list regardless of which channel is
+   selected — a single, persistent place for the peer count (previously
+   its own crowded-out tab), toggling the peer list open/closed in place
+   of the messages below it. */
+.online-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--card-divider);
+  color: var(--card-muted-text);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-align: left;
+  flex-shrink: 0;
+}
+.online-header:hover { background: var(--chip-bg); }
+.online-header.active { color: var(--card-about-text); font-weight: 600; }
+.online-header-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--state-active); flex-shrink: 0; }
+.online-header-chevron { margin-left: auto; opacity: 0.7; }
 .shoutbox-messages { flex: 1; overflow-y: auto; padding: 8px 10px; color: var(--card-about-text); }
 .shoutbox-empty { opacity: 0.6; color: var(--card-muted-text); text-align: center; padding: 16px 0; }
 .shoutbox-msg { margin-bottom: 6px; }
