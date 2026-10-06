@@ -673,7 +673,13 @@ function shareCurrentPost(): void {
   flex-direction: column;
   width: 420px; /* wider than before (320px) to fit the channel rail next to a still-readable message column */
   max-width: calc(100vw - 24px);
-  max-height: 420px;
+  /* Fixed height, not max-height: with max-height the panel shrank to fit
+     whatever that channel happened to contain (few messages, the shorter
+     online-peer list, etc.), so switching channels visibly resized the
+     whole dock every time. A fixed height keeps the window steady —
+     .shoutbox-messages/.shoutbox-online-list (flex: 1 each) absorb the
+     difference internally via their own scrollbar instead. */
+  height: 420px;
   margin-bottom: 6px;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-sm, 6px);
@@ -887,7 +893,7 @@ function shareCurrentPost(): void {
 
 @media (max-width: 800px) {
   .shoutbox-dock { left: 8px; }
-  .shoutbox { width: calc(100vw - 16px); max-height: 60vh; }
+  .shoutbox { width: calc(100vw - 16px); height: 60vh; }
   .shoutbox-pill-label, .shoutbox-pill-count { display: none; } /* keep the pill small on phones */
 }
 </style>
