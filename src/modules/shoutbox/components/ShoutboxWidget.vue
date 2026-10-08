@@ -494,24 +494,45 @@ function shareCurrentPost(): void {
         </div>
 
         <div class="shoutbox-main">
-          <!-- Mobile: horizontal channel strip, drag/wheel-scrollable like the player's own tabs -->
-          <ScrollableTabs class="show-mobile channel-strip">
+          <!-- Mobile: ONE compact row — a small online toggle pinned on the
+               left plus the horizontal, drag/wheel-scrollable channel strip
+               (same mechanics as the player's own tabs) filling the rest.
+               Previously this was two full-width rows (channel strip, then
+               a separate "N online" header below it) stacked on top of each
+               other, which on a short phone-height panel ate up roughly
+               half the visible window before a single message was even
+               visible — folding them into one row gives that space back. -->
+          <div class="mobile-header-row show-mobile">
             <button
-              v-for="c in channels"
-              :key="c.key"
               type="button"
-              class="channel-btn"
-              :class="{ active: !showOnline && activeTab === c.key }"
-              :title="c.label"
-              @click="selectChannel(c)"
+              class="online-toggle-compact"
+              :class="{ active: showOnline }"
+              :title="`${totalOnlineCount} online`"
+              @click="showOnline = !showOnline"
             >
-              {{ c.label }}<span v-if="c.unread > 0" class="shoutbox-tab-badge">{{ c.unread }}</span>
+              <span class="online-header-dot"></span>{{ totalOnlineCount }}
             </button>
-          </ScrollableTabs>
+            <ScrollableTabs class="channel-strip">
+              <button
+                v-for="c in channels"
+                :key="c.key"
+                type="button"
+                class="channel-btn"
+                :class="{ active: !showOnline && activeTab === c.key }"
+                :title="c.label"
+                @click="selectChannel(c)"
+              >
+                {{ c.label }}<span v-if="c.unread > 0" class="shoutbox-tab-badge">{{ c.unread }}</span>
+              </button>
+            </ScrollableTabs>
+          </div>
 
+          <!-- Desktop: full-width persistent header (the rail already
+               takes up a column, so there's no reason to compress this one
+               down — it's mobile's limited vertical space this is about). -->
           <button
             type="button"
-            class="online-header"
+            class="online-header hide-mobile"
             :class="{ active: showOnline }"
             @click="showOnline = !showOnline"
           >
@@ -731,16 +752,43 @@ function shareCurrentPost(): void {
   font-weight: 600;
 }
 
-/* ─── Mobile: horizontal channel strip ───────────────────────────────────
-   Wrapped in ScrollableTabs (same component the media player's tabs use)
-   so it actually drag/wheel-scrolls once there are more channels than fit
-   — plain `overflow-x: auto` on a touch-first element like this one isn't
-   enough on its own without a real pointer-drag affordance for mouse users. */
-.channel-strip {
+/* ─── Mobile: one compact row — online toggle + channel strip ───────────
+   Replaces what used to be two full-width rows (a channel strip, then a
+   separate "N online" header under it). On a short mobile panel height
+   that pair ate up roughly half the window before any messages were even
+   visible; folding the online toggle into the same row as the channels
+   (as a small pinned button, not a full row of its own) gives that space
+   back for actual chat content. Desktop keeps the full-width header
+   instead (see `.online-header` below) since it already has a side rail
+   and isn't short on vertical room the way a phone is. */
+.mobile-header-row {
+  display: flex;
+  align-items: stretch;
   border-bottom: 1px solid var(--tab-border);
   background: var(--tab-bg);
   flex-shrink: 0;
 }
+.online-toggle-compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--card-divider);
+  color: var(--card-muted-text);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+.online-toggle-compact.active { color: var(--card-about-text); font-weight: 600; }
+
+/* Channel strip itself — wrapped in ScrollableTabs (same component the
+   media player's tabs use) so it actually drag/wheel-scrolls once there
+   are more channels than fit — plain `overflow-x: auto` on a touch-first
+   element like this one isn't enough on its own without a real
+   pointer-drag affordance for mouse users. */
+.channel-strip { flex: 1; min-width: 0; }
 .channel-strip .channel-btn {
   border-bottom: 2px solid transparent;
   border-left: none;

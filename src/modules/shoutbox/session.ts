@@ -184,6 +184,29 @@ async function signCertificatePayloadInteractive(auth: { user: AuthUser | null }
  * when nothing usable is left. Resolves null if minting was needed but
  * declined/unavailable (caller should treat that as "couldn't send").
  */
+/** True if a still-valid session (memory or localStorage) already exists
+ *  for this account — i.e. getOrCreateSession() below would resolve
+ *  WITHOUT needing a fresh posting-key signature. Callers use this to
+ *  decide whether checkLock()'s PIN prompt is actually warranted before
+ *  showing it: a popup is correct the one time per ~48h a new certificate
+ *  genuinely has to be minted, but showing it again for every action in
+ *  between — just because the local key happens to be in its locked
+ *  state after a page reload — would be asking for a signature that
+ *  isn't actually needed. Deliberately mirrors getOrCreateSession()'s own
+ *  freshness check exactly, and must be kept in sync with it. */
+export function hasReadySession(auth: { user: AuthUser | null }): boolean {
+  const user = auth.user;
+  if (!user) return false;
+  const account = user.username;
+  const freshEnoughAt = Date.now() + MIN_REMAINING_MS;
+
+  const cached = memoryCache.get(account);
+  if (cached && cached.cert.expiresAt > freshEnoughAt) return true;
+
+  const stored = loadStored(account);
+  return !!(stored && stored.cert.expiresAt > freshEnoughAt);
+}
+
 export async function getOrCreateSession(auth: { user: AuthUser | null }): Promise<ActiveSession | null> {
   const user = auth.user;
   if (!user) return null;

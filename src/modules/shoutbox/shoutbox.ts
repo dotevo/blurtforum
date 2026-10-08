@@ -5,7 +5,7 @@ import type { SignalingTransport, TransportStatus } from './transport/types';
 import { PeerJsTransport } from './transport/peerjs-transport';
 import { ShoutboxStore } from './store';
 import { signChatBody, verifyChatBody, signTranslationBody, verifyTranslationBody } from './identity';
-import { getOrCreateSession, importSessionPublicKey, verifyCertificate } from './session';
+import { getOrCreateSession, hasReadySession, importSessionPublicKey, verifyCertificate } from './session';
 import { expandEmojiShortcodes } from './emoji';
 import { TranslationStore } from './translation-store';
 import type { TranslationEngine } from './translation-providers';
@@ -283,7 +283,13 @@ class ShoutboxCore {
     const user = this.deps.auth.user;
     if (!user) { warn('cannot send — not logged in'); return false; }
 
-    if (this.deps.checkLock(() => { void this.send(body, onSent); })) return false; // PIN modal now showing, will retry after unlock
+    // Only gate on checkLock() when a fresh posting-key signature would
+    // actually be needed (no still-valid certificate already in hand) —
+    // see hasReadySession()'s comment for why an unconditional checkLock()
+    // here would prompt for a PIN on every single message once the local
+    // key re-locks on reload, even though the ~48h certificate it would
+    // sign is still perfectly valid and about to be reused as-is.
+    if (!hasReadySession(this.deps.auth) && this.deps.checkLock(() => { void this.send(body, onSent); })) return false; // PIN modal now showing, will retry after unlock
 
     this.sending.value = true;
     try {
@@ -397,7 +403,13 @@ class ShoutboxCore {
     if (!user) { warn('cannot publish translation — not logged in'); return false; }
 
     return new Promise<boolean>((resolve) => {
-      if (this.deps!.checkLock(() => { void this.publishTranslation(contentId, targetLang, engine, body).then(resolve); })) return; // PIN modal now showing
+      // Same reasoning as send() above: this runs automatically (no
+      // explicit "share this" click from the user — autoShow triggers it
+      // on every post that isn't cached anywhere yet), so an unconditional
+      // checkLock() here would mean a PIN prompt on nearly every page
+      // visit, not just once per ~48h certificate. Only actually gate on
+      // it when a fresh signature is genuinely required.
+      if (!hasReadySession(this.deps!.auth) && this.deps!.checkLock(() => { void this.publishTranslation(contentId, targetLang, engine, body).then(resolve); })) return; // PIN modal now showing
 
       (async () => {
         const session = await getOrCreateSession(this.deps!.auth);
